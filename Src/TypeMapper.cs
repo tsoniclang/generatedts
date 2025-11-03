@@ -204,25 +204,96 @@ public sealed class TypeMapper
             return type.Name ?? "T";
         }
 
-        if (type.IsGenericType)
+        // Build the type name with arity included
+        var typeName = GetTypeNameWithArity(type);
+
+        // Add namespace if present
+        var fullName = type.Namespace != null ? $"{type.Namespace}.{typeName}" : typeName;
+
+        // Fallback to "any" if we somehow got an empty name
+        return string.IsNullOrWhiteSpace(fullName) ? "any" : fullName;
+    }
+
+    private string GetTypeNameWithArity(Type type)
+    {
+        var baseName = type.Name;
+        var arity = 0;
+
+        // Extract arity from generic types
+        if (type.IsGenericType || baseName.Contains('`'))
         {
-            var name = type.Name;
-            var backtickIndex = name.IndexOf('`');
+            var backtickIndex = baseName.IndexOf('`');
             if (backtickIndex > 0)
             {
-                name = name.Substring(0, backtickIndex);
+                if (int.TryParse(baseName.Substring(backtickIndex + 1), out var parsedArity))
+                {
+                    arity = parsedArity;
+                }
+                baseName = baseName.Substring(0, backtickIndex);
             }
-            var result = type.Namespace != null ? $"{type.Namespace}.{name}" : name;
-            return string.IsNullOrWhiteSpace(result) ? "any" : result;
         }
 
-        // Handle nested types: C# uses + but we use _ to avoid name conflicts
-        // Example: FrozenDictionary+AlternateLookup becomes FrozenDictionary_AlternateLookup
-        var fullName = type.FullName ?? type.Name ?? "";
-        var finalName = fullName.Replace('+', '_');
+        // Handle nested types - build full ancestry chain
+        if (type.IsNested && type.DeclaringType != null)
+        {
+            var ancestorChain = new List<(string name, int arity)>();
+            var current = type.DeclaringType;
 
-        // Fallback to "any" if we somehow got an empty name (can happen with function pointers, etc.)
-        return string.IsNullOrWhiteSpace(finalName) ? "any" : finalName;
+            while (current != null)
+            {
+                var ancestorName = current.Name;
+                var ancestorArity = 0;
+
+                var backtickIndex = ancestorName.IndexOf('`');
+                if (backtickIndex > 0)
+                {
+                    if (int.TryParse(ancestorName.Substring(backtickIndex + 1), out var parsedArity))
+                    {
+                        ancestorArity = parsedArity;
+                    }
+                    ancestorName = ancestorName.Substring(0, backtickIndex);
+                }
+
+                ancestorChain.Insert(0, (ancestorName, ancestorArity));
+                current = current.DeclaringType;
+            }
+
+            // Build name from ancestor chain
+            var nameBuilder = new StringBuilder();
+            foreach (var (ancestorName, ancestorArity) in ancestorChain)
+            {
+                if (nameBuilder.Length > 0)
+                {
+                    nameBuilder.Append('_');
+                }
+
+                nameBuilder.Append(ancestorName);
+                if (ancestorArity > 0)
+                {
+                    nameBuilder.Append('_');
+                    nameBuilder.Append(ancestorArity);
+                }
+            }
+
+            // Append the current type
+            nameBuilder.Append('_');
+            nameBuilder.Append(baseName);
+            if (arity > 0)
+            {
+                nameBuilder.Append('_');
+                nameBuilder.Append(arity);
+            }
+
+            return nameBuilder.ToString();
+        }
+
+        // For top-level types, include arity if generic
+        if (arity > 0)
+        {
+            return $"{baseName}_{arity}";
+        }
+
+        return baseName;
     }
 
     public void AddWarning(string message)
