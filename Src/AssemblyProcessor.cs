@@ -353,11 +353,38 @@ public sealed class AssemblyProcessor
             .OfType<TypeInfo.MethodInfo>() // Filter nulls and cast to non-nullable
             .ToList();
 
+        // Phase 8A: Interfaces that should be completely hidden (no wrappers, removed from implements)
+        var hiddenExplicitInterfaces = new HashSet<string>
+        {
+            "System.IConvertible",                              // Primitive type conversions
+            "System.Runtime.Serialization.ISerializable",       // Serialization internals
+            "System.Runtime.CompilerServices.ITuple"            // Tuple implementation details
+        };
+
+        // Check if this is an enumerator/memory struct (hide IEnumerator/IDisposable)
+        var isEnumeratorOrMemoryStruct = type.IsValueType &&
+            ((type.FullName ?? "").Contains("Enumerator") ||
+             (type.FullName ?? "").Contains("MemoryManager"));
+
         // Add public wrappers for explicit interface implementations
-        // This satisfies TS2420 errors where TypeScript expects public members
+        // BUT skip the ones we're hiding completely
         var explicitImplementations = GetExplicitInterfaceImplementations(type);
         foreach (var (interfaceType, interfaceMethod, implementation) in explicitImplementations)
         {
+            // Skip hidden interfaces - these will be removed from implements clause
+            if (hiddenExplicitInterfaces.Contains(interfaceType.FullName ?? ""))
+                continue;
+
+            // Skip IEnumerator/IDisposable for enumerator structs
+            if (isEnumeratorOrMemoryStruct)
+            {
+                var fullName = interfaceType.FullName ?? "";
+                if (fullName == "System.Collections.IEnumerator" ||
+                    fullName == "System.Collections.Generic.IEnumerator`1" ||
+                    fullName == "System.IDisposable")
+                    continue;
+            }
+
             // Check if this is a property getter/setter (special name)
             if (interfaceMethod.IsSpecialName && interfaceMethod.Name.StartsWith("get_"))
             {
@@ -415,8 +442,29 @@ public sealed class AssemblyProcessor
             TrackTypeDependency(type.BaseType);
         }
 
+        // Phase 8A: Filter out hidden explicitly implemented interfaces from TypeScript implements clause
         var interfaces = type.GetInterfaces()
             .Where(i => i.IsPublic)
+            .Where(i =>
+            {
+                // Skip interfaces that are always explicit (no public members)
+                if (hiddenExplicitInterfaces.Contains(i.FullName ?? ""))
+                    return false;
+
+                // Skip IEnumerator/IDisposable only for enumerator/memory structs
+                if (isEnumeratorOrMemoryStruct)
+                {
+                    var fullName = i.FullName ?? "";
+                    if (fullName == "System.Collections.IEnumerator" ||
+                        fullName == "System.Collections.Generic.IEnumerator`1" ||
+                        fullName == "System.IDisposable")
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            })
             .Select(i => _typeMapper.MapType(i))
             .Where(mapped => !mapped.StartsWith("ReadonlyArray<")) // Skip interfaces that map to ReadonlyArray<T>
             .Distinct() // Remove duplicates
