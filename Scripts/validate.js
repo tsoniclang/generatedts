@@ -16,12 +16,29 @@ const path = require('path');
 const os = require('os');
 
 // Configuration
-const DOTNET_PATH = process.env.DOTNET_PATH ||
-    `${os.homedir()}/dotnet/shared/Microsoft.NETCore.App/10.0.0-rc.1.25451.107`;
+const DOTNET_VERSION = '10.0.0-rc.1.25451.107';
+const DOTNET_HOME = os.homedir() + '/dotnet';
+
+// Prefer ref-pack for most assemblies (better type definitions, no type-forwarding)
+const DOTNET_REF_PATH = process.env.DOTNET_REF_PATH ||
+    `${DOTNET_HOME}/packs/Microsoft.NETCore.App.Ref/${DOTNET_VERSION}/ref/net10.0`;
+
+// Runtime path needed for System.Private.CoreLib (can't load from ref-pack with MetadataLoadContext)
+const DOTNET_RUNTIME_PATH = process.env.DOTNET_RUNTIME_PATH ||
+    `${DOTNET_HOME}/shared/Microsoft.NETCore.App/${DOTNET_VERSION}`;
+
+// Assemblies that MUST use runtime path (not ref-pack)
+const RUNTIME_ONLY_ASSEMBLIES = [
+    'System.Private.CoreLib',  // Requires MetadataLoadContext, doesn't work from ref-pack
+    'System.Private.Uri',      // Private implementation assembly, not in ref-pack
+    'System.Private.Xml'       // Private implementation assembly, not in ref-pack
+];
 
 const BCL_ASSEMBLIES = [
     // Core runtime
     // NOTE: System.Private.CoreLib is now generated using MetadataLoadContext
+    // NOTE: Type-forwarding assemblies (System.Runtime, System.IO, etc.) are included here
+    //       but will be automatically skipped by Program.cs if they forward to core assemblies
     'System.Private.CoreLib',
     'System.Runtime',
     'System.Runtime.Extensions',
@@ -40,6 +57,7 @@ const BCL_ASSEMBLIES = [
     'System.Collections.Concurrent',
     'System.Collections.Immutable',
     'System.Collections.Specialized',
+    'System.Collections.NonGeneric',
 
     // LINQ and queries
     'System.Linq',
@@ -85,18 +103,41 @@ const BCL_ASSEMBLIES = [
     'System.Xml.Linq',
     'System.Xml.Serialization',
     'System.Xml.XPath',
+    'System.Private.Xml',
 
     // Security
     'System.Security.Cryptography',
     'System.Security.Claims',
     'System.Security.Principal',
 
+    // Resources
+    'System.Resources.Writer',
+
     // Diagnostics
     'System.Diagnostics.Process',
     'System.Diagnostics.DiagnosticSource',
+    'System.Diagnostics.FileVersionInfo',
 
-    // Drawing (primitives only - no UI dependencies)
-    'System.Drawing.Primitives'
+    // Drawing
+    'System.Drawing.Primitives',
+    'System.Drawing',
+
+    // Transactions
+    'System.Transactions.Local',
+
+    // URI support (private implementation)
+    'System.Private.Uri',
+
+    // Numerics
+    'System.Numerics',
+    'System.Runtime.Numerics',
+
+    // Formats
+    'System.Formats.Asn1',
+    'System.Formats.Tar',
+
+    // Pipelines
+    'System.IO.Pipelines'
 ];
 
 const VALIDATION_DIR = path.join(os.tmpdir(), 'generatedts-validation');
@@ -126,7 +167,10 @@ function generateTypes() {
     let failCount = 0;
 
     for (const assembly of BCL_ASSEMBLIES) {
-        const dllPath = path.join(DOTNET_PATH, `${assembly}.dll`);
+        // Choose path: runtime-only assemblies use RUNTIME_PATH, others use REF_PATH
+        const useRuntimePath = RUNTIME_ONLY_ASSEMBLIES.includes(assembly);
+        const basePath = useRuntimePath ? DOTNET_RUNTIME_PATH : DOTNET_REF_PATH;
+        const dllPath = path.join(basePath, `${assembly}.dll`);
 
         if (!fs.existsSync(dllPath)) {
             error(`Assembly not found: ${dllPath}`);
@@ -157,11 +201,35 @@ function generateTypes() {
 
 // NOTE: No longer copying hand-written core types - System.Private.CoreLib is now generated
 
+function createIntrinsicsFile() {
+    log('Creating _intrinsics.d.ts with branded numeric types...');
+
+    const intrinsicsContent = `// Intrinsic type definitions for .NET numeric types
+// This file provides branded numeric type aliases used across all BCL declarations.
+// ESM module exports for full module support.
+
+export type int = number & { __brand: "int" };
+export type uint = number & { __brand: "uint" };
+export type byte = number & { __brand: "byte" };
+export type sbyte = number & { __brand: "sbyte" };
+export type short = number & { __brand: "short" };
+export type ushort = number & { __brand: "ushort" };
+export type long = number & { __brand: "long" };
+export type ulong = number & { __brand: "ulong" };
+export type float = number & { __brand: "float" };
+export type double = number & { __brand: "double" };
+export type decimal = number & { __brand: "decimal" };
+`;
+
+    fs.writeFileSync(path.join(TYPES_DIR, '_intrinsics.d.ts'), intrinsicsContent);
+    log('Created _intrinsics.d.ts');
+}
+
 function createIndexFile() {
-    log('Creating index.d.ts with triple-slash references...');
+    log('Creating index.d.ts with ESM re-exports...');
 
     const dtsFiles = fs.readdirSync(TYPES_DIR)
-        .filter(f => f.endsWith('.d.ts') && f !== 'index.d.ts')
+        .filter(f => f.endsWith('.d.ts') && f !== 'index.d.ts' && f !== '_intrinsics.d.ts')
         .sort();
 
     // Ensure System.Private.CoreLib is first (if it exists)
@@ -171,22 +239,23 @@ function createIndexFile() {
         dtsFiles.unshift('System.Private.CoreLib.d.ts');
     }
 
-    const references = dtsFiles
-        .map(f => `/// <reference path="./${f}" />`)
+    // Generate ESM re-exports (barrel pattern)
+    const exports = dtsFiles
+        .map(f => {
+            const moduleName = f.replace('.d.ts', '');
+            return `export * from './${moduleName}.js';`;
+        })
         .join('\n');
 
-    const indexContent = `// Auto-generated index file for validation
-// This file provides triple-slash references to all generated .d.ts files
-// so TypeScript can resolve cross-assembly dependencies.
+    const indexContent = `// Auto-generated barrel export file for BCL type definitions
+// This file re-exports all namespaces from individual assembly files
+// using ESM module syntax for full module support.
 
-${references}
-
-// Export empty object to make this a module
-export {};
+${exports}
 `;
 
     fs.writeFileSync(path.join(TYPES_DIR, 'index.d.ts'), indexContent);
-    log(`Created index.d.ts with ${dtsFiles.length} references`);
+    log(`Created index.d.ts with ${dtsFiles.length} re-exports`);
 }
 
 function createTsConfig() {
@@ -268,7 +337,7 @@ function validateMetadataFiles() {
     log('Validating metadata files...');
 
     const files = fs.readdirSync(TYPES_DIR);
-    const dtsFiles = files.filter(f => f.endsWith('.d.ts') && f !== 'index.d.ts');
+    const dtsFiles = files.filter(f => f.endsWith('.d.ts') && f !== 'index.d.ts' && f !== '_intrinsics.d.ts');
     const metadataFiles = files.filter(f => f.endsWith('.metadata.json'));
 
     log(`  .d.ts files: ${dtsFiles.length}`);
@@ -306,6 +375,9 @@ async function main() {
         // Step 2: Generate all types
         generateTypes();
 
+        // Step 2.5: Create intrinsics file with branded types
+        createIntrinsicsFile();
+
         // Step 3: Create index file
         createIndexFile();
 
@@ -342,6 +414,29 @@ async function main() {
         console.log('');
         console.log(`  Output directory: ${VALIDATION_DIR}`);
         console.log('');
+
+        // Write machine-readable stats
+        const stats = {
+            timestamp: new Date().toISOString(),
+            status: 'passed',
+            assemblies: {
+                total: BCL_ASSEMBLIES.length,
+                succeeded: BCL_ASSEMBLIES.length,
+                failed: 0
+            },
+            errors: {
+                syntax: result.syntaxErrors,
+                duplicate: result.duplicateTypeErrors,
+                semantic: result.semanticErrors,
+                total: result.totalErrors
+            },
+            outputDir: VALIDATION_DIR
+        };
+
+        const statsPath = path.join(__dirname, '..', '.analysis', 'validation-stats.json');
+        fs.mkdirSync(path.dirname(statsPath), { recursive: true });
+        fs.writeFileSync(statsPath, JSON.stringify(stats, null, 2));
+        log(`Machine-readable stats: ${statsPath}`);
 
         process.exit(0);
     } catch (err) {

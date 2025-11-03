@@ -8,6 +8,7 @@ public sealed class AssemblyProcessor
     private readonly HashSet<string>? _namespaceWhitelist;
     private readonly TypeMapper _typeMapper = new();
     private readonly SignatureFormatter _signatureFormatter = new();
+    private DependencyTracker? _dependencyTracker;
 
     /// <summary>
     /// TypeScript/JavaScript reserved keywords and special identifiers.
@@ -49,6 +50,12 @@ public sealed class AssemblyProcessor
 
     public ProcessedAssembly ProcessAssembly(Assembly assembly)
     {
+        // Initialize dependency tracker for this assembly
+        _dependencyTracker = new DependencyTracker(assembly);
+
+        // Set context for TypeMapper to enable cross-assembly reference rewriting
+        _typeMapper.SetContext(assembly, _dependencyTracker);
+
         var types = assembly.GetExportedTypes()
             .Where(ShouldIncludeType)
             .OrderBy(t => t.Namespace)
@@ -247,13 +254,21 @@ public sealed class AssemblyProcessor
         var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
             .Where(ShouldIncludeMember)
             .Where(m => !m.IsSpecialName)
+            .Where(m => !m.Name.Contains('.')) // Skip explicit interface implementations early
             .Select(m => ProcessMethod(m, type))
+            .OfType<TypeInfo.MethodInfo>() // Filter nulls and cast to non-nullable
             .ToList();
 
         var extends = type.GetInterfaces()
             .Where(i => i.FullName != "System.IDisposable") // Often not needed in TS (name-based for MetadataLoadContext)
             .Select(i => _typeMapper.MapType(i))
             .ToList();
+
+        // Track base interface dependencies
+        foreach (var iface in type.GetInterfaces().Where(i => i.FullName != "System.IDisposable"))
+        {
+            TrackTypeDependency(iface);
+        }
 
         var genericParams = type.IsGenericType
             ? type.GetGenericArguments().Select(t => t.Name).ToList()
@@ -281,7 +296,9 @@ public sealed class AssemblyProcessor
         var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)
             .Where(ShouldIncludeMember)
             .Where(m => !m.IsSpecialName)
+            .Where(m => !m.Name.Contains('.')) // Skip explicit interface implementations early
             .Select(m => ProcessMethod(m, type))
+            .OfType<TypeInfo.MethodInfo>() // Filter nulls and cast to non-nullable
             .ToList();
 
         var genericParams = type.IsGenericType
@@ -312,7 +329,9 @@ public sealed class AssemblyProcessor
         var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
             .Where(ShouldIncludeMember)
             .Where(m => !m.IsSpecialName)
+            .Where(m => !m.Name.Contains('.')) // Skip explicit interface implementations early
             .Select(m => ProcessMethod(m, type))
+            .OfType<TypeInfo.MethodInfo>() // Filter nulls and cast to non-nullable
             .ToList();
 
         // Add public wrappers for explicit interface implementations
@@ -344,7 +363,11 @@ public sealed class AssemblyProcessor
                 // Check if we already have this method (from public implementation)
                 if (!methods.Any(m => m.Name == interfaceMethod.Name))
                 {
-                    methods.Add(ProcessMethod(interfaceMethod, type));
+                    var processedMethod = ProcessMethod(interfaceMethod, type);
+                    if (processedMethod != null)
+                    {
+                        methods.Add(processedMethod);
+                    }
                 }
             }
         }
@@ -352,6 +375,10 @@ public sealed class AssemblyProcessor
         // Add interface-compatible overloads for all interface members
         // This handles TS2416 (covariant return types) and remaining TS2420 (interface implementation)
         AddInterfaceCompatibleOverloads(type, properties, methods);
+
+        // Add base class-compatible overloads for all base class members
+        // This handles TS2416 (method covariance) when derived classes override with more specific types
+        AddBaseClassCompatibleOverloads(type, properties, methods);
 
         // Use name-based comparison for MetadataLoadContext compatibility
         // (typeof(object) returns runtime type, but type.BaseType returns MetadataLoadContext type)
@@ -361,10 +388,24 @@ public sealed class AssemblyProcessor
             ? _typeMapper.MapType(type.BaseType)
             : null;
 
+        // Track base type dependency
+        if (type.BaseType != null
+            && type.BaseType.FullName != "System.Object"
+            && type.BaseType.FullName != "System.ValueType")
+        {
+            TrackTypeDependency(type.BaseType);
+        }
+
         var interfaces = type.GetInterfaces()
             .Where(i => i.IsPublic)
             .Select(i => _typeMapper.MapType(i))
             .ToList();
+
+        // Track interface dependencies
+        foreach (var iface in type.GetInterfaces().Where(i => i.IsPublic))
+        {
+            TrackTypeDependency(iface);
+        }
 
         var genericParams = type.IsGenericType
             ? type.GetGenericArguments().Select(t => t.Name).ToList()
@@ -385,6 +426,12 @@ public sealed class AssemblyProcessor
 
     private TypeInfo.ConstructorInfo ProcessConstructor(System.Reflection.ConstructorInfo ctor)
     {
+        // Track parameter type dependencies
+        foreach (var param in ctor.GetParameters())
+        {
+            TrackTypeDependency(param.ParameterType);
+        }
+
         var parameters = ctor.GetParameters()
             .Select(ProcessParameter)
             .ToList();
@@ -421,6 +468,9 @@ public sealed class AssemblyProcessor
                 return null!; // Will be filtered out
             }
         }
+
+        // Track property type dependency
+        TrackTypeDependency(prop.PropertyType);
 
         return new TypeInfo.PropertyInfo(
             prop.Name,
@@ -459,8 +509,27 @@ public sealed class AssemblyProcessor
         return false;
     }
 
-    private TypeInfo.MethodInfo ProcessMethod(System.Reflection.MethodInfo method, Type declaringType)
+    private TypeInfo.MethodInfo? ProcessMethod(System.Reflection.MethodInfo method, Type declaringType)
     {
+        // Skip explicit interface implementations (TS1434, TS1068)
+        // C# explicit interface implementations have dots in their method names
+        // Example: "System.IUtf8SpanFormattable.TryFormat" - invalid TypeScript syntax
+        if (method.Name.Contains('.'))
+        {
+            _typeMapper.AddWarning($"Skipped explicit interface implementation {declaringType.Name}.{method.Name} - " +
+                $"method name contains dot (TS1434: Unexpected keyword or identifier)");
+            return null; // Will be filtered out
+        }
+
+        // Track return type dependency
+        TrackTypeDependency(method.ReturnType);
+
+        // Track parameter type dependencies
+        foreach (var param in method.GetParameters())
+        {
+            TrackTypeDependency(param.ParameterType);
+        }
+
         var parameters = method.GetParameters()
             .Select(ProcessParameter)
             .ToList();
@@ -733,7 +802,8 @@ public sealed class AssemblyProcessor
         // Process methods (skip special methods like property getters/setters)
         var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
             .Where(ShouldIncludeMember)
-            .Where(m => !m.IsSpecialName);
+            .Where(m => !m.IsSpecialName)
+            .Where(m => !m.Name.Contains('.')); // Skip explicit interface implementations
 
         foreach (var method in methods)
         {
@@ -903,6 +973,12 @@ public sealed class AssemblyProcessor
                             continue;
                         }
 
+                        // Skip explicit interface implementations (method name contains dot)
+                        if (interfaceMethod.Name.Contains('.'))
+                        {
+                            continue;
+                        }
+
                         // Regular method - add interface-compatible overload
                         var interfaceReturnType = _typeMapper.MapType(interfaceMethod.ReturnType);
                         var interfaceParams = interfaceMethod.GetParameters()
@@ -946,6 +1022,147 @@ public sealed class AssemblyProcessor
     }
 
     /// <summary>
+    /// Adds base class-compatible method and property overloads for TS2416 covariance issues.
+    /// When a derived class overrides a base method with a more specific return type,
+    /// TypeScript requires both signatures to be present.
+    /// </summary>
+    private void AddBaseClassCompatibleOverloads(Type type, List<TypeInfo.PropertyInfo> properties, List<TypeInfo.MethodInfo> methods)
+    {
+        if (type.BaseType == null
+            || type.BaseType.FullName == "System.Object"
+            || type.BaseType.FullName == "System.ValueType"
+            || type.BaseType.FullName == "System.MarshalByRefObject")
+        {
+            return; // No base class to process
+        }
+
+        try
+        {
+            AddBaseClassOverloadsRecursive(type.BaseType, properties, methods);
+        }
+        catch
+        {
+            // Base class may not be accessible in MetadataLoadContext
+        }
+    }
+
+    /// <summary>
+    /// Recursively adds base class overloads from the entire inheritance chain.
+    /// </summary>
+    private void AddBaseClassOverloadsRecursive(Type baseType, List<TypeInfo.PropertyInfo> properties, List<TypeInfo.MethodInfo> methods)
+    {
+        if (baseType == null
+            || baseType.FullName == "System.Object"
+            || baseType.FullName == "System.ValueType"
+            || baseType.FullName == "System.MarshalByRefObject")
+        {
+            return;
+        }
+
+        try
+        {
+            // Process base class methods
+            var baseMethods = baseType.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                .Where(ShouldIncludeMember)
+                .Where(m => !m.IsSpecialName)
+                .Where(m => !m.Name.Contains('.')); // Skip explicit interface implementations
+
+            foreach (var baseMethod in baseMethods)
+            {
+                try
+                {
+                    // Track dependency for base method return type and parameters
+                    TrackTypeDependency(baseMethod.ReturnType);
+                    foreach (var param in baseMethod.GetParameters())
+                    {
+                        TrackTypeDependency(param.ParameterType);
+                    }
+
+                    var baseReturnType = _typeMapper.MapType(baseMethod.ReturnType);
+                    var baseParams = baseMethod.GetParameters()
+                        .Select(ProcessParameter)
+                        .ToList();
+
+                    // Check if we already have this exact method signature
+                    var hasExactMatch = methods.Any(m =>
+                        m.Name == baseMethod.Name &&
+                        m.ReturnType == baseReturnType &&
+                        ParameterListsMatch(m.Parameters, baseParams));
+
+                    if (!hasExactMatch)
+                    {
+                        // Add base class-compatible method signature
+                        var genericParams = baseMethod.IsGenericMethod
+                            ? baseMethod.GetGenericArguments().Select(t => t.Name).ToList()
+                            : new List<string>();
+
+                        methods.Add(new TypeInfo.MethodInfo(
+                            baseMethod.Name,
+                            baseReturnType,
+                            baseParams,
+                            false, // Instance method (base methods are not static in this context)
+                            baseMethod.IsGenericMethod,
+                            genericParams));
+                    }
+                }
+                catch
+                {
+                    // Skip methods that can't be processed
+                }
+            }
+
+            // Process base class properties (for covariant property return types)
+            var baseProperties = baseType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                .Where(ShouldIncludeMember);
+
+            foreach (var baseProp in baseProperties)
+            {
+                try
+                {
+                    // Skip indexers
+                    if (baseProp.GetIndexParameters().Length > 0)
+                        continue;
+
+                    TrackTypeDependency(baseProp.PropertyType);
+
+                    var basePropertyType = _typeMapper.MapType(baseProp.PropertyType);
+
+                    // Check if we already have this exact property signature
+                    var hasExactMatch = properties.Any(p =>
+                        p.Name == baseProp.Name &&
+                        p.Type == basePropertyType);
+
+                    if (!hasExactMatch)
+                    {
+                        // Add base class-compatible property signature
+                        var isStatic = baseProp.GetMethod?.IsStatic ?? baseProp.SetMethod?.IsStatic ?? false;
+
+                        properties.Add(new TypeInfo.PropertyInfo(
+                            baseProp.Name,
+                            basePropertyType,
+                            !baseProp.CanWrite,
+                            isStatic));
+                    }
+                }
+                catch
+                {
+                    // Skip properties that can't be processed
+                }
+            }
+
+            // Recurse up the inheritance chain
+            if (baseType.BaseType != null)
+            {
+                AddBaseClassOverloadsRecursive(baseType.BaseType, properties, methods);
+            }
+        }
+        catch
+        {
+            // Base type may not be accessible
+        }
+    }
+
+    /// <summary>
     /// Checks if two parameter lists have matching types.
     /// </summary>
     private bool ParameterListsMatch(IReadOnlyList<TypeInfo.ParameterInfo> params1, IReadOnlyList<TypeInfo.ParameterInfo> params2)
@@ -958,5 +1175,54 @@ public sealed class AssemblyProcessor
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Tracks a type dependency for cross-assembly import generation.
+    /// Recursively tracks generic type arguments.
+    /// </summary>
+    private void TrackTypeDependency(Type type)
+    {
+        if (_dependencyTracker == null) return;
+
+        // Track the type itself
+        _dependencyTracker.RecordTypeReference(type);
+
+        // Track generic type arguments
+        if (type.IsGenericType && !type.IsGenericTypeDefinition)
+        {
+            foreach (var arg in type.GetGenericArguments())
+            {
+                TrackTypeDependency(arg);
+            }
+        }
+
+        // Track array element type
+        if (type.IsArray)
+        {
+            var elementType = type.GetElementType();
+            if (elementType != null)
+            {
+                TrackTypeDependency(elementType);
+            }
+        }
+
+        // Track by-ref element type
+        if (type.IsByRef || type.IsPointer)
+        {
+            var elementType = type.GetElementType();
+            if (elementType != null)
+            {
+                TrackTypeDependency(elementType);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the dependency tracker for this assembly processing session.
+    /// </summary>
+    public DependencyTracker? GetDependencyTracker()
+    {
+        return _dependencyTracker;
     }
 }

@@ -102,15 +102,64 @@ public static class Program
                 assembly = Assembly.LoadFrom(Path.GetFullPath(assemblyPath));
             }
 
+            // Check if this is a type-forwarding assembly
+            if (TypeForwardingResolver.IsTypeForwardingAssembly(assembly))
+            {
+                Console.WriteLine("  Detected type-forwarding assembly");
+
+                // Get forwarded assemblies
+                var forwardedAssemblies = TypeForwardingResolver.GetForwardedAssemblies(assembly);
+
+                if (forwardedAssemblies.Count > 0)
+                {
+                    Console.WriteLine($"  Types forwarded to {forwardedAssemblies.Count} target assembly(ies):");
+                    foreach (var targetName in forwardedAssemblies)
+                    {
+                        Console.WriteLine($"    - {targetName}");
+                    }
+
+                    // Check if this forwards to a core assembly that should be generated separately
+                    // Skip generation to avoid duplicates
+                    var primaryTarget = forwardedAssemblies[0];
+                    if (TypeForwardingResolver.ShouldSkipForwarder(primaryTarget))
+                    {
+                        Console.WriteLine($"  Skipping generation: types will be included in {primaryTarget}");
+                        return;
+                    }
+
+                    // Try to load the target assembly and generate from it instead
+                    var targetAssembly = TypeForwardingResolver.TryLoadTargetAssembly(primaryTarget, assemblyPath);
+
+                    if (targetAssembly != null)
+                    {
+                        Console.WriteLine($"  Using target assembly: {targetAssembly.GetName().Name}");
+                        assembly = targetAssembly;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"  Warning: Could not load target assembly '{primaryTarget}'");
+                        Console.WriteLine($"  Continuing with forwarding assembly (will generate minimal types)");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("  Warning: No forwarding targets found");
+                    Console.WriteLine("  Continuing with forwarding assembly (will generate minimal types)");
+                }
+            }
+
             try
             {
                 // Process assembly
                 var processor = new AssemblyProcessor(config, namespaces);
                 var typeInfo = processor.ProcessAssembly(assembly);
 
-                // Render declarations
+                // Get dependency tracker for import generation
+                var dependencyTracker = processor.GetDependencyTracker();
+
+                // Render declarations with dependencies
                 var renderer = new DeclarationRenderer();
-                var declarations = renderer.RenderDeclarations(typeInfo);
+                var declarations = renderer.RenderDeclarations(typeInfo, dependencyTracker);
 
                 // Process metadata
                 var metadata = processor.ProcessAssemblyMetadata(assembly);
@@ -133,6 +182,18 @@ public static class Program
                 var metadataWriter = new MetadataWriter();
                 await metadataWriter.WriteMetadataAsync(metadata, metadataPath);
                 Console.WriteLine($"Generated: {metadataPath}");
+
+                // Write dependency information
+                if (dependencyTracker != null)
+                {
+                    var dependenciesFileName = $"{assemblyName}.dependencies.json";
+                    var dependenciesPath = Path.Combine(outDir, dependenciesFileName);
+                    var dependenciesJson = System.Text.Json.JsonSerializer.Serialize(
+                        dependencyTracker.ToJson(),
+                        new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                    await File.WriteAllTextAsync(dependenciesPath, dependenciesJson, System.Text.Encoding.UTF8);
+                    Console.WriteLine($"Generated: {dependenciesPath}");
+                }
 
                 // Write log if requested
                 if (logPath != null)
