@@ -1,0 +1,12 @@
+{
+  "name": "generatedts",
+  "version": "1.0.0",
+  "description": "Generate TypeScript declarations from .NET assemblies",
+  "private": true,
+  "scripts": {
+    "validate": "node Scripts/validate.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

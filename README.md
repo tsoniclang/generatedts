@@ -234,6 +234,64 @@ The tool automatically skips:
 - Common Object methods (`Equals`, `GetHashCode`, `ToString`, `GetType`, `ReferenceEquals`)
 - Special-name members (property accessors, backing fields)
 
+## Reserved Keyword Escaping
+
+Parameter names that conflict with TypeScript/JavaScript reserved keywords are automatically escaped by prefixing them with an underscore. This prevents syntax errors in the generated declarations.
+
+**Escaped keywords include:**
+- Control flow: `break`, `case`, `catch`, `continue`, `default`, `do`, `else`, `finally`, `for`, `if`, `return`, `switch`, `throw`, `try`, `while`
+- Declarations: `class`, `const`, `enum`, `export`, `extends`, `function`, `import`, `let`, `var`, `void`
+- Modifiers: `async`, `await`, `implements`, `interface`, `package`, `private`, `protected`, `public`, `static`, `yield`
+- Special identifiers: `arguments`, `eval`, `this`, `super`, `new`, `typeof`, `instanceof`, `delete`, `debugger`, `with`, `in`
+
+**Example:**
+```csharp
+// C# method signature
+public static LoopExpression Loop(Expression body, LabelTarget break, LabelTarget continue)
+
+// Generated TypeScript
+static Loop(body: Expression, _break: LabelTarget, _continue: LabelTarget): LoopExpression;
+```
+
+This ensures that all generated `.d.ts` files are valid TypeScript and can be parsed by the TypeScript compiler without syntax errors.
+
+## Validation
+
+The project includes a comprehensive validation script that ensures all generated `.d.ts` files are syntactically valid TypeScript.
+
+### Running Validation
+
+```bash
+npm install  # First time only
+npm run validate
+```
+
+This script:
+1. Regenerates all 38 BCL assemblies to a temporary directory
+2. Creates an `index.d.ts` with triple-slash references
+3. Runs the TypeScript compiler to validate all declarations
+4. Reports syntax errors (TS1xxx), duplicate type errors (TS6200), and semantic errors (TS2xxx)
+
+### Understanding Validation Results
+
+**Critical**: The validation **must** pass with **zero TS1xxx syntax errors**. These indicate the generator is producing invalid TypeScript syntax.
+
+**Expected**: Semantic errors (TS2xxx) and duplicate type errors (TS6200) are expected when validating individual assemblies without their full dependency graph. These are not critical as long as there are no syntax errors.
+
+**Example output:**
+```
+✓ VALIDATION PASSED
+
+All 38 assemblies generated successfully
+All metadata files present
+✓ No TypeScript syntax errors (TS1xxx)
+
+Error breakdown:
+  - Syntax errors (TS1xxx): 0 ✓
+  - Duplicate types (TS6200): 0 (expected)
+  - Semantic errors (TS2xxx): 1 (expected - missing cross-assembly refs)
+```
+
 ## Development
 
 ### Project Structure
@@ -251,6 +309,9 @@ generatedts/
 │   ├── MetadataWriter.cs       # JSON metadata serialization
 │   ├── GeneratorConfig.cs      # Configuration support
 │   └── GenerationLogger.cs     # Logging functionality
+├── Scripts/
+│   └── validate.js             # Full validation script
+├── package.json                # npm scripts (validate)
 └── README.md
 ```
 

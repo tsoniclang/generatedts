@@ -9,6 +9,36 @@ public sealed class AssemblyProcessor
     private readonly TypeMapper _typeMapper = new();
     private readonly SignatureFormatter _signatureFormatter = new();
 
+    /// <summary>
+    /// TypeScript/JavaScript reserved keywords and special identifiers.
+    /// </summary>
+    private static readonly HashSet<string> TypeScriptReservedKeywords = new(StringComparer.Ordinal)
+    {
+        // Keywords
+        "break", "case", "catch", "class", "const", "continue", "debugger",
+        "default", "delete", "do", "else", "enum", "export", "extends",
+        "false", "finally", "for", "function", "if", "import", "in",
+        "instanceof", "new", "null", "return", "super", "switch", "this",
+        "throw", "true", "try", "typeof", "var", "void", "while", "with",
+
+        // Strict / future reserved
+        "implements", "interface", "let", "package", "private", "protected",
+        "public", "static", "yield", "async", "await",
+
+        // Problematic identifiers
+        "arguments", "eval"
+    };
+
+    /// <summary>
+    /// Prefixes parameter names that conflict with TypeScript keywords.
+    /// </summary>
+    private static string EscapeParameterName(string name)
+    {
+        return TypeScriptReservedKeywords.Contains(name)
+            ? $"_{name}"
+            : name;
+    }
+
     public AssemblyProcessor(GeneratorConfig config, string[] namespaces)
     {
         _config = config;
@@ -48,7 +78,7 @@ public sealed class AssemblyProcessor
                 }
                 catch (Exception ex)
                 {
-                    _typeMapper.AddWarning($"Failed to process type {type.FullName}: {ex.Message}");
+                    _typeMapper.AddWarning($"Failed to process type {type.FullName}: {ex.Message}\nStack: {ex.StackTrace}");
                 }
             }
 
@@ -129,11 +159,12 @@ public sealed class AssemblyProcessor
 
     private EnumDeclaration ProcessEnum(Type type)
     {
-        var members = Enum.GetValues(type)
-            .Cast<object>()
-            .Select(v => new EnumMember(
-                Enum.GetName(type, v)!,
-                Convert.ToInt64(v)))
+        // Use GetFields() for MetadataLoadContext compatibility instead of Enum.GetValues()
+        var fields = type.GetFields(BindingFlags.Public | BindingFlags.Static);
+        var members = fields
+            .Select(f => new EnumMember(
+                f.Name,
+                Convert.ToInt64(f.GetRawConstantValue())))
             .ToList();
 
         return new EnumDeclaration(
@@ -158,7 +189,7 @@ public sealed class AssemblyProcessor
             .ToList();
 
         var extends = type.GetInterfaces()
-            .Where(i => i != typeof(IDisposable)) // Often not needed in TS
+            .Where(i => i.FullName != "System.IDisposable") // Often not needed in TS (name-based for MetadataLoadContext)
             .Select(i => _typeMapper.MapType(i))
             .ToList();
 
@@ -193,7 +224,11 @@ public sealed class AssemblyProcessor
             .Select(ProcessMethod)
             .ToList();
 
-        var baseType = type.BaseType != null && type.BaseType != typeof(object) && type.BaseType != typeof(ValueType)
+        // Use name-based comparison for MetadataLoadContext compatibility
+        // (typeof(object) returns runtime type, but type.BaseType returns MetadataLoadContext type)
+        var baseType = type.BaseType != null
+            && type.BaseType.FullName != "System.Object"
+            && type.BaseType.FullName != "System.ValueType"
             ? _typeMapper.MapType(type.BaseType)
             : null;
 
@@ -258,13 +293,19 @@ public sealed class AssemblyProcessor
 
     private TypeInfo.ParameterInfo ProcessParameter(System.Reflection.ParameterInfo param)
     {
-        var isParams = param.GetCustomAttribute<ParamArrayAttribute>() != null;
+        // Use GetCustomAttributesData() for MetadataLoadContext compatibility
+        var isParams = param.GetCustomAttributesData()
+            .Any(a => a.AttributeType.FullName == "System.ParamArrayAttribute");
+
         var paramType = isParams && param.ParameterType.IsArray
             ? param.ParameterType.GetElementType()!
             : param.ParameterType;
 
+        var originalName = param.Name ?? $"arg{param.Position}";
+        var safeName = EscapeParameterName(originalName);
+
         return new TypeInfo.ParameterInfo(
-            param.Name ?? $"arg{param.Position}",
+            safeName,
             _typeMapper.MapType(paramType),
             param.IsOptional || param.HasDefaultValue,
             isParams);
