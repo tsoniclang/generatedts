@@ -151,10 +151,48 @@ public sealed class AssemblyProcessor
         }
         else if (type.IsClass || type.IsValueType)
         {
+            // Check if this is a static-only type
+            if (IsStaticOnly(type))
+            {
+                return ProcessStaticNamespace(type);
+            }
             return ProcessClass(type);
         }
 
         return null;
+    }
+
+    private static bool IsStaticOnly(Type type)
+    {
+        // Static class in C# (abstract sealed)
+        if (type.IsAbstract && type.IsSealed)
+        {
+            return true;
+        }
+
+        // ValueType cannot be static-only
+        if (type.IsValueType)
+        {
+            return false;
+        }
+
+        // Check for public instance members
+        var instanceMembers = type.GetMembers(BindingFlags.Public | BindingFlags.Instance);
+        if (instanceMembers.Length > 0)
+        {
+            return false;
+        }
+
+        // Check for public instance constructors
+        var constructors = type.GetConstructors(BindingFlags.Public | BindingFlags.Instance);
+        if (constructors.Any(c => !c.IsPrivate))
+        {
+            return false;
+        }
+
+        // Must have static members to be considered static-only
+        var staticMembers = type.GetMembers(BindingFlags.Public | BindingFlags.Static);
+        return staticMembers.Length > 0;
     }
 
     private EnumDeclaration ProcessEnum(Type type)
@@ -203,6 +241,33 @@ public sealed class AssemblyProcessor
             type.IsGenericType,
             genericParams,
             extends,
+            properties,
+            methods);
+    }
+
+    private StaticNamespaceDeclaration ProcessStaticNamespace(Type type)
+    {
+        // For static-only types, only process static members
+        var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)
+            .Where(ShouldIncludeMember)
+            .Select(ProcessProperty)
+            .ToList();
+
+        var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)
+            .Where(ShouldIncludeMember)
+            .Where(m => !m.IsSpecialName)
+            .Select(m => ProcessMethod(m, type))
+            .ToList();
+
+        var genericParams = type.IsGenericType
+            ? type.GetGenericArguments().Select(t => t.Name).ToList()
+            : new List<string>();
+
+        return new StaticNamespaceDeclaration(
+            GetTypeName(type),
+            type.FullName!,
+            type.IsGenericType,
+            genericParams,
             properties,
             methods);
     }
