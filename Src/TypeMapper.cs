@@ -6,8 +6,19 @@ namespace GenerateDts;
 public sealed class TypeMapper
 {
     private readonly List<string> _warnings = new();
+    private Assembly? _currentAssembly;
+    private DependencyTracker? _dependencyTracker;
 
     public IReadOnlyList<string> Warnings => _warnings;
+
+    /// <summary>
+    /// Sets the context for cross-assembly type reference rewriting.
+    /// </summary>
+    public void SetContext(Assembly currentAssembly, DependencyTracker? dependencyTracker)
+    {
+        _currentAssembly = currentAssembly;
+        _dependencyTracker = dependencyTracker;
+    }
 
     public string MapType(Type type)
     {
@@ -217,7 +228,30 @@ public sealed class TypeMapper
         var fullName = type.Namespace != null ? $"{type.Namespace}.{typeName}" : typeName;
 
         // Fallback to "any" if we somehow got an empty name
-        return string.IsNullOrWhiteSpace(fullName) ? "any" : fullName;
+        if (string.IsNullOrWhiteSpace(fullName))
+        {
+            return "any";
+        }
+
+        // Rewrite cross-assembly references with aliases (ESM Step 3)
+        if (_currentAssembly != null && _dependencyTracker != null)
+        {
+            // Check if this type is from a different assembly
+            if (type.Assembly != _currentAssembly)
+            {
+                var assemblyName = type.Assembly.GetName().Name;
+                if (assemblyName != null)
+                {
+                    // Get the alias for this assembly
+                    var alias = DependencyTracker.GetModuleAlias(assemblyName);
+
+                    // Rewrite: System.Collections.IEnumerable → System_Private_CoreLib.System.Collections.IEnumerable
+                    return $"{alias}.{fullName}";
+                }
+            }
+        }
+
+        return fullName;
     }
 
     private string GetTypeNameWithArity(Type type)

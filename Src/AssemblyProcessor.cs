@@ -53,6 +53,9 @@ public sealed class AssemblyProcessor
         // Initialize dependency tracker for this assembly
         _dependencyTracker = new DependencyTracker(assembly);
 
+        // Set context for TypeMapper to enable cross-assembly reference rewriting
+        _typeMapper.SetContext(assembly, _dependencyTracker);
+
         var types = assembly.GetExportedTypes()
             .Where(ShouldIncludeType)
             .OrderBy(t => t.Namespace)
