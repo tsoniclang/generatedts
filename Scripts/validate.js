@@ -10,10 +10,14 @@
  * 5. Reports any syntax or semantic errors
  */
 
-const { execSync, spawn } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
+import { execSync, spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Configuration
 const DOTNET_VERSION = '10.0.0-rc.1.25451.107';
@@ -140,7 +144,7 @@ const BCL_ASSEMBLIES = [
     'System.IO.Pipelines'
 ];
 
-const VALIDATION_DIR = path.join(os.tmpdir(), 'generatedts-validation');
+const VALIDATION_DIR = path.join(__dirname, '..', '.tests', 'validation');
 const TYPES_DIR = path.join(VALIDATION_DIR, 'types');
 
 function log(message) {

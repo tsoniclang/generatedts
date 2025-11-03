@@ -71,7 +71,7 @@ mkdir -p .tests
 node Scripts/validate.js | tee .tests/validation-$(date +%s).txt
 
 # Run TypeScript compiler directly with tee
-npx tsc --project /tmp/generatedts-validation | tee .tests/tsc-$(date +%s).txt
+npx tsc --project .tests/validation | tee .tests/tsc-$(date +%s).txt
 
 # Analyze saved output later without re-running:
 grep "TS2416" .tests/validation-*.txt
@@ -310,8 +310,8 @@ node Scripts/validate.js | tee .tests/validation-$(date +%s).txt
 
 ### Validation Steps
 
-1. Cleans `/tmp/generatedts-validation`
-2. Generates all 55 BCL assemblies
+1. Cleans `.tests/validation/` directory
+2. Generates all 67 BCL assemblies
 3. Creates `index.d.ts` with triple-slash references
 4. Creates `tsconfig.json`
 5. Runs TypeScript compiler (`tsc`)
