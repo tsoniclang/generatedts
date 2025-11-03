@@ -180,6 +180,19 @@ public static class Program
                 await metadataWriter.WriteMetadataAsync(metadata, metadataPath);
                 Console.WriteLine($"Generated: {metadataPath}");
 
+                // Write dependency information
+                var dependencyTracker = processor.GetDependencyTracker();
+                if (dependencyTracker != null)
+                {
+                    var dependenciesFileName = $"{assemblyName}.dependencies.json";
+                    var dependenciesPath = Path.Combine(outDir, dependenciesFileName);
+                    var dependenciesJson = System.Text.Json.JsonSerializer.Serialize(
+                        dependencyTracker.ToJson(),
+                        new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                    await File.WriteAllTextAsync(dependenciesPath, dependenciesJson, System.Text.Encoding.UTF8);
+                    Console.WriteLine($"Generated: {dependenciesPath}");
+                }
+
                 // Write log if requested
                 if (logPath != null)
                 {

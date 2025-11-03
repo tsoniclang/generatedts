@@ -8,6 +8,7 @@ public sealed class AssemblyProcessor
     private readonly HashSet<string>? _namespaceWhitelist;
     private readonly TypeMapper _typeMapper = new();
     private readonly SignatureFormatter _signatureFormatter = new();
+    private DependencyTracker? _dependencyTracker;
 
     /// <summary>
     /// TypeScript/JavaScript reserved keywords and special identifiers.
@@ -49,6 +50,9 @@ public sealed class AssemblyProcessor
 
     public ProcessedAssembly ProcessAssembly(Assembly assembly)
     {
+        // Initialize dependency tracker for this assembly
+        _dependencyTracker = new DependencyTracker(assembly);
+
         var types = assembly.GetExportedTypes()
             .Where(ShouldIncludeType)
             .OrderBy(t => t.Namespace)
@@ -255,6 +259,12 @@ public sealed class AssemblyProcessor
             .Select(i => _typeMapper.MapType(i))
             .ToList();
 
+        // Track base interface dependencies
+        foreach (var iface in type.GetInterfaces().Where(i => i.FullName != "System.IDisposable"))
+        {
+            TrackTypeDependency(iface);
+        }
+
         var genericParams = type.IsGenericType
             ? type.GetGenericArguments().Select(t => t.Name).ToList()
             : new List<string>();
@@ -361,10 +371,24 @@ public sealed class AssemblyProcessor
             ? _typeMapper.MapType(type.BaseType)
             : null;
 
+        // Track base type dependency
+        if (type.BaseType != null
+            && type.BaseType.FullName != "System.Object"
+            && type.BaseType.FullName != "System.ValueType")
+        {
+            TrackTypeDependency(type.BaseType);
+        }
+
         var interfaces = type.GetInterfaces()
             .Where(i => i.IsPublic)
             .Select(i => _typeMapper.MapType(i))
             .ToList();
+
+        // Track interface dependencies
+        foreach (var iface in type.GetInterfaces().Where(i => i.IsPublic))
+        {
+            TrackTypeDependency(iface);
+        }
 
         var genericParams = type.IsGenericType
             ? type.GetGenericArguments().Select(t => t.Name).ToList()
@@ -385,6 +409,12 @@ public sealed class AssemblyProcessor
 
     private TypeInfo.ConstructorInfo ProcessConstructor(System.Reflection.ConstructorInfo ctor)
     {
+        // Track parameter type dependencies
+        foreach (var param in ctor.GetParameters())
+        {
+            TrackTypeDependency(param.ParameterType);
+        }
+
         var parameters = ctor.GetParameters()
             .Select(ProcessParameter)
             .ToList();
@@ -421,6 +451,9 @@ public sealed class AssemblyProcessor
                 return null!; // Will be filtered out
             }
         }
+
+        // Track property type dependency
+        TrackTypeDependency(prop.PropertyType);
 
         return new TypeInfo.PropertyInfo(
             prop.Name,
@@ -461,6 +494,15 @@ public sealed class AssemblyProcessor
 
     private TypeInfo.MethodInfo ProcessMethod(System.Reflection.MethodInfo method, Type declaringType)
     {
+        // Track return type dependency
+        TrackTypeDependency(method.ReturnType);
+
+        // Track parameter type dependencies
+        foreach (var param in method.GetParameters())
+        {
+            TrackTypeDependency(param.ParameterType);
+        }
+
         var parameters = method.GetParameters()
             .Select(ProcessParameter)
             .ToList();
@@ -958,5 +1000,54 @@ public sealed class AssemblyProcessor
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Tracks a type dependency for cross-assembly import generation.
+    /// Recursively tracks generic type arguments.
+    /// </summary>
+    private void TrackTypeDependency(Type type)
+    {
+        if (_dependencyTracker == null) return;
+
+        // Track the type itself
+        _dependencyTracker.RecordTypeReference(type);
+
+        // Track generic type arguments
+        if (type.IsGenericType && !type.IsGenericTypeDefinition)
+        {
+            foreach (var arg in type.GetGenericArguments())
+            {
+                TrackTypeDependency(arg);
+            }
+        }
+
+        // Track array element type
+        if (type.IsArray)
+        {
+            var elementType = type.GetElementType();
+            if (elementType != null)
+            {
+                TrackTypeDependency(elementType);
+            }
+        }
+
+        // Track by-ref element type
+        if (type.IsByRef || type.IsPointer)
+        {
+            var elementType = type.GetElementType();
+            if (elementType != null)
+            {
+                TrackTypeDependency(elementType);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the dependency tracker for this assembly processing session.
+    /// </summary>
+    public DependencyTracker? GetDependencyTracker()
+    {
+        return _dependencyTracker;
     }
 }
