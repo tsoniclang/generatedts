@@ -356,6 +356,18 @@ public sealed class AssemblyProcessor
 
     private TypeInfo.PropertyInfo ProcessProperty(System.Reflection.PropertyInfo prop)
     {
+        // Skip indexers (properties with index parameters like this[int index])
+        // These cause TS2300 duplicate identifier errors when multiple indexers exist
+        // with the same name but different parameter types
+        var indexParams = prop.GetIndexParameters();
+        if (indexParams.Length > 0)
+        {
+            // Log for visibility - indexers are tracked in metadata
+            _typeMapper.AddWarning($"Skipped indexer {prop.DeclaringType?.Name}.{prop.Name} - " +
+                $"indexers with parameters cannot be represented as TypeScript properties (TS2300)");
+            return null!; // Will be filtered out
+        }
+
         var isStatic = prop.GetMethod?.IsStatic ?? prop.SetMethod?.IsStatic ?? false;
 
         // TypeScript: static properties cannot reference class type parameters
@@ -673,6 +685,9 @@ public sealed class AssemblyProcessor
         bool isOverride = IsOverrideMethod(accessMethod);
         bool isStatic = accessMethod?.IsStatic ?? false;
 
+        // Check if this is an indexer (has index parameters)
+        bool isIndexer = prop.GetIndexParameters().Length > 0;
+
         return new MemberMetadata(
             "property",
             isVirtual,
@@ -680,7 +695,8 @@ public sealed class AssemblyProcessor
             isSealed,
             isOverride,
             isStatic,
-            GetAccessibility(accessMethod));
+            GetAccessibility(accessMethod),
+            IsIndexer: isIndexer ? true : null);
     }
 
     private MemberMetadata ProcessMethodMetadata(System.Reflection.MethodInfo method)
