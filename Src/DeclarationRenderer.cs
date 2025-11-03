@@ -51,6 +51,9 @@ public sealed class DeclarationRenderer
         {
             switch (type)
             {
+                case StaticNamespaceDeclaration staticNs:
+                    RenderStaticNamespace(sb, staticNs, 1);
+                    break;
                 case ClassDeclaration classDecl:
                     RenderClass(sb, classDecl, 1);
                     break;
@@ -66,6 +69,41 @@ public sealed class DeclarationRenderer
         }
 
         sb.AppendLine("}");
+    }
+
+    private void RenderStaticNamespace(StringBuilder sb, StaticNamespaceDeclaration staticNs, int indentLevel)
+    {
+        var indent = new string(' ', indentLevel * 2);
+
+        // Render as namespace with exported members
+        sb.AppendLine($"{indent}namespace {staticNs.Name} {{");
+
+        // Properties as exported constants
+        foreach (var prop in staticNs.Properties)
+        {
+            if (prop.IsReadOnly)
+            {
+                sb.AppendLine($"{indent}{Indent}export const {prop.Name}: {prop.Type};");
+            }
+            else
+            {
+                sb.AppendLine($"{indent}{Indent}export let {prop.Name}: {prop.Type};");
+            }
+        }
+
+        // Methods as exported functions
+        foreach (var method in staticNs.Methods)
+        {
+            var genericParams = method.IsGeneric
+                ? $"<{string.Join(", ", method.GenericParameters)}>"
+                : "";
+
+            var parameters = RenderParameters(method.Parameters);
+
+            sb.AppendLine($"{indent}{Indent}export function {method.Name}{genericParams}({parameters}): {method.ReturnType};");
+        }
+
+        sb.AppendLine($"{indent}}}");
     }
 
     private void RenderClass(StringBuilder sb, ClassDeclaration classDecl, int indentLevel)

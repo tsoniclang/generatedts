@@ -46,6 +46,14 @@ public sealed record EnumMember(
     string Name,
     object Value);
 
+public sealed record StaticNamespaceDeclaration(
+    string Name,
+    string FullName,
+    bool IsGeneric,
+    IReadOnlyList<string> GenericParameters,
+    IReadOnlyList<TypeInfo.PropertyInfo> Properties,
+    IReadOnlyList<TypeInfo.MethodInfo> Methods) : TypeDeclaration(Name, FullName, IsGeneric, GenericParameters);
+
 public static class TypeInfo
 {
     public sealed record ConstructorInfo(
