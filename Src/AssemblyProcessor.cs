@@ -376,6 +376,10 @@ public sealed class AssemblyProcessor
         // This handles TS2416 (covariant return types) and remaining TS2420 (interface implementation)
         AddInterfaceCompatibleOverloads(type, properties, methods);
 
+        // Add base class-compatible overloads for all base class members
+        // This handles TS2416 (method covariance) when derived classes override with more specific types
+        AddBaseClassCompatibleOverloads(type, properties, methods);
+
         // Use name-based comparison for MetadataLoadContext compatibility
         // (typeof(object) returns runtime type, but type.BaseType returns MetadataLoadContext type)
         var baseType = type.BaseType != null
@@ -1014,6 +1018,147 @@ public sealed class AssemblyProcessor
         catch
         {
             // Type may not support interface mapping
+        }
+    }
+
+    /// <summary>
+    /// Adds base class-compatible method and property overloads for TS2416 covariance issues.
+    /// When a derived class overrides a base method with a more specific return type,
+    /// TypeScript requires both signatures to be present.
+    /// </summary>
+    private void AddBaseClassCompatibleOverloads(Type type, List<TypeInfo.PropertyInfo> properties, List<TypeInfo.MethodInfo> methods)
+    {
+        if (type.BaseType == null
+            || type.BaseType.FullName == "System.Object"
+            || type.BaseType.FullName == "System.ValueType"
+            || type.BaseType.FullName == "System.MarshalByRefObject")
+        {
+            return; // No base class to process
+        }
+
+        try
+        {
+            AddBaseClassOverloadsRecursive(type.BaseType, properties, methods);
+        }
+        catch
+        {
+            // Base class may not be accessible in MetadataLoadContext
+        }
+    }
+
+    /// <summary>
+    /// Recursively adds base class overloads from the entire inheritance chain.
+    /// </summary>
+    private void AddBaseClassOverloadsRecursive(Type baseType, List<TypeInfo.PropertyInfo> properties, List<TypeInfo.MethodInfo> methods)
+    {
+        if (baseType == null
+            || baseType.FullName == "System.Object"
+            || baseType.FullName == "System.ValueType"
+            || baseType.FullName == "System.MarshalByRefObject")
+        {
+            return;
+        }
+
+        try
+        {
+            // Process base class methods
+            var baseMethods = baseType.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                .Where(ShouldIncludeMember)
+                .Where(m => !m.IsSpecialName)
+                .Where(m => !m.Name.Contains('.')); // Skip explicit interface implementations
+
+            foreach (var baseMethod in baseMethods)
+            {
+                try
+                {
+                    // Track dependency for base method return type and parameters
+                    TrackTypeDependency(baseMethod.ReturnType);
+                    foreach (var param in baseMethod.GetParameters())
+                    {
+                        TrackTypeDependency(param.ParameterType);
+                    }
+
+                    var baseReturnType = _typeMapper.MapType(baseMethod.ReturnType);
+                    var baseParams = baseMethod.GetParameters()
+                        .Select(ProcessParameter)
+                        .ToList();
+
+                    // Check if we already have this exact method signature
+                    var hasExactMatch = methods.Any(m =>
+                        m.Name == baseMethod.Name &&
+                        m.ReturnType == baseReturnType &&
+                        ParameterListsMatch(m.Parameters, baseParams));
+
+                    if (!hasExactMatch)
+                    {
+                        // Add base class-compatible method signature
+                        var genericParams = baseMethod.IsGenericMethod
+                            ? baseMethod.GetGenericArguments().Select(t => t.Name).ToList()
+                            : new List<string>();
+
+                        methods.Add(new TypeInfo.MethodInfo(
+                            baseMethod.Name,
+                            baseReturnType,
+                            baseParams,
+                            false, // Instance method (base methods are not static in this context)
+                            baseMethod.IsGenericMethod,
+                            genericParams));
+                    }
+                }
+                catch
+                {
+                    // Skip methods that can't be processed
+                }
+            }
+
+            // Process base class properties (for covariant property return types)
+            var baseProperties = baseType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                .Where(ShouldIncludeMember);
+
+            foreach (var baseProp in baseProperties)
+            {
+                try
+                {
+                    // Skip indexers
+                    if (baseProp.GetIndexParameters().Length > 0)
+                        continue;
+
+                    TrackTypeDependency(baseProp.PropertyType);
+
+                    var basePropertyType = _typeMapper.MapType(baseProp.PropertyType);
+
+                    // Check if we already have this exact property signature
+                    var hasExactMatch = properties.Any(p =>
+                        p.Name == baseProp.Name &&
+                        p.Type == basePropertyType);
+
+                    if (!hasExactMatch)
+                    {
+                        // Add base class-compatible property signature
+                        var isStatic = baseProp.GetMethod?.IsStatic ?? baseProp.SetMethod?.IsStatic ?? false;
+
+                        properties.Add(new TypeInfo.PropertyInfo(
+                            baseProp.Name,
+                            basePropertyType,
+                            !baseProp.CanWrite,
+                            isStatic));
+                    }
+                }
+                catch
+                {
+                    // Skip properties that can't be processed
+                }
+            }
+
+            // Recurse up the inheritance chain
+            if (baseType.BaseType != null)
+            {
+                AddBaseClassOverloadsRecursive(baseType.BaseType, properties, methods);
+            }
+        }
+        catch
+        {
+            // Base type may not be accessible
         }
     }
 
