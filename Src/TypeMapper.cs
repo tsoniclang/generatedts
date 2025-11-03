@@ -150,27 +150,8 @@ public sealed class TypeMapper
             }
         }
 
-        // Handle List<T>
-        if (fullName.StartsWith("System.Collections.Generic.List"))
-        {
-            var elementType = MapType(type.GenericTypeArguments[0]);
-            return $"List<{elementType}>";
-        }
-
-        // Handle Dictionary<K,V>
-        if (fullName.StartsWith("System.Collections.Generic.Dictionary"))
-        {
-            var keyType = MapType(type.GenericTypeArguments[0]);
-            var valueType = MapType(type.GenericTypeArguments[1]);
-            return $"Dictionary<{keyType}, {valueType}>";
-        }
-
-        // Handle HashSet<T>
-        if (fullName.StartsWith("System.Collections.Generic.HashSet"))
-        {
-            var elementType = MapType(type.GenericTypeArguments[0]);
-            return $"HashSet<{elementType}>";
-        }
+        // Note: List<T>, Dictionary<K,V>, HashSet<T> are handled by the generic logic below
+        // We use fully qualified names for .d.ts files to avoid TS2304 errors
 
         // Handle IEnumerable<T> and similar
         if (fullName.StartsWith("System.Collections.Generic.IEnumerable") ||
@@ -235,9 +216,10 @@ public sealed class TypeMapper
             return string.IsNullOrWhiteSpace(result) ? "any" : result;
         }
 
-        // Replace + with . for nested types (C# uses + but TypeScript uses .)
+        // Handle nested types: C# uses + but we use _ to avoid name conflicts
+        // Example: FrozenDictionary+AlternateLookup becomes FrozenDictionary_AlternateLookup
         var fullName = type.FullName ?? type.Name ?? "";
-        var finalName = fullName.Replace('+', '.');
+        var finalName = fullName.Replace('+', '_');
 
         // Fallback to "any" if we somehow got an empty name (can happen with function pointers, etc.)
         return string.IsNullOrWhiteSpace(finalName) ? "any" : finalName;

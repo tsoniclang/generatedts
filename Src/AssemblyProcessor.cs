@@ -151,6 +151,12 @@ public sealed class AssemblyProcessor
         }
         else if (type.IsClass || type.IsValueType)
         {
+            // Skip delegate types - they're mapped to function types in TypeMapper
+            if (IsDelegate(type))
+            {
+                return null;
+            }
+
             // Check if this is a static-only type
             if (IsStaticOnly(type))
             {
@@ -160,6 +166,23 @@ public sealed class AssemblyProcessor
         }
 
         return null;
+    }
+
+    private static bool IsDelegate(Type type)
+    {
+        // Check if type inherits from System.Delegate or System.MulticastDelegate
+        // Use name-based comparison for MetadataLoadContext compatibility
+        var baseType = type.BaseType;
+        while (baseType != null)
+        {
+            var baseName = baseType.FullName;
+            if (baseName == "System.Delegate" || baseName == "System.MulticastDelegate")
+            {
+                return true;
+            }
+            baseType = baseType.BaseType;
+        }
+        return false;
     }
 
     private static bool IsStaticOnly(Type type)
@@ -471,14 +494,35 @@ public sealed class AssemblyProcessor
 
     private string GetTypeName(Type type)
     {
-        if (!type.IsGenericType)
+        var baseName = type.Name;
+
+        // Handle generic types - strip the `N suffix
+        if (type.IsGenericType)
         {
-            return type.Name;
+            var backtickIndex = baseName.IndexOf('`');
+            if (backtickIndex > 0)
+            {
+                baseName = baseName.Substring(0, backtickIndex);
+            }
         }
 
-        var name = type.Name;
-        var backtickIndex = name.IndexOf('`');
-        return backtickIndex > 0 ? name.Substring(0, backtickIndex) : name;
+        // Handle nested types - prefix with parent class name to avoid conflicts
+        // Example: FrozenDictionary<K,V>.AlternateLookup becomes FrozenDictionary_AlternateLookup
+        if (type.IsNested && type.DeclaringType != null)
+        {
+            var parentName = type.DeclaringType.Name;
+
+            // Strip generic suffix from parent name too
+            var parentBacktick = parentName.IndexOf('`');
+            if (parentBacktick > 0)
+            {
+                parentName = parentName.Substring(0, parentBacktick);
+            }
+
+            return $"{parentName}_{baseName}";
+        }
+
+        return baseName;
     }
 
     /// <summary>
