@@ -82,45 +82,70 @@ public static class Program
 
             // Load assembly
             Console.WriteLine($"Loading assembly: {assemblyPath}");
-            var assembly = Assembly.LoadFrom(Path.GetFullPath(assemblyPath));
 
-            // Process assembly
-            var processor = new AssemblyProcessor(config, namespaces);
-            var typeInfo = processor.ProcessAssembly(assembly);
+            var assemblyFileName = Path.GetFileName(assemblyPath);
+            var isCoreLib = assemblyFileName.Equals("System.Private.CoreLib.dll", StringComparison.OrdinalIgnoreCase);
 
-            // Render declarations
-            var renderer = new DeclarationRenderer();
-            var declarations = renderer.RenderDeclarations(typeInfo);
+            Assembly assembly;
+            MetadataAssemblyLoader? loader = null;
 
-            // Process metadata
-            var metadata = processor.ProcessAssemblyMetadata(assembly);
-
-            // Determine output file name
-            var assemblyName = Path.GetFileNameWithoutExtension(assemblyPath);
-            var outputFileName = $"{assemblyName}.d.ts";
-            var outputPath = Path.Combine(outDir, outputFileName);
-            var metadataFileName = $"{assemblyName}.metadata.json";
-            var metadataPath = Path.Combine(outDir, metadataFileName);
-
-            // Ensure output directory exists
-            Directory.CreateDirectory(outDir);
-
-            // Write TypeScript declarations
-            await File.WriteAllTextAsync(outputPath, declarations, System.Text.Encoding.UTF8);
-            Console.WriteLine($"Generated: {outputPath}");
-
-            // Write metadata file
-            var metadataWriter = new MetadataWriter();
-            await metadataWriter.WriteMetadataAsync(metadata, metadataPath);
-            Console.WriteLine($"Generated: {metadataPath}");
-
-            // Write log if requested
-            if (logPath != null)
+            if (isCoreLib)
             {
-                var logger = new GenerationLogger();
-                var logData = logger.CreateLog(typeInfo);
-                await File.WriteAllTextAsync(logPath, logData, System.Text.Encoding.UTF8);
-                Console.WriteLine($"Log written: {logPath}");
+                // Use MetadataLoadContext for core library (cannot be loaded via standard reflection)
+                loader = new MetadataAssemblyLoader(assemblyPath);
+                assembly = loader.LoadFromAssemblyPath(assemblyPath);
+                Console.WriteLine("  (using MetadataLoadContext for System.Private.CoreLib)");
+            }
+            else
+            {
+                // Use standard reflection for other assemblies
+                assembly = Assembly.LoadFrom(Path.GetFullPath(assemblyPath));
+            }
+
+            try
+            {
+                // Process assembly
+                var processor = new AssemblyProcessor(config, namespaces);
+                var typeInfo = processor.ProcessAssembly(assembly);
+
+                // Render declarations
+                var renderer = new DeclarationRenderer();
+                var declarations = renderer.RenderDeclarations(typeInfo);
+
+                // Process metadata
+                var metadata = processor.ProcessAssemblyMetadata(assembly);
+
+                // Determine output file name
+                var assemblyName = Path.GetFileNameWithoutExtension(assemblyPath);
+                var outputFileName = $"{assemblyName}.d.ts";
+                var outputPath = Path.Combine(outDir, outputFileName);
+                var metadataFileName = $"{assemblyName}.metadata.json";
+                var metadataPath = Path.Combine(outDir, metadataFileName);
+
+                // Ensure output directory exists
+                Directory.CreateDirectory(outDir);
+
+                // Write TypeScript declarations
+                await File.WriteAllTextAsync(outputPath, declarations, System.Text.Encoding.UTF8);
+                Console.WriteLine($"Generated: {outputPath}");
+
+                // Write metadata file
+                var metadataWriter = new MetadataWriter();
+                await metadataWriter.WriteMetadataAsync(metadata, metadataPath);
+                Console.WriteLine($"Generated: {metadataPath}");
+
+                // Write log if requested
+                if (logPath != null)
+                {
+                    var logger = new GenerationLogger();
+                    var logData = logger.CreateLog(typeInfo);
+                    await File.WriteAllTextAsync(logPath, logData, System.Text.Encoding.UTF8);
+                    Console.WriteLine($"Log written: {logPath}");
+                }
+            }
+            finally
+            {
+                loader?.Dispose();
             }
         }
         catch (Exception ex)

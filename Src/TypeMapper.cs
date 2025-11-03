@@ -18,6 +18,15 @@ public sealed class TypeMapper
             return MapType(type.GetElementType()!);
         }
 
+        // Handle pointer types
+        if (type.IsPointer)
+        {
+            // TypeScript doesn't have pointers, map to 'any' for unsafe code
+            // The underlying type information is still available via GetElementType() if needed
+            AddWarning($"Pointer type {type.Name} mapped to 'any' (TypeScript doesn't support pointers)");
+            return "any";
+        }
+
         // Handle nullable value types
         if (Nullable.GetUnderlyingType(type) is Type underlyingType)
         {
@@ -53,8 +62,14 @@ public sealed class TypeMapper
             }
         }
 
-        // Default: use fully qualified name
-        return GetFullTypeName(type);
+        // Default: use fully qualified name, fallback to "any" if empty
+        var fullTypeName = GetFullTypeName(type);
+        if (string.IsNullOrWhiteSpace(fullTypeName))
+        {
+            AddWarning($"Type {type} has no name - mapped to 'any'");
+            return "any";
+        }
+        return fullTypeName;
     }
 
     private string MapPrimitiveType(Type type)
@@ -157,15 +172,35 @@ public sealed class TypeMapper
         // Generic type with parameters
         var sb = new StringBuilder();
         sb.Append(GetFullTypeName(genericTypeDef));
-        sb.Append('<');
 
-        for (int i = 0; i < type.GenericTypeArguments.Length; i++)
+        // Handle open generic types (no type arguments filled in)
+        if (type.GenericTypeArguments.Length == 0)
         {
-            if (i > 0) sb.Append(", ");
-            sb.Append(MapType(type.GenericTypeArguments[i]));
+            // Use the type parameter names from the definition
+            var typeParams = genericTypeDef.GetGenericArguments();
+            if (typeParams.Length > 0)
+            {
+                sb.Append('<');
+                for (int i = 0; i < typeParams.Length; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append(typeParams[i].Name);
+                }
+                sb.Append('>');
+            }
+        }
+        else
+        {
+            // Closed generic type with type arguments
+            sb.Append('<');
+            for (int i = 0; i < type.GenericTypeArguments.Length; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(MapType(type.GenericTypeArguments[i]));
+            }
+            sb.Append('>');
         }
 
-        sb.Append('>');
         return sb.ToString();
     }
 
@@ -173,7 +208,7 @@ public sealed class TypeMapper
     {
         if (type.IsGenericParameter)
         {
-            return type.Name;
+            return type.Name ?? "T";
         }
 
         if (type.IsGenericType)
@@ -184,12 +219,16 @@ public sealed class TypeMapper
             {
                 name = name.Substring(0, backtickIndex);
             }
-            return type.Namespace != null ? $"{type.Namespace}.{name}" : name;
+            var result = type.Namespace != null ? $"{type.Namespace}.{name}" : name;
+            return string.IsNullOrWhiteSpace(result) ? "any" : result;
         }
 
         // Replace + with . for nested types (C# uses + but TypeScript uses .)
-        var fullName = type.FullName ?? type.Name;
-        return fullName.Replace('+', '.');
+        var fullName = type.FullName ?? type.Name ?? "";
+        var finalName = fullName.Replace('+', '.');
+
+        // Fallback to "any" if we somehow got an empty name (can happen with function pointers, etc.)
+        return string.IsNullOrWhiteSpace(finalName) ? "any" : finalName;
     }
 
     public void AddWarning(string message)
