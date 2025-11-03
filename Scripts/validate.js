@@ -199,20 +199,19 @@ function createIntrinsicsFile() {
 
     const intrinsicsContent = `// Intrinsic type definitions for .NET numeric types
 // This file provides branded numeric type aliases used across all BCL declarations.
+// ESM module exports for full module support.
 
-type int = number & { __brand: "int" };
-type uint = number & { __brand: "uint" };
-type byte = number & { __brand: "byte" };
-type sbyte = number & { __brand: "sbyte" };
-type short = number & { __brand: "short" };
-type ushort = number & { __brand: "ushort" };
-type long = number & { __brand: "long" };
-type ulong = number & { __brand: "ulong" };
-type float = number & { __brand: "float" };
-type double = number & { __brand: "double" };
-type decimal = number & { __brand: "decimal" };
-
-export {};  // Make this a module
+export type int = number & { __brand: "int" };
+export type uint = number & { __brand: "uint" };
+export type byte = number & { __brand: "byte" };
+export type sbyte = number & { __brand: "sbyte" };
+export type short = number & { __brand: "short" };
+export type ushort = number & { __brand: "ushort" };
+export type long = number & { __brand: "long" };
+export type ulong = number & { __brand: "ulong" };
+export type float = number & { __brand: "float" };
+export type double = number & { __brand: "double" };
+export type decimal = number & { __brand: "decimal" };
 `;
 
     fs.writeFileSync(path.join(TYPES_DIR, '_intrinsics.d.ts'), intrinsicsContent);
@@ -220,10 +219,10 @@ export {};  // Make this a module
 }
 
 function createIndexFile() {
-    log('Creating index.d.ts with triple-slash references...');
+    log('Creating index.d.ts with ESM re-exports...');
 
     const dtsFiles = fs.readdirSync(TYPES_DIR)
-        .filter(f => f.endsWith('.d.ts') && f !== 'index.d.ts')
+        .filter(f => f.endsWith('.d.ts') && f !== 'index.d.ts' && f !== '_intrinsics.d.ts')
         .sort();
 
     // Ensure System.Private.CoreLib is first (if it exists)
@@ -233,22 +232,23 @@ function createIndexFile() {
         dtsFiles.unshift('System.Private.CoreLib.d.ts');
     }
 
-    const references = dtsFiles
-        .map(f => `/// <reference path="./${f}" />`)
+    // Generate ESM re-exports (barrel pattern)
+    const exports = dtsFiles
+        .map(f => {
+            const moduleName = f.replace('.d.ts', '');
+            return `export * from './${moduleName}.js';`;
+        })
         .join('\n');
 
-    const indexContent = `// Auto-generated index file for validation
-// This file provides triple-slash references to all generated .d.ts files
-// so TypeScript can resolve cross-assembly dependencies.
+    const indexContent = `// Auto-generated barrel export file for BCL type definitions
+// This file re-exports all namespaces from individual assembly files
+// using ESM module syntax for full module support.
 
-${references}
-
-// Export empty object to make this a module
-export {};
+${exports}
 `;
 
     fs.writeFileSync(path.join(TYPES_DIR, 'index.d.ts'), indexContent);
-    log(`Created index.d.ts with ${dtsFiles.length} references`);
+    log(`Created index.d.ts with ${dtsFiles.length} re-exports`);
 }
 
 function createTsConfig() {
