@@ -569,11 +569,61 @@ public sealed class AssemblyProcessor
         // Track property type dependency
         TrackTypeDependency(prop.PropertyType);
 
+        // P2: Apply Covariant wrapper for known property covariance patterns
+        var mappedType = _typeMapper.MapType(prop.PropertyType);
+        var propertyType = ApplyCovariantWrapperIfNeeded(prop, mappedType);
+
         return new TypeInfo.PropertyInfo(
             prop.Name,
-            _typeMapper.MapType(prop.PropertyType),
+            propertyType,
             !prop.CanWrite,
             isStatic);
+    }
+
+    /// <summary>
+    /// P2: Apply Covariant wrapper for property covariance patterns.
+    /// Dictionary Keys/Values properties return more specific types than interfaces require.
+    /// Use Covariant<TSpecific, TContract> to satisfy both runtime and interface contracts.
+    /// </summary>
+    private string ApplyCovariantWrapperIfNeeded(System.Reflection.PropertyInfo prop, string mappedType)
+    {
+        // Only apply to readonly properties
+        if (prop.CanWrite)
+            return mappedType;
+
+        // P2: Dictionary Keys/Values covariance
+        // Pattern: Keys property returns ICollection_1<TKey> but interface expects ICollection
+        if (prop.Name == "Keys" || prop.Name == "Values")
+        {
+            var declaringType = prop.DeclaringType;
+            if (declaringType == null)
+                return mappedType;
+
+            // Check if this is a dictionary-like type
+            var isDictionary = declaringType.GetInterfaces().Any(i =>
+                i.FullName == "System.Collections.IDictionary" ||
+                i.FullName == "System.Collections.Generic.IDictionary`2" ||
+                i.FullName == "System.Collections.Generic.IReadOnlyDictionary`2");
+
+            if (isDictionary)
+            {
+                // Keys property: wrap specific type with non-generic contract
+                if (prop.Name == "Keys" && mappedType.Contains("ICollection_1<"))
+                {
+                    // Specific: ICollection_1<TKey>, Contract: ICollection
+                    return $"Covariant<{mappedType}, System_Private_CoreLib.System.Collections.ICollection>";
+                }
+
+                // Values property: wrap specific type with non-generic contract
+                if (prop.Name == "Values" && mappedType.Contains("ICollection_1<"))
+                {
+                    // Specific: ICollection_1<TValue>, Contract: ICollection
+                    return $"Covariant<{mappedType}, System_Private_CoreLib.System.Collections.ICollection>";
+                }
+            }
+        }
+
+        return mappedType;
     }
 
     private bool PropertyTypeReferencesTypeParams(Type propertyType, HashSet<string> classTypeParams)
