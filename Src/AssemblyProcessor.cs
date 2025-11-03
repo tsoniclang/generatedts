@@ -218,6 +218,7 @@ public sealed class AssemblyProcessor
         var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
             .Where(ShouldIncludeMember)
             .Select(ProcessProperty)
+            .Where(p => p != null)
             .ToList();
 
         var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
@@ -251,6 +252,7 @@ public sealed class AssemblyProcessor
         var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)
             .Where(ShouldIncludeMember)
             .Select(ProcessProperty)
+            .Where(p => p != null)
             .ToList();
 
         var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)
@@ -281,6 +283,7 @@ public sealed class AssemblyProcessor
         var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
             .Where(ShouldIncludeMember)
             .Select(ProcessProperty)
+            .Where(p => p != null)
             .ToList();
 
         var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
@@ -330,11 +333,57 @@ public sealed class AssemblyProcessor
 
     private TypeInfo.PropertyInfo ProcessProperty(System.Reflection.PropertyInfo prop)
     {
+        var isStatic = prop.GetMethod?.IsStatic ?? prop.SetMethod?.IsStatic ?? false;
+
+        // TypeScript: static properties cannot reference class type parameters
+        // Skip static properties in generic classes to avoid TS2302 errors
+        if (isStatic && prop.DeclaringType != null && prop.DeclaringType.IsGenericType)
+        {
+            // Check if property type references any class type parameters
+            var classTypeParams = prop.DeclaringType.GetGenericArguments().Select(t => t.Name).ToHashSet();
+            if (PropertyTypeReferencesTypeParams(prop.PropertyType, classTypeParams))
+            {
+                _typeMapper.AddWarning($"Skipped static property {prop.DeclaringType.Name}.{prop.Name} - " +
+                    $"references class type parameters (TS2302: Static members cannot reference class type parameters)");
+                return null!; // Will be filtered out
+            }
+        }
+
         return new TypeInfo.PropertyInfo(
             prop.Name,
             _typeMapper.MapType(prop.PropertyType),
             !prop.CanWrite,
-            prop.GetMethod?.IsStatic ?? prop.SetMethod?.IsStatic ?? false);
+            isStatic);
+    }
+
+    private bool PropertyTypeReferencesTypeParams(Type propertyType, HashSet<string> classTypeParams)
+    {
+        // Check if this type is a generic parameter
+        if (propertyType.IsGenericParameter && classTypeParams.Contains(propertyType.Name))
+        {
+            return true;
+        }
+
+        // Check if this is a generic type that uses the class's type parameters
+        if (propertyType.IsGenericType)
+        {
+            var typeArgs = propertyType.GetGenericArguments();
+            foreach (var arg in typeArgs)
+            {
+                if (PropertyTypeReferencesTypeParams(arg, classTypeParams))
+                {
+                    return true;
+                }
+            }
+        }
+
+        // Check arrays
+        if (propertyType.IsArray)
+        {
+            return PropertyTypeReferencesTypeParams(propertyType.GetElementType()!, classTypeParams);
+        }
+
+        return false;
     }
 
     private TypeInfo.MethodInfo ProcessMethod(System.Reflection.MethodInfo method, Type declaringType)
@@ -347,17 +396,29 @@ public sealed class AssemblyProcessor
         var isGeneric = method.IsGenericMethod;
 
         // TypeScript: static methods cannot reference class type parameters
-        // Solution: If this is a static method in a generic class, make the method generic
-        // by adding the class's type parameters to the method
-        if (method.IsStatic && declaringType.IsGenericType && !method.IsGenericMethod)
+        // Solution: If this is a static method in a generic class, add the class's type parameters
+        if (method.IsStatic && declaringType.IsGenericType)
         {
-            // Add class type parameters to the static method
-            genericParams = declaringType.GetGenericArguments().Select(t => t.Name).ToList();
+            // Start with class type parameters
+            var classTypeParams = declaringType.GetGenericArguments().Select(t => t.Name).ToList();
+
+            if (method.IsGenericMethod)
+            {
+                // Method already has its own type parameters - prepend class params
+                var methodTypeParams = method.GetGenericArguments().Select(t => t.Name).ToList();
+                genericParams = classTypeParams.Concat(methodTypeParams).ToList();
+            }
+            else
+            {
+                // Method has no generic params - use class params
+                genericParams = classTypeParams;
+            }
+
             isGeneric = genericParams.Count > 0;
         }
         else if (method.IsGenericMethod)
         {
-            // Method already has its own type parameters
+            // Non-static method with its own type parameters
             genericParams = method.GetGenericArguments().Select(t => t.Name).ToList();
         }
 
