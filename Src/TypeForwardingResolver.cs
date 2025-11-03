@@ -14,6 +14,25 @@ public class TypeForwardingResolver
     /// </summary>
     private static readonly Dictionary<string, string[]> KnownForwardingMappings = new()
     {
+        // Core runtime - most forward to System.Private.CoreLib
+        ["System.Runtime"] = new[] { "System.Private.CoreLib" },
+        ["System.Runtime.Extensions"] = new[] { "System.Private.CoreLib" },
+        ["System.IO"] = new[] { "System.Private.CoreLib" },
+        ["System.IO.FileSystem"] = new[] { "System.Private.CoreLib" },
+        ["System.Reflection"] = new[] { "System.Private.CoreLib" },
+        ["System.Text.Encoding"] = new[] { "System.Private.CoreLib" },
+        ["System.Threading.Tasks"] = new[] { "System.Private.CoreLib" },
+
+        // Networking
+        ["System.Net"] = new[] { "System.Net.Primitives" },
+
+        // Data
+        ["System.Data"] = new[] { "System.Data.Common" },
+
+        // Numerics
+        ["System.Numerics"] = new[] { "System.Private.CoreLib" },
+        ["System.Numerics.Vectors"] = new[] { "System.Private.CoreLib", "System.Numerics.Vectors" },
+
         // XML assemblies all forward to System.Private.Xml
         ["System.Xml"] = new[] { "System.Private.Xml" },
         ["System.Xml.ReaderWriter"] = new[] { "System.Private.Xml" },
@@ -25,12 +44,6 @@ public class TypeForwardingResolver
         ["System.Xml.Linq"] = new[] { "System.Private.Xml.Linq" },
         ["System.Xml.Serialization"] = new[] { "System.Private.Xml" },
 
-        // Numerics
-        ["System.Numerics.Vectors"] = new[] { "System.Private.CoreLib", "System.Numerics.Vectors" },
-
-        // Runtime extensions
-        ["System.Runtime.Extensions"] = new[] { "System.Private.CoreLib" },
-
         // Security
         ["System.Security.Cryptography"] = new[] { "System.Security.Cryptography" },
         ["System.Security.Principal"] = new[] { "System.Private.CoreLib" },
@@ -41,6 +54,30 @@ public class TypeForwardingResolver
         // Transactions
         ["System.Transactions"] = new[] { "System.Transactions.Local" },
     };
+
+    /// <summary>
+    /// Core assemblies that are typically generated separately and should not be duplicated
+    /// by generating their forwarders.
+    /// </summary>
+    private static readonly HashSet<string> CoreAssemblies = new()
+    {
+        "System.Private.CoreLib",
+        "System.Private.Xml",
+        "System.Private.Xml.Linq",
+        "System.Private.Uri",
+        "System.Data.Common",
+        "System.Drawing.Common",
+        "System.Net.Primitives",
+    };
+
+    /// <summary>
+    /// Determines if a type-forwarding assembly should be skipped because its target
+    /// is a core assembly that will be generated separately.
+    /// </summary>
+    public static bool ShouldSkipForwarder(string targetAssemblyName)
+    {
+        return CoreAssemblies.Contains(targetAssemblyName);
+    }
 
     /// <summary>
     /// Checks if an assembly is primarily a type-forwarding assembly (no or very few types).

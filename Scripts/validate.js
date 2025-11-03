@@ -36,6 +36,8 @@ const RUNTIME_ONLY_ASSEMBLIES = [
 const BCL_ASSEMBLIES = [
     // Core runtime
     // NOTE: System.Private.CoreLib is now generated using MetadataLoadContext
+    // NOTE: Type-forwarding assemblies (System.Runtime, System.IO, etc.) are included here
+    //       but will be automatically skipped by Program.cs if they forward to core assemblies
     'System.Private.CoreLib',
     'System.Runtime',
     'System.Runtime.Extensions',
@@ -192,6 +194,31 @@ function generateTypes() {
 
 // NOTE: No longer copying hand-written core types - System.Private.CoreLib is now generated
 
+function createIntrinsicsFile() {
+    log('Creating _intrinsics.d.ts with branded numeric types...');
+
+    const intrinsicsContent = `// Intrinsic type definitions for .NET numeric types
+// This file provides branded numeric type aliases used across all BCL declarations.
+
+type int = number & { __brand: "int" };
+type uint = number & { __brand: "uint" };
+type byte = number & { __brand: "byte" };
+type sbyte = number & { __brand: "sbyte" };
+type short = number & { __brand: "short" };
+type ushort = number & { __brand: "ushort" };
+type long = number & { __brand: "long" };
+type ulong = number & { __brand: "ulong" };
+type float = number & { __brand: "float" };
+type double = number & { __brand: "double" };
+type decimal = number & { __brand: "decimal" };
+
+export {};  // Make this a module
+`;
+
+    fs.writeFileSync(path.join(TYPES_DIR, '_intrinsics.d.ts'), intrinsicsContent);
+    log('Created _intrinsics.d.ts');
+}
+
 function createIndexFile() {
     log('Creating index.d.ts with triple-slash references...');
 
@@ -303,7 +330,7 @@ function validateMetadataFiles() {
     log('Validating metadata files...');
 
     const files = fs.readdirSync(TYPES_DIR);
-    const dtsFiles = files.filter(f => f.endsWith('.d.ts') && f !== 'index.d.ts');
+    const dtsFiles = files.filter(f => f.endsWith('.d.ts') && f !== 'index.d.ts' && f !== '_intrinsics.d.ts');
     const metadataFiles = files.filter(f => f.endsWith('.metadata.json'));
 
     log(`  .d.ts files: ${dtsFiles.length}`);
@@ -340,6 +367,9 @@ async function main() {
 
         // Step 2: Generate all types
         generateTypes();
+
+        // Step 2.5: Create intrinsics file with branded types
+        createIntrinsicsFile();
 
         // Step 3: Create index file
         createIndexFile();

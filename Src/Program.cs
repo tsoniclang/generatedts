@@ -118,8 +118,16 @@ public static class Program
                         Console.WriteLine($"    - {targetName}");
                     }
 
-                    // Try to load the first (typically primary) target assembly
+                    // Check if this forwards to a core assembly that should be generated separately
+                    // Skip generation to avoid duplicates
                     var primaryTarget = forwardedAssemblies[0];
+                    if (TypeForwardingResolver.ShouldSkipForwarder(primaryTarget))
+                    {
+                        Console.WriteLine($"  Skipping generation: types will be included in {primaryTarget}");
+                        return;
+                    }
+
+                    // Try to load the target assembly and generate from it instead
                     var targetAssembly = TypeForwardingResolver.TryLoadTargetAssembly(primaryTarget, assemblyPath);
 
                     if (targetAssembly != null)
