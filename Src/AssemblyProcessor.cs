@@ -358,6 +358,7 @@ public sealed class AssemblyProcessor
         {
             "System.IConvertible",                              // Primitive type conversions
             "System.Runtime.Serialization.ISerializable",       // Serialization internals
+            "System.Runtime.Serialization.IDeserializationCallback",  // Deserialization callback
             "System.Runtime.CompilerServices.ITuple"            // Tuple implementation details
         };
 
@@ -462,7 +463,7 @@ public sealed class AssemblyProcessor
                 {
                     var fullName = i.FullName ?? "";
                     if (fullName == "System.Collections.IEnumerator" ||
-                        fullName == "System.Collections.Generic.IEnumerator`1" ||
+                        fullName.StartsWith("System.Collections.Generic.IEnumerator`1") ||
                         fullName == "System.IDisposable")
                     {
                         return false;
