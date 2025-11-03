@@ -16,8 +16,21 @@ const path = require('path');
 const os = require('os');
 
 // Configuration
-const DOTNET_PATH = process.env.DOTNET_PATH ||
-    `${os.homedir()}/dotnet/shared/Microsoft.NETCore.App/10.0.0-rc.1.25451.107`;
+const DOTNET_VERSION = '10.0.0-rc.1.25451.107';
+const DOTNET_HOME = os.homedir() + '/dotnet';
+
+// Prefer ref-pack for most assemblies (better type definitions, no type-forwarding)
+const DOTNET_REF_PATH = process.env.DOTNET_REF_PATH ||
+    `${DOTNET_HOME}/packs/Microsoft.NETCore.App.Ref/${DOTNET_VERSION}/ref/net10.0`;
+
+// Runtime path needed for System.Private.CoreLib (can't load from ref-pack with MetadataLoadContext)
+const DOTNET_RUNTIME_PATH = process.env.DOTNET_RUNTIME_PATH ||
+    `${DOTNET_HOME}/shared/Microsoft.NETCore.App/${DOTNET_VERSION}`;
+
+// Assemblies that MUST use runtime path (not ref-pack)
+const RUNTIME_ONLY_ASSEMBLIES = [
+    'System.Private.CoreLib'  // Requires MetadataLoadContext, doesn't work from ref-pack
+];
 
 const BCL_ASSEMBLIES = [
     // Core runtime
@@ -126,7 +139,10 @@ function generateTypes() {
     let failCount = 0;
 
     for (const assembly of BCL_ASSEMBLIES) {
-        const dllPath = path.join(DOTNET_PATH, `${assembly}.dll`);
+        // Choose path: runtime-only assemblies use RUNTIME_PATH, others use REF_PATH
+        const useRuntimePath = RUNTIME_ONLY_ASSEMBLIES.includes(assembly);
+        const basePath = useRuntimePath ? DOTNET_RUNTIME_PATH : DOTNET_REF_PATH;
+        const dllPath = path.join(basePath, `${assembly}.dll`);
 
         if (!fs.existsSync(dllPath)) {
             error(`Assembly not found: ${dllPath}`);
@@ -342,6 +358,29 @@ async function main() {
         console.log('');
         console.log(`  Output directory: ${VALIDATION_DIR}`);
         console.log('');
+
+        // Write machine-readable stats
+        const stats = {
+            timestamp: new Date().toISOString(),
+            status: 'passed',
+            assemblies: {
+                total: BCL_ASSEMBLIES.length,
+                succeeded: BCL_ASSEMBLIES.length,
+                failed: 0
+            },
+            errors: {
+                syntax: result.syntaxErrors,
+                duplicate: result.duplicateTypeErrors,
+                semantic: result.semanticErrors,
+                total: result.totalErrors
+            },
+            outputDir: VALIDATION_DIR
+        };
+
+        const statsPath = path.join(__dirname, '..', '.analysis', 'validation-stats.json');
+        fs.mkdirSync(path.dirname(statsPath), { recursive: true });
+        fs.writeFileSync(statsPath, JSON.stringify(stats, null, 2));
+        log(`Machine-readable stats: ${statsPath}`);
 
         process.exit(0);
     } catch (err) {

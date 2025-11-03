@@ -102,6 +102,44 @@ public static class Program
                 assembly = Assembly.LoadFrom(Path.GetFullPath(assemblyPath));
             }
 
+            // Check if this is a type-forwarding assembly
+            if (TypeForwardingResolver.IsTypeForwardingAssembly(assembly))
+            {
+                Console.WriteLine("  Detected type-forwarding assembly");
+
+                // Get forwarded assemblies
+                var forwardedAssemblies = TypeForwardingResolver.GetForwardedAssemblies(assembly);
+
+                if (forwardedAssemblies.Count > 0)
+                {
+                    Console.WriteLine($"  Types forwarded to {forwardedAssemblies.Count} target assembly(ies):");
+                    foreach (var targetName in forwardedAssemblies)
+                    {
+                        Console.WriteLine($"    - {targetName}");
+                    }
+
+                    // Try to load the first (typically primary) target assembly
+                    var primaryTarget = forwardedAssemblies[0];
+                    var targetAssembly = TypeForwardingResolver.TryLoadTargetAssembly(primaryTarget, assemblyPath);
+
+                    if (targetAssembly != null)
+                    {
+                        Console.WriteLine($"  Using target assembly: {targetAssembly.GetName().Name}");
+                        assembly = targetAssembly;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"  Warning: Could not load target assembly '{primaryTarget}'");
+                        Console.WriteLine($"  Continuing with forwarding assembly (will generate minimal types)");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("  Warning: No forwarding targets found");
+                    Console.WriteLine("  Continuing with forwarding assembly (will generate minimal types)");
+                }
+            }
+
             try
             {
                 // Process assembly
