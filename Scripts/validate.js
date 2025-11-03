@@ -24,12 +24,16 @@ const BCL_ASSEMBLIES = [
     // NOTE: System.Private.CoreLib is now generated using MetadataLoadContext
     'System.Private.CoreLib',
     'System.Runtime',
+    'System.Runtime.Extensions',
+    'System.Runtime.InteropServices',
     'System.Console',
     'System.ComponentModel',
     'System.ComponentModel.Primitives',
     'System.ComponentModel.TypeConverter',
+    'System.ObjectModel',
     'System.Reflection',
     'System.Memory',
+    'System.Numerics.Vectors',
 
     // Core collections
     'System.Collections',
@@ -85,10 +89,14 @@ const BCL_ASSEMBLIES = [
     // Security
     'System.Security.Cryptography',
     'System.Security.Claims',
+    'System.Security.Principal',
 
     // Diagnostics
     'System.Diagnostics.Process',
-    'System.Diagnostics.DiagnosticSource'
+    'System.Diagnostics.DiagnosticSource',
+
+    // Drawing (primitives only - no UI dependencies)
+    'System.Drawing.Primitives'
 ];
 
 const VALIDATION_DIR = path.join(os.tmpdir(), 'generatedts-validation');
