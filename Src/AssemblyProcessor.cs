@@ -254,7 +254,9 @@ public sealed class AssemblyProcessor
         var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
             .Where(ShouldIncludeMember)
             .Where(m => !m.IsSpecialName)
+            .Where(m => !m.Name.Contains('.')) // Skip explicit interface implementations early
             .Select(m => ProcessMethod(m, type))
+            .OfType<TypeInfo.MethodInfo>() // Filter nulls and cast to non-nullable
             .ToList();
 
         var extends = type.GetInterfaces()
@@ -294,7 +296,9 @@ public sealed class AssemblyProcessor
         var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)
             .Where(ShouldIncludeMember)
             .Where(m => !m.IsSpecialName)
+            .Where(m => !m.Name.Contains('.')) // Skip explicit interface implementations early
             .Select(m => ProcessMethod(m, type))
+            .OfType<TypeInfo.MethodInfo>() // Filter nulls and cast to non-nullable
             .ToList();
 
         var genericParams = type.IsGenericType
@@ -325,7 +329,9 @@ public sealed class AssemblyProcessor
         var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
             .Where(ShouldIncludeMember)
             .Where(m => !m.IsSpecialName)
+            .Where(m => !m.Name.Contains('.')) // Skip explicit interface implementations early
             .Select(m => ProcessMethod(m, type))
+            .OfType<TypeInfo.MethodInfo>() // Filter nulls and cast to non-nullable
             .ToList();
 
         // Add public wrappers for explicit interface implementations
@@ -357,7 +363,11 @@ public sealed class AssemblyProcessor
                 // Check if we already have this method (from public implementation)
                 if (!methods.Any(m => m.Name == interfaceMethod.Name))
                 {
-                    methods.Add(ProcessMethod(interfaceMethod, type));
+                    var processedMethod = ProcessMethod(interfaceMethod, type);
+                    if (processedMethod != null)
+                    {
+                        methods.Add(processedMethod);
+                    }
                 }
             }
         }
@@ -495,8 +505,18 @@ public sealed class AssemblyProcessor
         return false;
     }
 
-    private TypeInfo.MethodInfo ProcessMethod(System.Reflection.MethodInfo method, Type declaringType)
+    private TypeInfo.MethodInfo? ProcessMethod(System.Reflection.MethodInfo method, Type declaringType)
     {
+        // Skip explicit interface implementations (TS1434, TS1068)
+        // C# explicit interface implementations have dots in their method names
+        // Example: "System.IUtf8SpanFormattable.TryFormat" - invalid TypeScript syntax
+        if (method.Name.Contains('.'))
+        {
+            _typeMapper.AddWarning($"Skipped explicit interface implementation {declaringType.Name}.{method.Name} - " +
+                $"method name contains dot (TS1434: Unexpected keyword or identifier)");
+            return null; // Will be filtered out
+        }
+
         // Track return type dependency
         TrackTypeDependency(method.ReturnType);
 
@@ -778,7 +798,8 @@ public sealed class AssemblyProcessor
         // Process methods (skip special methods like property getters/setters)
         var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
             .Where(ShouldIncludeMember)
-            .Where(m => !m.IsSpecialName);
+            .Where(m => !m.IsSpecialName)
+            .Where(m => !m.Name.Contains('.')); // Skip explicit interface implementations
 
         foreach (var method in methods)
         {
@@ -944,6 +965,12 @@ public sealed class AssemblyProcessor
 
                         // Skip property getters/setters - they can't have overloads in TypeScript
                         if (interfaceMethod.IsSpecialName)
+                        {
+                            continue;
+                        }
+
+                        // Skip explicit interface implementations (method name contains dot)
+                        if (interfaceMethod.Name.Contains('.'))
                         {
                             continue;
                         }

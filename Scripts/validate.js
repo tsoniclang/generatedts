@@ -30,7 +30,8 @@ const DOTNET_RUNTIME_PATH = process.env.DOTNET_RUNTIME_PATH ||
 // Assemblies that MUST use runtime path (not ref-pack)
 const RUNTIME_ONLY_ASSEMBLIES = [
     'System.Private.CoreLib',  // Requires MetadataLoadContext, doesn't work from ref-pack
-    'System.Private.Uri'       // Private implementation assembly, not in ref-pack
+    'System.Private.Uri',      // Private implementation assembly, not in ref-pack
+    'System.Private.Xml'       // Private implementation assembly, not in ref-pack
 ];
 
 const BCL_ASSEMBLIES = [
@@ -56,6 +57,7 @@ const BCL_ASSEMBLIES = [
     'System.Collections.Concurrent',
     'System.Collections.Immutable',
     'System.Collections.Specialized',
+    'System.Collections.NonGeneric',
 
     // LINQ and queries
     'System.Linq',
@@ -101,11 +103,15 @@ const BCL_ASSEMBLIES = [
     'System.Xml.Linq',
     'System.Xml.Serialization',
     'System.Xml.XPath',
+    'System.Private.Xml',
 
     // Security
     'System.Security.Cryptography',
     'System.Security.Claims',
     'System.Security.Principal',
+
+    // Resources
+    'System.Resources.Writer',
 
     // Diagnostics
     'System.Diagnostics.Process',
@@ -124,6 +130,7 @@ const BCL_ASSEMBLIES = [
 
     // Numerics
     'System.Numerics',
+    'System.Runtime.Numerics',
 
     // Formats
     'System.Formats.Asn1',
