@@ -1416,10 +1416,14 @@ public sealed class AssemblyProcessor
     }
 
     /// <summary>
-    /// Phase 4: Check if a property is redundantly redeclaring a base class property.
-    /// If base class already has this exact property (same name, same mapped type), skip it.
+    /// Phase 4: Check if a property is redundantly redeclared with same TypeScript type.
     ///
-    /// General rule: Only re-emit properties when types differ (true covariance).
+    /// General rule: Walk entire inheritance chain up to System.Object.
+    /// If ANY ancestor has a property with same name and same mapped TypeScript type, skip re-emitting.
+    ///
+    /// Handles edge cases like:
+    /// - DataAdapter.TableMappings : ITableMappingCollection
+    /// - DbDataAdapter.TableMappings : DataTableMappingCollection (both map to same TS type)
     /// </summary>
     private bool IsRedundantPropertyRedeclaration(System.Reflection.PropertyInfo prop)
     {
@@ -1427,38 +1431,46 @@ public sealed class AssemblyProcessor
         if (declaringType == null)
             return false;
 
-        var baseType = declaringType.BaseType;
-        if (baseType == null ||
-            baseType.FullName == "System.Object" ||
-            baseType.FullName == "System.ValueType" ||
-            baseType.FullName == "System.MarshalByRefObject")
-        {
-            return false; // No base to check
-        }
-
         try
         {
-            // Look for property with same name in base class
-            var baseProperty = baseType.GetProperty(prop.Name, BindingFlags.Public | BindingFlags.Instance);
-            if (baseProperty == null)
-                return false; // Not in base class
-
-            // Map both types to TypeScript
+            // Map derived property type to TypeScript
             var derivedMapped = _typeMapper.MapType(prop.PropertyType);
-            var baseMapped = _typeMapper.MapType(baseProperty.PropertyType);
 
-            // If types match exactly, this is a redundant redeclaration
-            if (derivedMapped == baseMapped)
+            // Walk entire inheritance chain
+            var currentBase = declaringType.BaseType;
+            while (currentBase != null &&
+                   currentBase.FullName != "System.Object" &&
+                   currentBase.FullName != "System.ValueType" &&
+                   currentBase.FullName != "System.MarshalByRefObject")
             {
-                return true; // Skip - TypeScript will inherit from base
+                // Look for property with same name in this ancestor
+                var ancestorProperty = currentBase.GetProperty(prop.Name, BindingFlags.Public | BindingFlags.Instance);
+                if (ancestorProperty != null)
+                {
+                    // Map ancestor property type to TypeScript
+                    var ancestorMapped = _typeMapper.MapType(ancestorProperty.PropertyType);
+
+                    // If mapped types match exactly, this is redundant
+                    if (derivedMapped == ancestorMapped)
+                    {
+                        return true; // Skip - TypeScript will inherit from ancestor
+                    }
+
+                    // Found property with different mapped type - this is true covariance
+                    // Don't skip, but also don't check further ancestors
+                    return false;
+                }
+
+                // Move up the inheritance chain
+                currentBase = currentBase.BaseType;
             }
 
-            // Types differ - this is true covariance, keep it (will be handled by Covariant wrapper)
+            // No matching property found in any ancestor
             return false;
         }
         catch
         {
-            // Base class may not be accessible in MetadataLoadContext
+            // Ancestor class may not be accessible in MetadataLoadContext
             return false; // Keep the property to be safe
         }
     }
