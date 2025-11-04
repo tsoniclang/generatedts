@@ -288,7 +288,7 @@ Always test locally before committing:
 dotnet run -- path/to/assembly.dll --out-dir .tests/test-run
 
 # Full BCL validation
-node Scripts/validate.js
+node scripts/validate.js
 
 # Check specific error types
 cd .tests/test-run && npx tsc --noEmit 2>&1 | grep TS2300

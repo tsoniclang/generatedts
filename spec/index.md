@@ -14,7 +14,7 @@ implement it, and the observable output.
 | [emit.md](emit.md) | How declaration text is produced from the analysed model |
 | [metadata.md](metadata.md) | Metadata JSON generation used by the Tsonic emitter |
 | [bindings-consumer.md](bindings-consumer.md) | How the runtime should consume `<Assembly>.bindings.json` |
-| [modules.md](modules.md) | One‑line responsibilities for every `.cs` file in `Src/` |
+| [modules.md](modules.md) | One‑line responsibilities for every `.cs` file in `src/generatedts/` |
 | [validation.md](validation.md) | Validation/CI expectations |
 
 The documents are deliberately terse and cite the exact functions and files

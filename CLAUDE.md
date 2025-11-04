@@ -81,7 +81,7 @@ Git reset can cause data loss and confusion. Always move forward with new commit
 
 ### WORKING DIRECTORIES
 
-**IMPORTANT**: Never create temporary files in the project root or Src/ directories. Use dedicated gitignored directories for different purposes.
+**IMPORTANT**: Never create temporary files in the project root or src/ directories. Use dedicated gitignored directories for different purposes.
 
 #### .tests/ Directory (Test Output Capture)
 
@@ -93,7 +93,7 @@ Git reset can cause data loss and confusion. Always move forward with new commit
 mkdir -p .tests
 
 # Run validation with tee - shows output AND saves to file
-node Scripts/validate.js | tee .tests/validation-$(date +%s).txt
+node scripts/validate.js | tee .tests/validation-$(date +%s).txt
 
 # Run TypeScript compiler directly with tee
 npx tsc --project .tests/validation | tee .tests/tsc-$(date +%s).txt
@@ -147,7 +147,7 @@ When you begin working on this project, you MUST:
 
 1. **Read this entire CLAUDE.md file** to understand the project conventions
 2. **Read STATUS.md** for current project state and metrics
-3. **Read coding-standards.md** for C# style guidelines
+3. **Read CODING-STANDARDS.md** for C# style guidelines
 4. **Review recent .analysis/ reports** to understand recent work
 5. **Check git status** to see uncommitted work
 
@@ -191,7 +191,7 @@ Every .NET assembly generates two companion files:
 ### Code Organization
 
 ```
-Src/generatedts/                 # C# implementation
+src/generatedts/                 # C# implementation
 ├── Program.cs                    # CLI entry point
 ├── AssemblyProcessor.cs          # Reflection and type extraction
 ├── TypeMapper.cs                 # C# → TypeScript type mapping
@@ -199,7 +199,7 @@ Src/generatedts/                 # C# implementation
 ├── MetadataAssemblyLoader.cs     # MetadataLoadContext handling
 └── TypeInfo.cs                   # Data structures
 
-Scripts/
+scripts/
 └── validate.js                   # Full BCL validation script
 
 .analysis/                        # Generated analysis reports
@@ -327,10 +327,10 @@ class List_1<T> {
 
 ```bash
 # Full validation (2-3 minutes)
-node Scripts/validate.js
+node scripts/validate.js
 
 # With output capture for later analysis
-node Scripts/validate.js | tee .tests/validation-$(date +%s).txt
+node scripts/validate.js | tee .tests/validation-$(date +%s).txt
 ```
 
 ### Validation Steps
@@ -362,14 +362,14 @@ TS6200 - Duplicate type aliases (expected for branded types)
 ### Generating Declarations for an Assembly
 
 ```bash
-dotnet run --project Src/generatedts.csproj -- \
+dotnet run --project src/generatedts/generatedts.csproj -- \
   /path/to/Assembly.dll \
   --out-dir output/
 ```
 
 ### Adding a New BCL Assembly to Validation
 
-1. Edit `Scripts/validate.js`
+1. Edit `scripts/validate.js`
 2. Add assembly name to `BCL_ASSEMBLIES` array
 3. Run validation to verify generation
 4. Update STATUS.md with new assembly count
@@ -385,7 +385,7 @@ dotnet run --project Src/generatedts.csproj -- \
 
 ```bash
 # Run validation with capture
-node Scripts/validate.js 2>&1 | tee .tests/run.txt
+node scripts/validate.js 2>&1 | tee .tests/run.txt
 
 # Count errors by type
 grep "error TS" .tests/run.txt | sed 's/.*error \(TS[0-9]*\).*/\1/' | sort | uniq -c | sort -rn
@@ -401,16 +401,16 @@ grep "System.Collections.Generic.d.ts" .tests/run.txt
 
 ```bash
 # Build project
-dotnet build Src/generatedts.csproj
+dotnet build src/generatedts/generatedts.csproj
 
 # Run tool
-dotnet run --project Src/generatedts.csproj -- <args>
+dotnet run --project src/generatedts/generatedts.csproj -- <args>
 
 # Validate all BCL assemblies
-node Scripts/validate.js
+node scripts/validate.js
 
 # Capture validation output
-node Scripts/validate.js | tee .tests/validation-$(date +%s).txt
+node scripts/validate.js | tee .tests/validation-$(date +%s).txt
 ```
 
 ## Git Workflow
@@ -509,10 +509,10 @@ If you encounter issues:
 ## Key Files to Reference
 
 - **STATUS.md** - Current project state and metrics
-- **coding-standards.md** - C# style guidelines
+- **CODING-STANDARDS.md** - C# style guidelines
 - **.analysis/remaining-errors-comprehensive.md** - Complete error catalog
 - **.analysis/session-status-report-*.md** - Recent session work
-- **Scripts/validate.js** - BCL assembly validation script
+- **scripts/validate.js** - BCL assembly validation script
 
 ## Remember
 

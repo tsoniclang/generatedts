@@ -11,11 +11,11 @@ submitting changes.
 
 ## Full validation script
 
-`node Scripts/validate.js` performs an end-to-end sanity check:
+`node scripts/validate.js` performs an end-to-end sanity check:
 
 1. Recreates `/.tests/validation/` (clean slate).
 2. Generates declarations + metadata for the configured BCL assembly list (see
-   `Scripts/validate.js` for the exact set).
+   `scripts/validate.js` for the exact set).
 3. Writes `index.d.ts` with triple-slash references to every generated file.
 4. Emits a `tsconfig.json` targeting ES2020 with `strict` settings and no emit.
 5. Invokes `tsc --project` on the validation directory.
@@ -34,7 +34,7 @@ fails, ensuring CI catches regressions.
 ## Manual checklist for new contributions
 
 1. `dotnet test`
-2. `node Scripts/validate.js` (outside sandbox, so the script can write to
+2. `node scripts/validate.js` (outside sandbox, so the script can write to
    `.tests/validation/`)
 3. Inspect diff for `.d.ts`/`.metadata.json` to confirm expected transform.
 4. Update documentation under `spec/` when adding new rules.
