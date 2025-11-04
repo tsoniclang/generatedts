@@ -61,14 +61,18 @@ public static class InterfaceEmitter
 
         // Normal case: no diamond, proceed with standard interface generation
         var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .Cast<MemberInfo>()
             .Where(shouldIncludeMember)
+            .Cast<System.Reflection.PropertyInfo>()
             .Select(processProperty)
             .Where(p => p != null)
             .ToList();
 
         var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .Cast<MemberInfo>()
             .Where(shouldIncludeMember)
-            .Where(m => !m.IsSpecialName)
+            .Cast<System.Reflection.MethodInfo>()
+            .Where(m => m.IsSpecialName == false)
             .Where(m => !m.Name.Contains('.'))
             .Select(m => processMethod(m, type))
             .OfType<TypeInfo.MethodInfo>()
