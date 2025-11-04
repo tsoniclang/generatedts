@@ -465,28 +465,34 @@ public sealed class AssemblyProcessor
             .Where(i => !HasAnyExplicitImplementation(type, i)) // Skip explicitly implemented interfaces
             .Select(i =>
             {
-                // Check if this interface has a diamond pattern
+                var mapped = _typeMapper.MapType(i);
+
+                // Check if this interface has a diamond pattern AND is an actual interface declaration
+                // (not a built-in type like ReadonlyArray)
+                // General rule: Built-in types won't have namespace separators or underscores in the mapped name
+                // Examples: ReadonlyArray<T>, Promise<T> vs System.IComparable, System_Private_CoreLib.System.Collections.IEnumerable
                 if (i.IsInterface && HasDiamondInheritance(i, out _))
                 {
-                    // Use _Base variant for diamond interfaces
-                    var mapped = _typeMapper.MapType(i);
-                    var typeName = GetTypeName(i);
+                    // Check if this maps to a generated interface (has namespace/module prefix)
+                    // by checking for the presence of '.' or '_' before any '<'
+                    var genericStart = mapped.IndexOf('<');
+                    var checkPart = genericStart > 0 ? mapped.Substring(0, genericStart) : mapped;
 
-                    // Replace the interface name with _Base variant
-                    // Handle generic types: IFoo_1<T> -> IFoo_1_Base<T>
-                    if (i.IsGenericType)
+                    // If it contains '.' or '_', it's a module-qualified type that we generated
+                    // Otherwise it's a built-in like ReadonlyArray
+                    if (checkPart.Contains('.') || checkPart.Contains('_'))
                     {
-                        var genericArgs = mapped.Substring(mapped.IndexOf('<'));
-                        return typeName + "_Base" + genericArgs;
-                    }
-                    else
-                    {
-                        return typeName + "_Base";
+                        // Use _Base variant for diamond interfaces
+                        // Insert "_Base" before generic parameters or at end
+                        if (i.IsGenericType && genericStart > 0)
+                        {
+                            return mapped.Substring(0, genericStart) + "_Base" + mapped.Substring(genericStart);
+                        }
+                        return mapped + "_Base";
                     }
                 }
-                return _typeMapper.MapType(i);
+                return mapped;
             })
-            .Where(mapped => !mapped.StartsWith("ReadonlyArray<")) // Skip interfaces that map to ReadonlyArray<T>
             .Distinct() // Remove duplicates
             .ToList();
 
