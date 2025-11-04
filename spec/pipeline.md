@@ -2,7 +2,7 @@
 
 This document describes the end–to–end flow that produces `.d.ts`,
 `.metadata.json`, and `.dependencies.json` files for a single assembly.  The
-primary entry point is the CLI executable defined in `Src/Cli/Program.cs`.
+primary entry point is the CLI executable defined in `src/generatedts/Cli/Program.cs`.
 
 ## 1. CLI invocation
 

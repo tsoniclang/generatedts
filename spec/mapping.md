@@ -1,6 +1,6 @@
 # CLR → TypeScript Mapping Rules
 
-`Src/Mapping/` contains the pure mapping functions used by
+`src/generatedts/Mapping/` contains the pure mapping functions used by
 `TypeMapper.MapType`.  Each function is designed to be composable and to emit a
 string representation while recording dependencies through
 `Analysis/DependencyHelpers.TrackTypeDependency`.

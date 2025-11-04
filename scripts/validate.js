@@ -166,7 +166,7 @@ function cleanValidationDir() {
 function generateTypes() {
     log(`Generating types for ${BCL_ASSEMBLIES.length} assemblies...`);
 
-    const projectPath = path.join(__dirname, '..', 'Src', 'generatedts.csproj');
+    const projectPath = path.join(__dirname, '..', 'src', 'generatedts', 'generatedts.csproj');
     let successCount = 0;
     let failCount = 0;
 
