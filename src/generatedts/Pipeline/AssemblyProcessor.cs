@@ -41,7 +41,12 @@ public sealed class AssemblyProcessor
         // Phase 1: Clear intersection aliases for this assembly
         _intersectionAliases.Clear();
 
-        var types = assembly.GetExportedTypes()
+        // Get both exported types (assembly's own types) and forwarded types
+        var exportedTypes = assembly.GetExportedTypes();
+        var forwardedTypes = assembly.GetForwardedTypes();
+        var allTypes = exportedTypes.Concat(forwardedTypes).Distinct();
+
+        var types = allTypes
             .Where(ShouldIncludeType)
             .OrderBy(t => t.Namespace)
             .ThenBy(t => t.Name)
@@ -209,7 +214,12 @@ public sealed class AssemblyProcessor
     /// </summary>
     public AssemblyMetadata ProcessAssemblyMetadata(Assembly assembly)
     {
-        var types = assembly.GetExportedTypes()
+        // Get both exported types (assembly's own types) and forwarded types
+        var exportedTypes = assembly.GetExportedTypes();
+        var forwardedTypes = assembly.GetForwardedTypes();
+        var allTypes = exportedTypes.Concat(forwardedTypes).Distinct();
+
+        var types = allTypes
             .Where(ShouldIncludeType)
             .OrderBy(t => t.Namespace)
             .ThenBy(t => t.Name)
