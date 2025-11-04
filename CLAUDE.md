@@ -41,6 +41,31 @@ This applies to ANY question, even if it seems like part of a larger task or dis
 
 Automated scripts break syntax in unpredictable ways and destroy codebases.
 
+### ALWAYS USE WRITE TOOL FOR FILE CREATION
+
+**🚨 CRITICAL RULE: Use the Write tool, NOT cat/heredocs for creating files. 🚨**
+
+- **ALWAYS** use the `Write` tool to create new files
+- **NEVER** use `cat > file << 'EOF'` or `cat << 'EOF' | tee file`
+- **NEVER** use bash heredocs for file creation
+- The Write tool is cleaner, safer, and designed for this purpose
+
+**Bad Example:**
+```bash
+cat > .analysis/report.md << 'EOF'
+# Report content here
+EOF
+```
+
+**Good Example:**
+```
+Use Write tool with:
+- file_path: "/absolute/path/to/.analysis/report.md"
+- content: "# Report content here"
+```
+
+**Exception:** Using `tee` to capture command output while also saving to file is acceptable (see .tests/ directory usage).
+
 ### NEVER USE GIT RESET
 
 **🚨 CRITICAL RULE: NEVER use git reset commands. 🚨**

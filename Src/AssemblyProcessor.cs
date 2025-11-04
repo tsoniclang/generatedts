@@ -409,7 +409,43 @@ public sealed class AssemblyProcessor
                 // Check if we already have this property (from public implementation)
                 if (!properties.Any(p => p.Name == propName))
                 {
-                    properties.Add(new TypeInfo.PropertyInfo(propName, propType, true, false));
+                    // Check if base class has this property with different type - apply Covariant wrapper
+                    var currentBase = type.BaseType;
+                    string finalPropType = propType;
+
+                    while (currentBase != null &&
+                           currentBase.FullName != "System.Object" &&
+                           currentBase.FullName != "System.ValueType" &&
+                           currentBase.FullName != "System.MarshalByRefObject")
+                    {
+                        try
+                        {
+                            var baseProp = currentBase.GetProperty(propName, BindingFlags.Public | BindingFlags.Instance);
+                            if (baseProp != null)
+                            {
+                                var baseTypeName = _typeMapper.MapType(baseProp.PropertyType);
+                                if (baseTypeName != propType)
+                                {
+                                    // Base class has different type - wrap with Covariant
+                                    // Covariant<TSpecific, TContract> where TSpecific is more specific than TContract
+                                    // baseTypeName is from base class (more specific), propType is from interface (contract)
+                                    TrackTypeDependency(interfaceMethod.ReturnType);
+                                    TrackTypeDependency(baseProp.PropertyType);
+                                    finalPropType = $"Covariant<{baseTypeName}, {propType}>";
+                                }
+                                break;
+                            }
+                        }
+                        catch (System.Reflection.AmbiguousMatchException)
+                        {
+                            // Multiple properties with same name (indexers) - skip Covariant wrapper check
+                            // The property will be added with its interface type
+                            break;
+                        }
+                        currentBase = currentBase.BaseType;
+                    }
+
+                    properties.Add(new TypeInfo.PropertyInfo(propName, finalPropType, true, false));
                 }
             }
             else if (interfaceMethod.IsSpecialName && interfaceMethod.Name.StartsWith("set_"))
@@ -591,12 +627,42 @@ public sealed class AssemblyProcessor
     /// </summary>
     private string ApplyCovariantWrapperIfNeeded(System.Reflection.PropertyInfo prop, string mappedType)
     {
-        // Only apply to readonly properties (covariance is safe for readonly)
-        if (prop.CanWrite)
-            return mappedType;
-
         var declaringType = prop.DeclaringType;
         if (declaringType == null)
+            return mappedType;
+
+        // First, check base class for property hiding with "new" keyword
+        // Walk up the inheritance chain to find a base property with the same name
+        var baseType = declaringType.BaseType;
+        while (baseType != null &&
+               baseType.FullName != "System.Object" &&
+               baseType.FullName != "System.ValueType" &&
+               baseType.FullName != "System.MarshalByRefObject")
+        {
+            // Note: FlattenHierarchy only works for static members, not instance properties
+            var baseProp = baseType.GetProperty(prop.Name, BindingFlags.Public | BindingFlags.Instance);
+            if (baseProp != null)
+            {
+                // Found a base property with same name - compare mapped types
+                var baseTypeName = _typeMapper.MapType(baseProp.PropertyType);
+                var derivedTypeName = _typeMapper.MapType(prop.PropertyType);
+
+                if (baseTypeName != derivedTypeName)
+                {
+                    // Types differ - this is property hiding or covariance
+                    // Wrap with Covariant to satisfy base contract
+                    TrackTypeDependency(prop.PropertyType);
+                    TrackTypeDependency(baseProp.PropertyType);
+                    return $"Covariant<{derivedTypeName}, {baseTypeName}>";
+                }
+                // If types are identical, no need to check further - will be caught by IsRedundantPropertyRedeclaration
+                break;
+            }
+            baseType = baseType.BaseType;
+        }
+
+        // Only apply interface covariance checks to readonly properties (covariance is safe for readonly)
+        if (prop.CanWrite)
             return mappedType;
 
         // For each interface this type implements (that we kept in the .d.ts)
@@ -656,6 +722,36 @@ public sealed class AssemblyProcessor
         if (propertyType.IsArray)
         {
             return PropertyTypeReferencesTypeParams(propertyType.GetElementType()!, classTypeParams);
+        }
+
+        return false;
+    }
+
+    private bool TypeReferencesAnyTypeParam(Type type, HashSet<Type> typeParams)
+    {
+        // Check if this type IS a type parameter
+        if (type.IsGenericParameter && typeParams.Contains(type))
+        {
+            return true;
+        }
+
+        // Check if this is a generic type that uses any of the type parameters
+        if (type.IsGenericType)
+        {
+            var typeArgs = type.GetGenericArguments();
+            foreach (var arg in typeArgs)
+            {
+                if (TypeReferencesAnyTypeParam(arg, typeParams))
+                {
+                    return true;
+                }
+            }
+        }
+
+        // Check arrays
+        if (type.IsArray)
+        {
+            return TypeReferencesAnyTypeParam(type.GetElementType()!, typeParams);
         }
 
         return false;
@@ -1224,7 +1320,7 @@ public sealed class AssemblyProcessor
 
         try
         {
-            AddBaseClassOverloadsRecursive(type.BaseType, properties, methods);
+            AddBaseClassOverloadsRecursive(type, type.BaseType, properties, methods);
         }
         catch
         {
@@ -1233,9 +1329,36 @@ public sealed class AssemblyProcessor
     }
 
     /// <summary>
+    /// Enumerates static methods from a base type, including method-level generics from the generic type definition.
+    /// For constructed generic types like EqualityComparer&lt;byte&gt;, method-level generics like Create&lt;T&gt;()
+    /// are only visible on the generic type definition EqualityComparer&lt;T&gt;.
+    /// </summary>
+    private IEnumerable<System.Reflection.MethodInfo> EnumerateBaseStaticMethods(Type baseType)
+    {
+        var binding = BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly;
+
+        // Methods declared directly on this constructed type
+        foreach (var m in baseType.GetMethods(binding))
+            yield return m;
+
+        // If the type is generic, pull ONLY method-level generics from the type definition
+        // Regular static methods are already available on the constructed type
+        if (baseType.IsGenericType && !baseType.IsGenericTypeDefinition)
+        {
+            foreach (var m in baseType.GetGenericTypeDefinition().GetMethods(binding))
+            {
+                // Only include if it's a generic method (method-level generics)
+                // Skip non-generic methods as they're already on the constructed type
+                if (m.IsGenericMethod)
+                    yield return m;
+            }
+        }
+    }
+
+    /// <summary>
     /// Recursively adds base class overloads from the entire inheritance chain.
     /// </summary>
-    private void AddBaseClassOverloadsRecursive(Type baseType, List<TypeInfo.PropertyInfo> properties, List<TypeInfo.MethodInfo> methods)
+    private void AddBaseClassOverloadsRecursive(Type derivedType, Type baseType, List<TypeInfo.PropertyInfo> properties, List<TypeInfo.MethodInfo> methods)
     {
         if (baseType == null
             || baseType.FullName == "System.Object"
@@ -1297,6 +1420,79 @@ public sealed class AssemblyProcessor
                 }
             }
 
+            // Process base class static methods (for TS2417 static member conflicts)
+            // Need to check both the constructed type AND the generic type definition
+            // because method-level generics like Create<T>() live on the type definition
+            var baseStaticMethods = EnumerateBaseStaticMethods(baseType)
+                .Where(ShouldIncludeMember)
+                .Where(m => !m.IsSpecialName)
+                .Where(m => !m.Name.Contains('.')); // Skip explicit interface implementations
+
+            foreach (var baseStaticMethod in baseStaticMethods)
+            {
+                try
+                {
+                    // Track dependency for base static method return type and parameters
+                    TrackTypeDependency(baseStaticMethod.ReturnType);
+                    foreach (var param in baseStaticMethod.GetParameters())
+                    {
+                        TrackTypeDependency(param.ParameterType);
+                    }
+
+                    // TS2302: Skip if base static method uses DERIVED class type parameters
+                    // TypeScript doesn't allow static members to reference class type parameters
+                    // Check at reflection level before mapping
+                    if (derivedType.IsGenericType)
+                    {
+                        var derivedTypeParams = derivedType.GetGenericArguments().ToHashSet();
+
+                        // Check if return type references any derived class type parameter
+                        if (TypeReferencesAnyTypeParam(baseStaticMethod.ReturnType, derivedTypeParams))
+                        {
+                            continue; // Skip - would cause TS2302
+                        }
+
+                        // Check if any parameter type references derived class type parameters
+                        if (baseStaticMethod.GetParameters().Any(p => TypeReferencesAnyTypeParam(p.ParameterType, derivedTypeParams)))
+                        {
+                            continue; // Skip - would cause TS2302
+                        }
+                    }
+
+                    var baseReturnType = _typeMapper.MapType(baseStaticMethod.ReturnType);
+                    var baseParams = baseStaticMethod.GetParameters()
+                        .Select(ProcessParameter)
+                        .ToList();
+
+                    // Check if we already have this exact static method signature
+                    var hasExactMatch = methods.Any(m =>
+                        m.Name == baseStaticMethod.Name &&
+                        m.IsStatic &&
+                        m.ReturnType == baseReturnType &&
+                        ParameterListsMatch(m.Parameters, baseParams));
+
+                    if (!hasExactMatch)
+                    {
+                        // Add base class-compatible static method signature
+                        var genericParams = baseStaticMethod.IsGenericMethod
+                            ? baseStaticMethod.GetGenericArguments().Select(t => t.Name).ToList()
+                            : new List<string>();
+
+                        methods.Add(new TypeInfo.MethodInfo(
+                            baseStaticMethod.Name,
+                            baseReturnType,
+                            baseParams,
+                            true, // Static method
+                            baseStaticMethod.IsGenericMethod,
+                            genericParams));
+                    }
+                }
+                catch
+                {
+                    // Skip methods that can't be processed
+                }
+            }
+
             // Process base class properties (for covariant property return types)
             var baseProperties = baseType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
                 .Where(ShouldIncludeMember);
@@ -1338,7 +1534,7 @@ public sealed class AssemblyProcessor
             // Recurse up the inheritance chain
             if (baseType.BaseType != null)
             {
-                AddBaseClassOverloadsRecursive(baseType.BaseType, properties, methods);
+                AddBaseClassOverloadsRecursive(derivedType, baseType.BaseType, properties, methods);
             }
         }
         catch
@@ -1440,7 +1636,9 @@ public sealed class AssemblyProcessor
                    currentBase.FullName != "System.MarshalByRefObject")
             {
                 // Look for property with same name in this ancestor
-                var ancestorProperty = currentBase.GetProperty(prop.Name, BindingFlags.Public | BindingFlags.Instance);
+                // Note: FlattenHierarchy only works for static members, not instance properties
+                var ancestorProperty = currentBase.GetProperty(prop.Name,
+                    BindingFlags.Public | BindingFlags.Instance);
                 if (ancestorProperty != null)
                 {
                     // Map ancestor property type to TypeScript
@@ -1452,8 +1650,8 @@ public sealed class AssemblyProcessor
                         return true; // Skip - TypeScript will inherit from ancestor
                     }
 
-                    // Found property with different mapped type - this is true covariance
-                    // Don't skip, but also don't check further ancestors
+                    // Found property with different mapped type - NOT redundant
+                    // ApplyCovariantWrapperIfNeeded will handle wrapping it
                     return false;
                 }
 
