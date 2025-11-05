@@ -1,41 +1,44 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace GenerateDts.Config;
+namespace tsbindgen.Config;
 
-public sealed class GeneratorConfig
+public sealed record GeneratorConfig
 {
     [JsonPropertyName("skipNamespaces")]
-    public List<string> SkipNamespaces { get; set; } = new();
+    public List<string> SkipNamespaces { get; init; } = new();
 
     [JsonPropertyName("typeRenames")]
-    public Dictionary<string, string> TypeRenames { get; set; } = new();
+    public Dictionary<string, string> TypeRenames { get; init; } = new();
 
     [JsonPropertyName("skipMembers")]
-    public List<string> SkipMembers { get; set; } = new();
+    public List<string> SkipMembers { get; init; } = new();
 
     // Naming transform options (CLI-only, not from config file)
     [JsonIgnore]
-    public NameTransformOption NamespaceNames { get; set; } = NameTransformOption.None;
+    public NameTransformOption NamespaceNames { get; init; } = NameTransformOption.None;
 
     [JsonIgnore]
-    public NameTransformOption ClassNames { get; set; } = NameTransformOption.None;
+    public NameTransformOption ClassNames { get; init; } = NameTransformOption.None;
 
     [JsonIgnore]
-    public NameTransformOption InterfaceNames { get; set; } = NameTransformOption.None;
+    public NameTransformOption InterfaceNames { get; init; } = NameTransformOption.None;
 
     [JsonIgnore]
-    public NameTransformOption MethodNames { get; set; } = NameTransformOption.None;
+    public NameTransformOption MethodNames { get; init; } = NameTransformOption.None;
 
     [JsonIgnore]
-    public NameTransformOption PropertyNames { get; set; } = NameTransformOption.None;
+    public NameTransformOption PropertyNames { get; init; } = NameTransformOption.None;
 
     [JsonIgnore]
-    public NameTransformOption EnumMemberNames { get; set; } = NameTransformOption.None;
+    public NameTransformOption EnumMemberNames { get; init; } = NameTransformOption.None;
 
     [JsonIgnore]
-    public NameTransformOption BindingNames { get; set; } = NameTransformOption.None;
+    public NameTransformOption BindingNames { get; init; } = NameTransformOption.None;
+}
 
+public static class GeneratorConfigIO
+{
     public static async Task<GeneratorConfig> LoadAsync(string path)
     {
         var json = await File.ReadAllTextAsync(path);

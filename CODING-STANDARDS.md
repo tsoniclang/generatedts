@@ -44,7 +44,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace GenerateDts;
+namespace tsbindgen;
 
 public sealed class TypeMapper
 {
