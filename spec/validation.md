@@ -1,6 +1,6 @@
 # Validation & QA
 
-`generatedts` uses a combination of automated tests and TypeScript compilation to
+`tsbindgen` uses a combination of automated tests and TypeScript compilation to
 guarantee output quality.
 
 ## Unit tests

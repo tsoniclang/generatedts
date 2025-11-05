@@ -1,5 +1,5 @@
 {
-  "name": "generatedts",
+  "name": "tsbindgen",
   "version": "1.0.0",
   "description": "Generate TypeScript declarations from .NET assemblies",
   "type": "module",

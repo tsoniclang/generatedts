@@ -1,6 +1,6 @@
 # Metadata Sidecar Generation
 
-`generatedts` produces a `.metadata.json` file alongside the `.d.ts` for every
+`tsbindgen` produces a `.metadata.json` file alongside the `.d.ts` for every
 assembly.  The metadata describes runtime semantics that TypeScript cannot
 express (virtual/override, abstract, accessibility, etc.) and is consumed by the
 Tsonic emitter when producing C#.

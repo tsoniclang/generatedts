@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Validation script for generatedts output
+ * Validation script for tsbindgen output
  *
  * This script:
  * 1. Regenerates all BCL .d.ts files to a temp directory
@@ -171,7 +171,7 @@ function cleanValidationDir() {
 function generateTypes() {
     log(`Generating types for ${BCL_ASSEMBLIES.length} assemblies...`);
 
-    const projectPath = path.join(__dirname, '..', 'src', 'generatedts', 'generatedts.csproj');
+    const projectPath = path.join(__dirname, '..', 'src', 'tsbindgen', 'tsbindgen.csproj');
     let successCount = 0;
     let failCount = 0;
 
@@ -384,7 +384,7 @@ function validateMetadataFiles() {
 async function main() {
     console.log('');
     console.log('================================================================');
-    console.log('generatedts - Full Validation');
+    console.log('tsbindgen - Full Validation');
     console.log('================================================================');
     console.log('');
 

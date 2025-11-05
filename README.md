@@ -1,10 +1,10 @@
-# generatedts
+# tsbindgen
 
 A .NET tool that generates TypeScript declaration files (`.d.ts`) from .NET assemblies for use with the Tsonic compiler.
 
 ## Overview
 
-`generatedts` uses reflection to analyze .NET assemblies and produces TypeScript declarations that follow Tsonic's interop rules. This allows TypeScript code compiled with Tsonic to properly type-check when using .NET libraries.
+`tsbindgen` uses reflection to analyze .NET assemblies and produces TypeScript declarations that follow Tsonic's interop rules. This allows TypeScript code compiled with Tsonic to properly type-check when using .NET libraries.
 
 ## Installation
 
@@ -19,13 +19,13 @@ dotnet build
 ### Basic Usage
 
 ```bash
-generatedts <assembly-path>
+tsbindgen <assembly-path>
 ```
 
 Example:
 
 ```bash
-generatedts /usr/share/dotnet/packs/Microsoft.NETCore.App.Ref/8.0.0/ref/net8.0/System.Text.Json.dll
+tsbindgen /usr/share/dotnet/packs/Microsoft.NETCore.App.Ref/8.0.0/ref/net8.0/System.Text.Json.dll
 # Creates:
 #   ./System.Text.Json.d.ts
 #   ./System.Text.Json.metadata.json
@@ -45,19 +45,19 @@ generatedts /usr/share/dotnet/packs/Microsoft.NETCore.App.Ref/8.0.0/ref/net8.0/S
 **Filter specific namespaces:**
 
 ```bash
-generatedts System.Text.Json.dll --namespaces System.Text.Json.Serialization
+tsbindgen System.Text.Json.dll --namespaces System.Text.Json.Serialization
 ```
 
 **Specify output directory:**
 
 ```bash
-generatedts System.Net.Http.dll --out-dir ./declarations
+tsbindgen System.Net.Http.dll --out-dir ./declarations
 ```
 
 **Generate with logging:**
 
 ```bash
-generatedts System.IO.dll --log build.log.json
+tsbindgen System.IO.dll --log build.log.json
 ```
 
 ## Generated Output
@@ -190,7 +190,7 @@ You can provide a JSON configuration file to customize behavior:
 Usage:
 
 ```bash
-generatedts Assembly.dll --config config.json
+tsbindgen Assembly.dll --config config.json
 ```
 
 ## Log Output
@@ -297,7 +297,7 @@ Error breakdown:
 ### Project Structure
 
 ```
-generatedts/
+tsbindgen/
 ├── Src/
 │   ├── Program.cs              # CLI entry point
 │   ├── AssemblyProcessor.cs    # Reflection and type/metadata extraction
