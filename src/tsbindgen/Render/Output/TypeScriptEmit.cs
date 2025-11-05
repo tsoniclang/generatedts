@@ -14,11 +14,11 @@ public static class TypeScriptEmit
         var builder = new StringBuilder();
 
         // Header comment
-        builder.AppendLine($"// TypeScript declarations for {model.ClrName}");
+        builder.AppendLine($"// Module for {model.ClrName}");
         builder.AppendLine($"// Generated from {model.SourceAssemblies.Count} assembly(ies)");
         builder.AppendLine();
 
-        // Imports
+        // Imports - using named imports from other modules
         if (model.Imports.Count > 0)
         {
             foreach (var (assembly, namespaces) in model.Imports.OrderBy(kvp => kvp.Key))
@@ -35,31 +35,21 @@ public static class TypeScriptEmit
             builder.AppendLine();
         }
 
-        // Namespace declaration
-        builder.AppendLine($"declare namespace {model.TsAlias} {{");
-        builder.AppendLine();
-
-        // Helper declarations first
+        // Helper declarations first - export them directly
         foreach (var type in model.Types)
         {
             foreach (var helper in type.Helpers)
             {
-                builder.AppendLine($"    {helper.TsDefinition}");
+                builder.AppendLine($"export {helper.TsDefinition}");
                 builder.AppendLine();
             }
         }
 
-        // Types
+        // Types - export each type directly
         foreach (var type in model.Types)
         {
-            EmitType(builder, type, "    ");
+            EmitType(builder, type, "");
         }
-
-        builder.AppendLine("}");
-        builder.AppendLine();
-
-        // ESM export
-        builder.AppendLine("export {};");
 
         return builder.ToString();
     }
@@ -91,7 +81,7 @@ public static class TypeScriptEmit
 
     private static void EmitEnum(StringBuilder builder, TypeModel type, string indent)
     {
-        builder.AppendLine($"{indent}enum {type.TsAlias} {{");
+        builder.AppendLine($"{indent}export enum {type.TsAlias} {{");
 
         if (type.EnumMembers != null)
         {
@@ -111,7 +101,7 @@ public static class TypeScriptEmit
             ? " extends " + string.Join(", ", type.Implements.Select(i => i.TsType))
             : "";
 
-        builder.AppendLine($"{indent}interface {type.TsAlias}{genericParams}{extends} {{");
+        builder.AppendLine($"{indent}export interface {type.TsAlias}{genericParams}{extends} {{");
 
         // Members - skip static members (TypeScript doesn't support static interface members)
         EmitMembers(builder, type.Members, indent + "    ", skipStatic: true);
@@ -128,7 +118,7 @@ public static class TypeScriptEmit
             : "";
 
         var modifiers = type.IsAbstract ? "abstract " : "";
-        builder.AppendLine($"{indent}{modifiers}class {type.TsAlias}{genericParams}{extends}{implements} {{");
+        builder.AppendLine($"{indent}export {modifiers}class {type.TsAlias}{genericParams}{extends}{implements} {{");
 
         // Members
         EmitMembers(builder, type.Members, indent + "    ");
@@ -144,12 +134,12 @@ public static class TypeScriptEmit
             : "";
         var returnType = type.DelegateReturnType?.TsType ?? "void";
 
-        builder.AppendLine($"{indent}type {type.TsAlias}{genericParams} = ({parameters}) => {returnType};");
+        builder.AppendLine($"{indent}export type {type.TsAlias}{genericParams} = ({parameters}) => {returnType};");
     }
 
     private static void EmitStaticNamespace(StringBuilder builder, TypeModel type, string indent)
     {
-        builder.AppendLine($"{indent}class {type.TsAlias} {{");
+        builder.AppendLine($"{indent}export class {type.TsAlias} {{");
 
         // Only static members
         EmitMembers(builder, type.Members, indent + "    ", staticOnly: true);

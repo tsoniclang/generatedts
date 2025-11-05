@@ -406,23 +406,39 @@ public static class Reflect
     /// Formats a type name with generic arity and arguments for TypeScript.
     /// Converts: List`1[[System.Int32, ...]] to List_1<System.Int32>
     /// Converts nested types: Outer+Inner to Outer.Inner
+    /// For cross-assembly types: includes full namespace (System.Linq.Expressions.ExpressionType)
+    /// For same-assembly types: includes full namespace
+    /// Note: CreateTypeReference will add assembly alias prefix for cross-assembly types
     /// </summary>
     private static string FormatTypeName(Type type, Assembly currentAssembly)
     {
-        // Non-generic types: use FullName, replace + with . for nested types
+        var isCrossAssembly = type.Assembly != currentAssembly;
+
+        // Non-generic types
         if (!type.IsGenericType)
-            return (type.FullName ?? type.Name).Replace('+', '.');
+        {
+            // For cross-assembly types, use simple name (namespace handled by import alias)
+            // For same-assembly types, use full namespace path
+            var fullName = isCrossAssembly
+                ? GetSimpleTypeName(type)
+                : (type.FullName ?? type.Name).Replace('+', '.');
+            return fullName;
+        }
 
         // Generic type definition (e.g., List`1): add underscore arity, replace + with .
         if (type.IsGenericTypeDefinition)
         {
-            var name = type.FullName ?? type.Name;
-            return name.Replace('`', '_').Replace('+', '.');
+            var name = isCrossAssembly
+                ? GetSimpleTypeName(type).Replace('`', '_')
+                : (type.FullName ?? type.Name).Replace('`', '_').Replace('+', '.');
+            return name;
         }
 
         // Constructed generic type (e.g., List<int>): format with TypeScript syntax
         var genericDef = type.GetGenericTypeDefinition();
-        var baseName = (genericDef.FullName ?? genericDef.Name).Replace('`', '_').Replace('+', '.');
+        var baseName = isCrossAssembly
+            ? GetSimpleTypeName(genericDef).Replace('`', '_')
+            : (genericDef.FullName ?? genericDef.Name).Replace('`', '_').Replace('+', '.');
 
         var typeArgs = type.GetGenericArguments();
         var formattedArgs = typeArgs.Select(arg => {
@@ -431,6 +447,31 @@ public static class Reflect
         });
 
         return $"{baseName}<{string.Join(", ", formattedArgs)}>";
+    }
+
+    /// <summary>
+    /// Gets the simple type name (without namespace) for a type.
+    /// Handles nested types by using underscore separators.
+    /// Example: Dictionary+KeyCollection -> Dictionary_KeyCollection
+    /// </summary>
+    private static string GetSimpleTypeName(Type type)
+    {
+        // Handle nested types - build full name with underscores
+        if (type.IsNested && type.DeclaringType != null)
+        {
+            var parts = new List<string>();
+            var current = type;
+
+            while (current != null)
+            {
+                parts.Insert(0, current.Name);
+                current = current.DeclaringType;
+            }
+
+            return string.Join("_", parts).Replace('+', '_');
+        }
+
+        return type.Name.Replace('+', '_');
     }
 
     /// <summary>

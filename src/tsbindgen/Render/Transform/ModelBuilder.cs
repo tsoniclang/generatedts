@@ -16,8 +16,14 @@ public static class ModelBuilder
     {
         var tsAlias = NameTransformation.Apply(bundle.ClrName, config.NamespaceNames);
 
+        // Build import aliases for type reference rewriting
+        var importAliases = bundle.Imports
+            .SelectMany(kvp => kvp.Value.Select(ns => ns))
+            .Where(ns => ns != bundle.ClrName) // Exclude self-references
+            .ToHashSet();
+
         var types = bundle.Types
-            .Select(t => BuildType(t, config))
+            .Select(t => BuildType(t, config, bundle.ClrName, importAliases))
             .ToList();
 
         var imports = bundle.Imports
@@ -34,7 +40,7 @@ public static class ModelBuilder
             bundle.SourceAssemblies.ToList());
     }
 
-    private static TypeModel BuildType(TypeSnapshot snapshot, GeneratorConfig config)
+    private static TypeModel BuildType(TypeSnapshot snapshot, GeneratorConfig config, string currentNamespace, HashSet<string> importAliases)
     {
         // Clean the CLR name (replace backticks with underscores for generic arity)
         var cleanedName = snapshot.ClrName.Replace('`', '_');
@@ -50,22 +56,25 @@ public static class ModelBuilder
             .Select(gp => new GenericParameterModel(
                 gp.Name,
                 gp.Name, // Generic parameters don't get transformed
-                gp.Constraints,
+                gp.Constraints.Select(c => RewriteTypeReference(c, currentNamespace, importAliases)).ToList(),
                 gp.Variance))
             .ToList();
 
         var baseType = snapshot.BaseType != null
             ? new TypeReferenceModel(
                 snapshot.BaseType.ClrType,
-                snapshot.BaseType.TsType,
+                RewriteTypeReference(snapshot.BaseType.TsType, currentNamespace, importAliases),
                 snapshot.BaseType.Assembly)
             : null;
 
         var implements = snapshot.Implements
-            .Select(i => new TypeReferenceModel(i.ClrType, i.TsType, i.Assembly))
+            .Select(i => new TypeReferenceModel(
+                i.ClrType,
+                RewriteTypeReference(i.TsType, currentNamespace, importAliases),
+                i.Assembly))
             .ToList();
 
-        var members = BuildMembers(snapshot.Members, config);
+        var members = BuildMembers(snapshot.Members, config, currentNamespace, importAliases);
 
         return new TypeModel(
             snapshot.ClrName,
@@ -84,45 +93,47 @@ public static class ModelBuilder
             Array.Empty<HelperDeclaration>(), // Helpers added by analysis passes
             snapshot.UnderlyingType,
             snapshot.EnumMembers,
-            snapshot.DelegateParameters?.Select(p => BuildParameter(p)).ToList(),
+            snapshot.DelegateParameters?.Select(p => BuildParameter(p, currentNamespace, importAliases)).ToList(),
             snapshot.DelegateReturnType != null
                 ? new TypeReferenceModel(
                     snapshot.DelegateReturnType.ClrType,
-                    snapshot.DelegateReturnType.TsType,
+                    RewriteTypeReference(snapshot.DelegateReturnType.TsType, currentNamespace, importAliases),
                     snapshot.DelegateReturnType.Assembly)
                 : null);
     }
 
     private static MemberCollectionModel BuildMembers(
         MemberCollection members,
-        GeneratorConfig config)
+        GeneratorConfig config,
+        string currentNamespace,
+        HashSet<string> importAliases)
     {
         var constructors = members.Constructors
             .Select(c => new ConstructorModel(
                 c.Visibility,
-                c.Parameters.Select(BuildParameter).ToList()))
+                c.Parameters.Select(p => BuildParameter(p, currentNamespace, importAliases)).ToList()))
             .ToList();
 
         var methods = members.Methods
-            .Select(m => BuildMethod(m, config))
+            .Select(m => BuildMethod(m, config, currentNamespace, importAliases))
             .ToList();
 
         var properties = members.Properties
-            .Select(p => BuildProperty(p, config))
+            .Select(p => BuildProperty(p, config, currentNamespace, importAliases))
             .ToList();
 
         var fields = members.Fields
-            .Select(f => BuildField(f, config))
+            .Select(f => BuildField(f, config, currentNamespace, importAliases))
             .ToList();
 
         var events = members.Events
-            .Select(e => BuildEvent(e, config))
+            .Select(e => BuildEvent(e, config, currentNamespace, importAliases))
             .ToList();
 
         return new MemberCollectionModel(constructors, methods, properties, fields, events);
     }
 
-    private static MethodModel BuildMethod(MethodSnapshot snapshot, GeneratorConfig config)
+    private static MethodModel BuildMethod(MethodSnapshot snapshot, GeneratorConfig config, string currentNamespace, HashSet<string> importAliases)
     {
         var tsAlias = NameTransformation.Apply(snapshot.ClrName, config.MethodNames);
 
@@ -130,7 +141,7 @@ public static class ModelBuilder
             .Select(gp => new GenericParameterModel(
                 gp.Name,
                 gp.Name,
-                gp.Constraints,
+                gp.Constraints.Select(c => RewriteTypeReference(c, currentNamespace, importAliases)).ToList(),
                 gp.Variance))
             .ToList();
 
@@ -143,15 +154,15 @@ public static class ModelBuilder
             snapshot.IsAbstract,
             snapshot.Visibility,
             genericParams,
-            snapshot.Parameters.Select(BuildParameter).ToList(),
+            snapshot.Parameters.Select(p => BuildParameter(p, currentNamespace, importAliases)).ToList(),
             new TypeReferenceModel(
                 snapshot.ReturnType.ClrType,
-                snapshot.ReturnType.TsType,
+                RewriteTypeReference(snapshot.ReturnType.TsType, currentNamespace, importAliases),
                 snapshot.ReturnType.Assembly),
             snapshot.Binding);
     }
 
-    private static PropertyModel BuildProperty(PropertySnapshot snapshot, GeneratorConfig config)
+    private static PropertyModel BuildProperty(PropertySnapshot snapshot, GeneratorConfig config, string currentNamespace, HashSet<string> importAliases)
     {
         var tsAlias = NameTransformation.Apply(snapshot.ClrName, config.PropertyNames);
 
@@ -159,7 +170,7 @@ public static class ModelBuilder
             snapshot.ClrName,
             tsAlias,
             snapshot.ClrType,
-            snapshot.TsType,
+            RewriteTypeReference(snapshot.TsType, currentNamespace, importAliases),
             snapshot.IsReadOnly,
             snapshot.IsStatic,
             snapshot.IsVirtual,
@@ -168,7 +179,7 @@ public static class ModelBuilder
             snapshot.Binding);
     }
 
-    private static FieldModel BuildField(FieldSnapshot snapshot, GeneratorConfig config)
+    private static FieldModel BuildField(FieldSnapshot snapshot, GeneratorConfig config, string currentNamespace, HashSet<string> importAliases)
     {
         var tsAlias = NameTransformation.Apply(snapshot.ClrName, config.PropertyNames);
 
@@ -176,14 +187,14 @@ public static class ModelBuilder
             snapshot.ClrName,
             tsAlias,
             snapshot.ClrType,
-            snapshot.TsType,
+            RewriteTypeReference(snapshot.TsType, currentNamespace, importAliases),
             snapshot.IsReadOnly,
             snapshot.IsStatic,
             snapshot.Visibility,
             snapshot.Binding);
     }
 
-    private static EventModel BuildEvent(EventSnapshot snapshot, GeneratorConfig config)
+    private static EventModel BuildEvent(EventSnapshot snapshot, GeneratorConfig config, string currentNamespace, HashSet<string> importAliases)
     {
         var tsAlias = NameTransformation.Apply(snapshot.ClrName, config.PropertyNames);
 
@@ -191,21 +202,137 @@ public static class ModelBuilder
             snapshot.ClrName,
             tsAlias,
             snapshot.ClrType,
-            snapshot.TsType,
+            RewriteTypeReference(snapshot.TsType, currentNamespace, importAliases),
             snapshot.IsStatic,
             snapshot.Visibility,
             snapshot.Binding);
     }
 
-    private static ParameterModel BuildParameter(ParameterSnapshot snapshot)
+    private static ParameterModel BuildParameter(ParameterSnapshot snapshot, string currentNamespace, HashSet<string> importAliases)
     {
         return new ParameterModel(
             snapshot.Name,
             snapshot.ClrType,
-            snapshot.TsType,
+            RewriteTypeReference(snapshot.TsType, currentNamespace, importAliases),
             snapshot.Kind,
             snapshot.IsOptional,
             snapshot.DefaultValue,
             snapshot.IsParams);
+    }
+
+    /// <summary>
+    /// Rewrites type references based on namespace context.
+    /// - Same namespace: "Microsoft.CSharp.RuntimeBinder.CSharpBinderFlags" -> "CSharpBinderFlags"
+    /// - Imported namespace: "Microsoft.VisualBasic.CompareMethod" -> "Microsoft_VisualBasic.CompareMethod"
+    /// - Other: leave as-is
+    /// Handles generic types recursively.
+    /// </summary>
+    private static string RewriteTypeReference(string tsType, string currentNamespace, HashSet<string> importAliases)
+    {
+        if (string.IsNullOrEmpty(tsType))
+            return tsType;
+
+        // Handle generic types - split base name and type arguments
+        if (tsType.Contains('<'))
+        {
+            var genericStart = tsType.IndexOf('<');
+            var baseName = tsType.Substring(0, genericStart);
+
+            // Find matching closing bracket
+            var depth = 0;
+            var genericEnd = -1;
+            for (var i = genericStart; i < tsType.Length; i++)
+            {
+                if (tsType[i] == '<') depth++;
+                else if (tsType[i] == '>') depth--;
+
+                if (depth == 0)
+                {
+                    genericEnd = i;
+                    break;
+                }
+            }
+
+            if (genericEnd == -1)
+                return tsType; // Malformed generic, return as-is
+
+            var typeArgsText = tsType.Substring(genericStart + 1, genericEnd - genericStart - 1);
+            var suffix = genericEnd + 1 < tsType.Length ? tsType.Substring(genericEnd + 1) : "";
+
+            // Rewrite base name
+            var rewrittenBase = RewriteSimpleType(baseName, currentNamespace, importAliases);
+
+            // Parse and rewrite type arguments
+            var typeArgs = ParseTypeArguments(typeArgsText);
+            var rewrittenArgs = typeArgs.Select(arg => RewriteTypeReference(arg, currentNamespace, importAliases));
+
+            return $"{rewrittenBase}<{string.Join(", ", rewrittenArgs)}>{suffix}";
+        }
+
+        // Non-generic type - rewrite based on namespace
+        return RewriteSimpleType(tsType, currentNamespace, importAliases);
+    }
+
+    private static string RewriteSimpleType(string tsType, string currentNamespace, HashSet<string> importAliases)
+    {
+        // Case 1: Same namespace - strip namespace prefix
+        if (tsType.StartsWith(currentNamespace + "."))
+        {
+            return tsType.Substring(currentNamespace.Length + 1);
+        }
+
+        // Case 2: Imported namespace - rewrite with import alias
+        foreach (var ns in importAliases.OrderByDescending(n => n.Length))
+        {
+            if (tsType.StartsWith(ns + ".") || tsType == ns)
+            {
+                var alias = ns.Replace(".", "_");
+                return alias + tsType.Substring(ns.Length);
+            }
+        }
+
+        // Case 3: Other namespace - leave as-is
+        return tsType;
+    }
+
+    private static List<string> ParseTypeArguments(string typeArgsText)
+    {
+        var args = new List<string>();
+        var current = new System.Text.StringBuilder();
+        var depth = 0;
+
+        for (var i = 0; i < typeArgsText.Length; i++)
+        {
+            var ch = typeArgsText[i];
+
+            if (ch == '<')
+            {
+                depth++;
+                current.Append(ch);
+            }
+            else if (ch == '>')
+            {
+                depth--;
+                current.Append(ch);
+            }
+            else if (ch == ',' && depth == 0)
+            {
+                // Top-level comma - this is an argument separator
+                args.Add(current.ToString().Trim());
+                current.Clear();
+                // Skip space after comma
+                if (i + 1 < typeArgsText.Length && typeArgsText[i + 1] == ' ')
+                    i++;
+            }
+            else
+            {
+                current.Append(ch);
+            }
+        }
+
+        if (current.Length > 0)
+            args.Add(current.ToString().Trim());
+
+        return args;
     }
 }
