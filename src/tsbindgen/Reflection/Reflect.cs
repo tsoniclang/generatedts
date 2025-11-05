@@ -518,6 +518,18 @@ public static class Reflect
         var ns = actualType.Namespace;
         var typeName = actualType.Name.Replace('+', '.');
 
+        // Check for exotic types (function pointers, etc.)
+        if (string.IsNullOrEmpty(typeName))
+        {
+            Console.WriteLine($"WARNING: Type with empty name: IsGenericParameter={actualType.IsGenericParameter}, " +
+                            $"IsByRef={actualType.IsByRef}, IsPointer={actualType.IsPointer}, " +
+                            $"IsFunctionPointer={actualType.IsFunctionPointer}, " +
+                            $"FullName={actualType.FullName}, Name={actualType.Name}");
+
+            // Use "any" for unsupported types
+            return TypeReference.CreateSimple(null, "any", null);
+        }
+
         // Handle generic types - recursively create TypeReferences for generic arguments
         if (actualType.IsGenericType)
         {
