@@ -35,39 +35,30 @@ Unsupported values are rejected with a validation error.
 ## Binding dictionary (`<Assembly>.bindings.json`)
 
 `Cli/Program.GenerateDeclarationsAsync` serialises the collected bindings to
-`<Assembly>.bindings.json`.  The file mirrors the declaration hierarchy and
-includes both the transformed name (`name`) and the CLR identifier (`alias`).
+`<Assembly>.bindings.json`.  The file is a flat dictionary keyed by CLR identifiers,
+with each entry containing the CLR name (`Name`) and TypeScript alias (`Alias`).
 Example:
 
 ```json
 {
-  "assembly": "System.Linq",
-  "namespaces": [
-    {
-      "name": "systemLinq",
-      "alias": "System.Linq",
-      "types": [
-        {
-          "name": "enumerable",
-          "alias": "Enumerable",
-          "kind": "class",
-          "members": [
-            {
-              "kind": "method",
-              "signature": "selectMany<...>",
-              "name": "selectMany",
-              "alias": "SelectMany",
-              "binding": {
-                "assembly": "System.Linq",
-                "type": "System.Linq.Enumerable",
-                "member": "SelectMany"
-              }
-            }
-          ]
-        }
-      ]
-    }
-  ]
+  "SelectMany": {
+    "Kind": "method",
+    "Name": "SelectMany",
+    "Alias": "selectMany",
+    "FullName": "System.Linq.Enumerable.SelectMany"
+  },
+  "Enumerable": {
+    "Kind": "class",
+    "Name": "Enumerable",
+    "Alias": "enumerable",
+    "FullName": "System.Linq.Enumerable"
+  },
+  "System.Linq": {
+    "Kind": "namespace",
+    "Name": "System.Linq",
+    "Alias": "systemLinq",
+    "FullName": "System.Linq"
+  }
 }
 ```
 
