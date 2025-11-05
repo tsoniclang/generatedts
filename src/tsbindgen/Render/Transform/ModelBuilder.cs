@@ -232,6 +232,10 @@ public static class ModelBuilder
         if (string.IsNullOrEmpty(tsType))
             return tsType;
 
+        // Phase 3 transformations - convert CLR markers to TypeScript types
+        if (tsType == "__FunctionPointer" || tsType == "__UnknownType")
+            return "any";
+
         // Handle generic types - split base name and type arguments
         if (tsType.Contains('<'))
         {

@@ -138,7 +138,7 @@ public sealed record TypeReference(
     string TypeName,                             // "Nullable_1", "Int32", "T" (generic param)
     IReadOnlyList<TypeReference> GenericArgs,    // Recursive: generic type arguments
     int ArrayRank,                                // 0 = not array, 1 = [], 2 = [][], etc.
-    bool IsPointer,                              // true if pointer type (*)
+    int PointerDepth,                            // 0 = not pointer, 1 = *, 2 = **, etc.
     string? Assembly = null)                     // Assembly alias for cross-assembly refs
 {
     /// <summary>
@@ -171,8 +171,8 @@ public sealed record TypeReference(
                 sb.Append('>');
             }
 
-            // Pointer
-            if (IsPointer)
+            // Pointers
+            for (int i = 0; i < PointerDepth; i++)
             {
                 sb.Append('*');
             }
@@ -192,7 +192,7 @@ public sealed record TypeReference(
     /// </summary>
     public static TypeReference CreateSimple(string? ns, string typeName, string? assembly = null)
     {
-        return new TypeReference(ns, typeName, Array.Empty<TypeReference>(), 0, false, assembly);
+        return new TypeReference(ns, typeName, Array.Empty<TypeReference>(), 0, 0, assembly);
     }
 
     /// <summary>
@@ -200,7 +200,7 @@ public sealed record TypeReference(
     /// </summary>
     public static TypeReference CreateGeneric(string? ns, string typeName, IReadOnlyList<TypeReference> genericArgs, string? assembly = null)
     {
-        return new TypeReference(ns, typeName, genericArgs, 0, false, assembly);
+        return new TypeReference(ns, typeName, genericArgs, 0, 0, assembly);
     }
 
     /// <summary>
@@ -208,15 +208,15 @@ public sealed record TypeReference(
     /// </summary>
     public static TypeReference CreateArray(TypeReference elementType, int rank)
     {
-        return new TypeReference(elementType.Namespace, elementType.TypeName, elementType.GenericArgs, rank, elementType.IsPointer, elementType.Assembly);
+        return new TypeReference(elementType.Namespace, elementType.TypeName, elementType.GenericArgs, rank, elementType.PointerDepth, elementType.Assembly);
     }
 
     /// <summary>
-    /// Creates a pointer TypeReference from an element type.
+    /// Creates a pointer TypeReference from an element type (increases pointer depth by 1).
     /// </summary>
     public static TypeReference CreatePointer(TypeReference elementType)
     {
-        return new TypeReference(elementType.Namespace, elementType.TypeName, elementType.GenericArgs, elementType.ArrayRank, true, elementType.Assembly);
+        return new TypeReference(elementType.Namespace, elementType.TypeName, elementType.GenericArgs, elementType.ArrayRank, elementType.PointerDepth + 1, elementType.Assembly);
     }
 };
 
