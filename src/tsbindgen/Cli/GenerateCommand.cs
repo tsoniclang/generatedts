@@ -280,7 +280,10 @@ public static class GenerateCommand
             Console.WriteLine($"  Aggregated into {bundles.Count} namespace snapshots");
             Console.WriteLine();
 
-            // TODO: Phase 3 will be rewritten - old code moved to _old/Views
+            // Render TypeScript declarations
+            Render.Pipeline.NamespacePipeline.Run(outDir, bundles, config, verbose);
+
+            // TODO: Old view code moved to _old/Views
             /*
             // Phase 2: Generate views
             Console.WriteLine("Phase 2: Generating views...");

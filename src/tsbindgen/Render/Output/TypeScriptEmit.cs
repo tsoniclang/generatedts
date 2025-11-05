@@ -1,0 +1,232 @@
+using System.Text;
+using tsbindgen.Render;
+using tsbindgen.Snapshot;
+
+namespace tsbindgen.Render.Output;
+
+/// <summary>
+/// Emits TypeScript declaration files (.d.ts) from NamespaceModel.
+/// </summary>
+public static class TypeScriptEmit
+{
+    public static string Emit(NamespaceModel model)
+    {
+        var builder = new StringBuilder();
+
+        // Header comment
+        builder.AppendLine($"// TypeScript declarations for {model.ClrName}");
+        builder.AppendLine($"// Generated from {model.SourceAssemblies.Count} assembly(ies)");
+        builder.AppendLine();
+
+        // Imports
+        if (model.Imports.Count > 0)
+        {
+            foreach (var (assembly, namespaces) in model.Imports.OrderBy(kvp => kvp.Key))
+            {
+                foreach (var ns in namespaces.OrderBy(n => n))
+                {
+                    // Skip self-references
+                    if (ns == model.ClrName) continue;
+
+                    var nsAlias = ns.Replace(".", "_");
+                    builder.AppendLine($"import type * as {nsAlias} from \"../{ns}/index.js\";");
+                }
+            }
+            builder.AppendLine();
+        }
+
+        // Namespace declaration
+        builder.AppendLine($"declare namespace {model.TsAlias} {{");
+        builder.AppendLine();
+
+        // Helper declarations first
+        foreach (var type in model.Types)
+        {
+            foreach (var helper in type.Helpers)
+            {
+                builder.AppendLine($"    {helper.TsDefinition}");
+                builder.AppendLine();
+            }
+        }
+
+        // Types
+        foreach (var type in model.Types)
+        {
+            EmitType(builder, type, "    ");
+        }
+
+        builder.AppendLine("}");
+        builder.AppendLine();
+
+        // ESM export
+        builder.AppendLine("export {};");
+
+        return builder.ToString();
+    }
+
+    private static void EmitType(StringBuilder builder, TypeModel type, string indent)
+    {
+        switch (type.Kind)
+        {
+            case TypeKind.Enum:
+                EmitEnum(builder, type, indent);
+                break;
+            case TypeKind.Interface:
+                EmitInterface(builder, type, indent);
+                break;
+            case TypeKind.Class:
+            case TypeKind.Struct:
+                EmitClass(builder, type, indent);
+                break;
+            case TypeKind.Delegate:
+                EmitDelegate(builder, type, indent);
+                break;
+            case TypeKind.StaticNamespace:
+                EmitStaticNamespace(builder, type, indent);
+                break;
+        }
+
+        builder.AppendLine();
+    }
+
+    private static void EmitEnum(StringBuilder builder, TypeModel type, string indent)
+    {
+        builder.AppendLine($"{indent}enum {type.TsAlias} {{");
+
+        if (type.EnumMembers != null)
+        {
+            foreach (var member in type.EnumMembers)
+            {
+                builder.AppendLine($"{indent}    {member.Name} = {member.Value},");
+            }
+        }
+
+        builder.AppendLine($"{indent}}}");
+    }
+
+    private static void EmitInterface(StringBuilder builder, TypeModel type, string indent)
+    {
+        var genericParams = FormatGenericParameters(type.GenericParameters);
+        var extends = type.Implements.Count > 0
+            ? " extends " + string.Join(", ", type.Implements.Select(i => i.TsType))
+            : "";
+
+        builder.AppendLine($"{indent}interface {type.TsAlias}{genericParams}{extends} {{");
+
+        // Members
+        EmitMembers(builder, type.Members, indent + "    ");
+
+        builder.AppendLine($"{indent}}}");
+    }
+
+    private static void EmitClass(StringBuilder builder, TypeModel type, string indent)
+    {
+        var genericParams = FormatGenericParameters(type.GenericParameters);
+        var extends = type.BaseType != null ? $" extends {type.BaseType.TsType}" : "";
+        var implements = type.Implements.Count > 0
+            ? " implements " + string.Join(", ", type.Implements.Select(i => i.TsType))
+            : "";
+
+        var modifiers = type.IsAbstract ? "abstract " : "";
+        builder.AppendLine($"{indent}{modifiers}class {type.TsAlias}{genericParams}{extends}{implements} {{");
+
+        // Members
+        EmitMembers(builder, type.Members, indent + "    ");
+
+        builder.AppendLine($"{indent}}}");
+    }
+
+    private static void EmitDelegate(StringBuilder builder, TypeModel type, string indent)
+    {
+        var genericParams = FormatGenericParameters(type.GenericParameters);
+        var parameters = type.DelegateParameters != null
+            ? string.Join(", ", type.DelegateParameters.Select(p => $"{p.Name}: {p.TsType}"))
+            : "";
+        var returnType = type.DelegateReturnType?.TsType ?? "void";
+
+        builder.AppendLine($"{indent}type {type.TsAlias}{genericParams} = ({parameters}) => {returnType};");
+    }
+
+    private static void EmitStaticNamespace(StringBuilder builder, TypeModel type, string indent)
+    {
+        builder.AppendLine($"{indent}class {type.TsAlias} {{");
+
+        // Only static members
+        EmitMembers(builder, type.Members, indent + "    ", staticOnly: true);
+
+        builder.AppendLine($"{indent}}}");
+    }
+
+    private static void EmitMembers(StringBuilder builder, MemberCollectionModel members, string indent, bool staticOnly = false)
+    {
+        // Constructors (if not staticOnly)
+        if (!staticOnly)
+        {
+            foreach (var ctor in members.Constructors)
+            {
+                var parameters = string.Join(", ", ctor.Parameters.Select(p => $"{p.Name}: {p.TsType}"));
+                builder.AppendLine($"{indent}constructor({parameters});");
+            }
+        }
+
+        // Methods
+        foreach (var method in members.Methods)
+        {
+            if (staticOnly && !method.IsStatic) continue;
+
+            var modifiers = method.IsStatic ? "static " : "";
+            var genericParams = FormatGenericParameters(method.GenericParameters);
+            var parameters = string.Join(", ", method.Parameters.Select(p => $"{p.Name}: {p.TsType}"));
+
+            builder.AppendLine($"{indent}{modifiers}{method.TsAlias}{genericParams}({parameters}): {method.ReturnType.TsType};");
+        }
+
+        // Properties
+        foreach (var prop in members.Properties)
+        {
+            if (staticOnly && !prop.IsStatic) continue;
+
+            var modifiers = prop.IsStatic ? "static " : "";
+            var readonlyModifier = prop.IsReadonly ? "readonly " : "";
+
+            builder.AppendLine($"{indent}{modifiers}{readonlyModifier}{prop.TsAlias}: {prop.TsType};");
+        }
+
+        // Fields
+        foreach (var field in members.Fields)
+        {
+            if (staticOnly && !field.IsStatic) continue;
+
+            var modifiers = field.IsStatic ? "static " : "";
+            var readonlyModifier = field.IsReadonly ? "readonly " : "";
+
+            builder.AppendLine($"{indent}{modifiers}{readonlyModifier}{field.TsAlias}: {field.TsType};");
+        }
+
+        // Events
+        foreach (var evt in members.Events)
+        {
+            if (staticOnly && !evt.IsStatic) continue;
+
+            var modifiers = evt.IsStatic ? "static " : "";
+
+            builder.AppendLine($"{indent}{modifiers}readonly {evt.TsAlias}: {evt.TsType};");
+        }
+    }
+
+    private static string FormatGenericParameters(IReadOnlyList<GenericParameterModel> parameters)
+    {
+        if (parameters.Count == 0)
+            return "";
+
+        var formatted = parameters.Select(p =>
+        {
+            var constraints = p.Constraints.Count > 0
+                ? " extends " + string.Join(" & ", p.Constraints)
+                : "";
+            return $"{p.TsAlias}{constraints}";
+        });
+
+        return $"<{string.Join(", ", formatted)}>";
+    }
+}
