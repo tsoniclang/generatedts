@@ -33,9 +33,10 @@ const DOTNET_RUNTIME_PATH = process.env.DOTNET_RUNTIME_PATH ||
 
 // Assemblies that MUST use runtime path (not ref-pack)
 const RUNTIME_ONLY_ASSEMBLIES = [
-    'System.Private.CoreLib',  // Requires MetadataLoadContext, doesn't work from ref-pack
-    'System.Private.Uri',      // Private implementation assembly, not in ref-pack
-    'System.Private.Xml'       // Private implementation assembly, not in ref-pack
+    'System.Private.CoreLib',     // Requires MetadataLoadContext, doesn't work from ref-pack
+    'System.Private.Uri',         // Private implementation assembly, not in ref-pack
+    'System.Private.Xml',         // Private implementation assembly, not in ref-pack
+    'System.Private.Xml.Linq'     // Private implementation assembly, not in ref-pack
 ];
 
 const BCL_ASSEMBLIES = [
@@ -51,6 +52,7 @@ const BCL_ASSEMBLIES = [
     'System.ComponentModel',
     'System.ComponentModel.Primitives',
     'System.ComponentModel.TypeConverter',
+    'System.ComponentModel.EventBasedAsync',
     'System.ObjectModel',
     'System.Reflection',
     'System.Memory',
@@ -87,6 +89,8 @@ const BCL_ASSEMBLIES = [
     'System.Net.Primitives',
     'System.Net.Http',
     'System.Net.Http.Json',
+    'System.Net.Requests',
+    'System.Net.WebHeaderCollection',
     'System.Net.Sockets',
     'System.Net.WebSockets',
     'System.Net.Security',
@@ -108,6 +112,7 @@ const BCL_ASSEMBLIES = [
     'System.Xml.Serialization',
     'System.Xml.XPath',
     'System.Private.Xml',
+    'System.Private.Xml.Linq',
 
     // Security
     'System.Security.Cryptography',
