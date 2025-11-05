@@ -116,7 +116,7 @@ rendering the TypeScript declarations:
   `--interface-names camelCase`, `--method-names camelCase`,
   `--property-names camelCase`, `--enum-member-names camelCase`)
 - Recursively transforms all names in the `ProcessedAssembly` model
-- Tracks all transformations in a binding manifest: `{ "selectMany": "SelectMany" }`
+- Tracks all transformations in a binding manifest: `{ "SelectMany": { "Kind": "method", "Name": "SelectMany", "Alias": "selectMany", "FullName": "..." } }`
 - The binding manifest is written as `<Assembly>.bindings.json` alongside the
   `.d.ts` and `.metadata.json` files
 - Metadata files **always** contain original CLR names (not transformed names)

@@ -67,7 +67,7 @@ and dependency data.  It renders:
 | `<AssemblyName>.d.ts` | Result of `DeclarationRenderer.RenderDeclarations` |
 | `<AssemblyName>.metadata.json` | Serialised `MetadataWriter.WriteMetadataAsync` |
 | `<AssemblyName>.dependencies.json` | JSON emitted by `DependencyTracker.ToJson` |
-| `<AssemblyName>.bindings.json` | Binding map `{ "transformed": { "originalName": "...", "fullName": "..." } }` (only if naming transforms applied) |
+| `<AssemblyName>.bindings.json` | Binding map `{ "CLRName": { "Kind": "...", "Name": "CLRName", "Alias": "tsName", "FullName": "..." } }` (only if naming transforms applied) |
 
 Logging (when requested) uses `Diagnostics/GenerationLogger.cs` to capture
 warnings emitted by `TypeMapper`.
