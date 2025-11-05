@@ -2,7 +2,7 @@
 set -e
 
 # Build script for tsbindgen
-# Outputs to artifacts/ directory following .NET SDK conventions
+# Uses standard .NET SDK build paths configured in Directory.Build.props
 #
 # Usage:
 #   ./build.sh              # Build for current platform only
@@ -28,20 +28,21 @@ if [[ "$ALL_ARCHS" == "true" ]]; then
     dotnet publish src/tsbindgen/tsbindgen.csproj \
       --configuration Release \
       --runtime "$rid" \
-      --self-contained false \
-      --artifacts-path artifacts/
+      --self-contained false
   done
 
   echo ""
   echo "Build complete for all architectures!"
-  echo "Output: artifacts/publish/tsbindgen/release_*/"
+  echo "Output locations:"
+  for rid in "${RIDS[@]}"; do
+    echo "  - artifacts/bin/tsbindgen/Release/net10.0/$rid/publish/"
+  done
 else
   # Single-arch build (current platform)
   dotnet publish src/tsbindgen/tsbindgen.csproj \
-    --configuration Release \
-    --artifacts-path artifacts/
+    --configuration Release
 
   echo ""
   echo "Build complete!"
-  echo "Output: artifacts/publish/tsbindgen/release/"
+  echo "Output: artifacts/bin/tsbindgen/Release/net10.0/publish/"
 fi
