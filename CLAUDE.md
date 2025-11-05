@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code when working with the generatedts project.
+This file provides guidance to Claude Code when working with the tsbindgen project.
 
 ## Critical Guidelines
 
@@ -155,7 +155,7 @@ Only after reading these documents should you proceed with implementation tasks.
 
 ## Project Overview
 
-**generatedts** is a .NET tool that generates TypeScript declaration files (.d.ts) and metadata sidecars (.metadata.json) from .NET assemblies using reflection.
+**tsbindgen** is a .NET tool that generates TypeScript declaration files (.d.ts) and metadata sidecars (.metadata.json) from .NET assemblies using reflection.
 
 ### Purpose
 
@@ -191,7 +191,7 @@ Every .NET assembly generates two companion files:
 ### Code Organization
 
 ```
-src/generatedts/                 # C# implementation
+src/tsbindgen/                 # C# implementation
 ├── Program.cs                    # CLI entry point
 ├── AssemblyProcessor.cs          # Reflection and type extraction
 ├── TypeMapper.cs                 # C# → TypeScript type mapping
@@ -362,7 +362,7 @@ TS6200 - Duplicate type aliases (expected for branded types)
 ### Generating Declarations for an Assembly
 
 ```bash
-dotnet run --project src/generatedts/generatedts.csproj -- \
+dotnet run --project src/tsbindgen/tsbindgen.csproj -- \
   /path/to/Assembly.dll \
   --out-dir output/
 ```
@@ -401,10 +401,10 @@ grep "System.Collections.Generic.d.ts" .tests/run.txt
 
 ```bash
 # Build project
-dotnet build src/generatedts/generatedts.csproj
+dotnet build src/tsbindgen/tsbindgen.csproj
 
 # Run tool
-dotnet run --project src/generatedts/generatedts.csproj -- <args>
+dotnet run --project src/tsbindgen/tsbindgen.csproj -- <args>
 
 # Validate all BCL assemblies
 node scripts/validate.js

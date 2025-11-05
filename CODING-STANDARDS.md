@@ -1,4 +1,4 @@
-# Coding Standards - generatedts
+# Coding Standards - tsbindgen
 
 ## C# Code Style
 

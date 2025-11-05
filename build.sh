@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-# Build script for generatedts
+# Build script for tsbindgen
 # Outputs to artifacts/ directory following .NET SDK conventions
 #
 # Usage:
@@ -13,7 +13,7 @@ if [[ "$1" == "--all-archs" ]]; then
   ALL_ARCHS=true
 fi
 
-echo "Building generatedts..."
+echo "Building tsbindgen..."
 
 # Clean previous artifacts
 rm -rf artifacts/
@@ -25,7 +25,7 @@ if [[ "$ALL_ARCHS" == "true" ]]; then
   for rid in "${RIDS[@]}"; do
     echo ""
     echo "Building for $rid..."
-    dotnet publish src/generatedts/generatedts.csproj \
+    dotnet publish src/tsbindgen/tsbindgen.csproj \
       --configuration Release \
       --runtime "$rid" \
       --self-contained false \
@@ -34,14 +34,14 @@ if [[ "$ALL_ARCHS" == "true" ]]; then
 
   echo ""
   echo "Build complete for all architectures!"
-  echo "Output: artifacts/publish/generatedts/release_*/"
+  echo "Output: artifacts/publish/tsbindgen/release_*/"
 else
   # Single-arch build (current platform)
-  dotnet publish src/generatedts/generatedts.csproj \
+  dotnet publish src/tsbindgen/tsbindgen.csproj \
     --configuration Release \
     --artifacts-path artifacts/
 
   echo ""
   echo "Build complete!"
-  echo "Output: artifacts/publish/generatedts/release/"
+  echo "Output: artifacts/publish/tsbindgen/release/"
 fi

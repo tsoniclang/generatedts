@@ -2,11 +2,11 @@
 
 The `<Assembly>.bindings.json` file maps the TypeScript-facing names produced by
 the naming transform back to their CLR counterparts.  The manifest is emitted by
-`generatedts` when any naming transform (camelCase, etc.) is active.
+`tsbindgen` when any naming transform (camelCase, etc.) is active.
 
 ## File location
 
-For every assembly processed, `generatedts` now emits:
+For every assembly processed, `tsbindgen` now emits:
 
 ```
 <OutputDir>/
