@@ -148,7 +148,7 @@ public static class TypeScriptEmit
 
         // Emit getter/setter methods for properties to satisfy interface contracts
         // Pass the namespace model so we can look up interface types
-        EmitPropertyMethods(builder, type.Members, type.Implements, namespaceModel, typeBindings, indent + "    ", currentNamespace);
+        EmitPropertyMethods(builder, type.Members, type.Implements, namespaceModel, typeBindings, indent + "    ", currentNamespace, type);
 
         builder.AppendLine($"{indent}}}");
     }
@@ -267,7 +267,7 @@ public static class TypeScriptEmit
     /// Generates overloads based on implemented interfaces.
     /// Handles name conflicts with existing methods by adding numeric suffixes.
     /// </summary>
-    private static void EmitPropertyMethods(StringBuilder builder, MemberCollectionModel members, IReadOnlyList<TypeReference> implements, NamespaceModel namespaceModel, TypeBindings typeBindings, string indent, string currentNamespace)
+    private static void EmitPropertyMethods(StringBuilder builder, MemberCollectionModel members, IReadOnlyList<TypeReference> implements, NamespaceModel namespaceModel, TypeBindings typeBindings, string indent, string currentNamespace, TypeModel typeModel)
     {
         // Collect existing method names to detect conflicts
         var existingMethodNames = new HashSet<string>(
@@ -303,6 +303,17 @@ public static class TypeScriptEmit
 
                     if (interfaceProp != null)
                     {
+                        // Check if this interface property type references type parameters not in current class scope
+                        // Example: IEnumerator<T>.Current returns T, but implementing class uses IEnumerator<KeyValuePair<K,V>>
+                        // We can't emit "current(): T" because T is not in scope
+                        var referencedTypeParams = CollectTypeParameters(interfaceProp.Type);
+                        var classTypeParams = new HashSet<string>(typeModel.GenericParameters.Select(p => p.TsAlias));
+
+                        // Skip this overload if it references type parameters not defined on this class
+                        var hasOutOfScopeTypeParams = referencedTypeParams.Any(tp => !classTypeParams.Contains(tp));
+                        if (hasOutOfScopeTypeParams)
+                            continue;
+
                         // Always use current namespace for type resolution so cross-namespace types get prefixed
                         var interfacePropertyType = ToTypeScriptType(interfaceProp.Type, currentNamespace);
                         // Only add if different from the property's own type
@@ -476,6 +487,35 @@ public static class TypeScriptEmit
             return true; // TKey, TValue, TResult, etc.
 
         return false;
+    }
+
+    /// <summary>
+    /// Recursively collects all type parameter names referenced in a type.
+    /// Example: List_1<T> returns ["T"], Dictionary_2<TKey, TValue> returns ["TKey", "TValue"]
+    /// </summary>
+    private static HashSet<string> CollectTypeParameters(TypeReference typeRef)
+    {
+        var result = new HashSet<string>();
+
+        // If this is a type parameter itself, add it
+        if (IsTypeParameter(typeRef))
+        {
+            result.Add(typeRef.TypeName);
+        }
+
+        // Recursively collect from generic arguments
+        foreach (var arg in typeRef.GenericArgs)
+        {
+            result.UnionWith(CollectTypeParameters(arg));
+        }
+
+        // Recursively collect from declaring type (for nested types)
+        if (typeRef.DeclaringType != null)
+        {
+            result.UnionWith(CollectTypeParameters(typeRef.DeclaringType));
+        }
+
+        return result;
     }
 
     /// <summary>
