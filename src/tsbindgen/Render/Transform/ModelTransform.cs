@@ -37,6 +37,15 @@ public static class ModelTransform
 
     private static TypeModel BuildType(TypeSnapshot snapshot, GeneratorConfig config, string currentNamespace)
     {
+        // Build TsAlias using structured naming + CLI transformations
+        var baseName = TsNaming.ForAnalysis(snapshot.Binding.Type);
+        var tsAlias = snapshot.Kind switch
+        {
+            TypeKind.Interface => NameTransformation.Apply(baseName, config.InterfaceNames),
+            TypeKind.Class => NameTransformation.Apply(baseName, config.ClassNames),
+            _ => baseName
+        };
+
         var genericParams = snapshot.GenericParameters
             .Select(gp => new GenericParameterModel(
                 gp.Name,
@@ -49,6 +58,7 @@ public static class ModelTransform
 
         return new TypeModel(
             snapshot.ClrName,
+            tsAlias,
             snapshot.Kind,
             snapshot.IsStatic,
             snapshot.IsSealed,
