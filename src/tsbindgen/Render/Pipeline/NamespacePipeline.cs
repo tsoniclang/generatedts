@@ -9,12 +9,15 @@ using tsbindgen.Snapshot;
 namespace tsbindgen.Render.Pipeline;
 
 /// <summary>
-/// Orchestrates Phase 3 pipeline: Transform → Analyze → Emit → Write.
+/// Orchestrates Phase 3-4 pipeline: Transform → Analyze → Emit → Write.
+/// Phase 3: Transform (creates TsAlias) + Analysis passes
+/// Phase 4: Emit (.d.ts, metadata, bindings, stubs) + Write to disk
 /// </summary>
 public static class NamespacePipeline
 {
     /// <summary>
-    /// Builds NamespaceModels from NamespaceBundles, applying all transformations and analysis.
+    /// Phase 3: Builds NamespaceModels from NamespaceBundles.
+    /// Applies name transformations (creates TsAlias) and analysis passes.
     /// </summary>
     public static IReadOnlyDictionary<string, NamespaceModel> BuildModels(
         IReadOnlyDictionary<string, NamespaceBundle> bundles,
@@ -29,6 +32,7 @@ public static class NamespacePipeline
 
             // Apply analysis passes
             model = DiamondAnalysis.Apply(model);
+            // model = InterfaceReduction.Apply(model);  // DISABLED - causing TS2304 errors
             model = CovarianceAdjustments.Apply(model);
             model = OverloadAdjustments.Apply(model);
             model = ExplicitInterfaceReview.Apply(model);
@@ -41,7 +45,7 @@ public static class NamespacePipeline
     }
 
     /// <summary>
-    /// Renders a single namespace to all artifacts.
+    /// Phase 4: Renders a single namespace to all artifacts (strings).
     /// </summary>
     public static NamespaceArtifacts RenderNamespace(NamespaceModel model, IReadOnlyDictionary<string, NamespaceModel> allModels)
     {
@@ -68,7 +72,7 @@ public static class NamespacePipeline
     }
 
     /// <summary>
-    /// Runs the complete Phase 3 pipeline: builds models, renders artifacts, writes files.
+    /// Runs the complete Phase 3-4 pipeline: builds models, renders artifacts, writes files.
     /// </summary>
     public static void Run(
         string outputDir,
@@ -76,7 +80,8 @@ public static class NamespacePipeline
         GeneratorConfig config,
         bool verbose)
     {
-        Console.WriteLine("Phase 3: Rendering TypeScript declarations...");
+        Console.WriteLine("Phase 3: Transforming to TypeScript models...");
+        Console.WriteLine("Phase 4: Rendering TypeScript declarations...");
 
         // Build models
         var models = BuildModels(bundles, config);

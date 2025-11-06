@@ -192,6 +192,9 @@ public static class TypeScriptEmit
         // Pass the namespace model so we can look up interface types
         EmitPropertyMethods(builder, type.Members, type.Implements, namespaceModel, typeBindings, indent + "    ", currentNamespace, type);
 
+        // Emit missing interface members (explicitly implemented members in C#)
+        EmitMissingInterfaceMembers(builder, type, namespaceModel, typeBindings, indent + "    ", currentNamespace);
+
         builder.AppendLine($"{indent}}}");
     }
 
@@ -327,8 +330,8 @@ public static class TypeScriptEmit
                 var modifiers = prop.IsStatic ? "static " : "";
                 var propertyType = ToTypeScriptType(prop.Type, currentNamespace);
 
-                // Use property name directly (camelCase) - no "get"/"set" prefix
-                var methodName = ToCamelCase(prop.TsAlias);
+                // Use property name directly - no "get"/"set" prefix
+                var methodName = prop.TsAlias;
 
                 // Emit getter
                 builder.AppendLine($"{indent}{modifiers}{methodName}(): {propertyType};");
@@ -350,7 +353,7 @@ public static class TypeScriptEmit
 
             var modifiers = field.IsStatic ? "static " : "";
             var fieldType = ToTypeScriptType(field.Type, currentNamespace);
-            var methodName = ToCamelCase(field.TsAlias);
+            var methodName = field.TsAlias;
 
             // For static fields that reference class type parameters, add them as method-level generics
             var methodGenericParams = new List<GenericParameterModel>();
@@ -413,7 +416,7 @@ public static class TypeScriptEmit
     {
         // Collect existing method names to detect conflicts
         var existingMethodNames = new HashSet<string>(
-            members.Methods.Select(m => ToCamelCase(m.TsAlias)),
+            members.Methods.Select(m => m.TsAlias),
             StringComparer.Ordinal);
 
         foreach (var prop in members.Properties)
@@ -423,9 +426,9 @@ public static class TypeScriptEmit
 
             var propertyType = ToTypeScriptType(prop.Type, currentNamespace);
 
-            // Use property name directly (camelCase) - no "get"/"set" prefix
+            // Use property name directly - no "get"/"set" prefix
             // C# doesn't allow property and method with same name, so no conflicts
-            var baseMethodName = ToCamelCase(prop.TsAlias);
+            var baseMethodName = prop.TsAlias;
 
             // Resolve name conflicts (shouldn't happen, but defensive)
             var methodName = ResolveConflict(baseMethodName, existingMethodNames);
@@ -525,6 +528,144 @@ public static class TypeScriptEmit
     }
 
     /// <summary>
+    /// Emits interface members that are missing from the class (explicitly implemented in C#).
+    /// TypeScript doesn't support explicit interface implementation, so all interface members
+    /// must be present on the class.
+    /// </summary>
+    private static void EmitMissingInterfaceMembers(StringBuilder builder, TypeModel type, NamespaceModel namespaceModel, TypeBindings typeBindings, string indent, string currentNamespace)
+    {
+        // Collect all member names already on the class
+        var existingMembers = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var method in type.Members.Methods)
+            existingMembers.Add(method.TsAlias);
+
+        foreach (var prop in type.Members.Properties)
+            existingMembers.Add(prop.TsAlias);
+
+        foreach (var field in type.Members.Fields)
+            existingMembers.Add(field.TsAlias);
+
+        foreach (var evt in type.Members.Events)
+            existingMembers.Add(evt.TsAlias);
+
+        // Check each implemented interface
+        foreach (var interfaceRef in type.Implements)
+        {
+            var interfaceType = FindInterfaceType(interfaceRef, namespaceModel, currentNamespace);
+            if (interfaceType == null) continue;
+
+            // Check for missing properties
+            foreach (var interfaceProp in interfaceType.Members.Properties)
+            {
+                var memberName = interfaceProp.TsAlias;
+
+                if (!existingMembers.Contains(memberName))
+                {
+                    // Check if property type references type parameters not defined on the class
+                    var referencedTypeParams = CollectTypeParameters(interfaceProp.Type);
+                    var classTypeParams = new HashSet<string>(type.GenericParameters.Select(p => p.TsAlias));
+
+                    // Skip if property uses type parameters not available on the class
+                    if (referencedTypeParams.Any(tp => !classTypeParams.Contains(tp)))
+                        continue;
+
+                    // Emit missing property as getter/setter methods
+                    var propertyType = ToTypeScriptType(interfaceProp.Type, currentNamespace);
+                    var modifiers = interfaceProp.IsStatic ? "static " : "";
+
+                    // Emit getter
+                    builder.AppendLine($"{indent}{modifiers}{memberName}(): {propertyType};");
+
+                    // Emit setter if not readonly
+                    if (!interfaceProp.IsReadonly)
+                    {
+                        var voidType = currentNamespace == "System" ? "Void" : "System.Void";
+                        builder.AppendLine($"{indent}{modifiers}{memberName}(value: {propertyType}): {voidType};");
+                    }
+
+                    // Track in bindings
+                    typeBindings.Members[memberName] = new MemberBindingInfo(
+                        Kind: "method",
+                        ClrName: interfaceProp.ClrName,
+                        ClrMemberType: "property",
+                        Access: interfaceProp.IsReadonly ? "get" : "get+set");
+
+                    existingMembers.Add(memberName);
+                }
+            }
+
+            // Check for missing methods (less common, but possible)
+            foreach (var interfaceMethod in interfaceType.Members.Methods)
+            {
+                var memberName = interfaceMethod.TsAlias;
+
+                // Skip if already exists (checking just by name, not full signature)
+                if (!existingMembers.Contains(memberName))
+                {
+                    // Check if method uses type parameters not defined on the class
+                    var referencedTypeParams = new HashSet<string>();
+                    foreach (var param in interfaceMethod.Parameters)
+                        referencedTypeParams.UnionWith(CollectTypeParameters(param.Type));
+                    referencedTypeParams.UnionWith(CollectTypeParameters(interfaceMethod.ReturnType));
+
+                    var classTypeParams = new HashSet<string>(type.GenericParameters.Select(p => p.TsAlias));
+
+                    // Skip if method uses type parameters not available on the class
+                    if (referencedTypeParams.Any(tp => !classTypeParams.Contains(tp)))
+                        continue;
+
+                    var genericParams = FormatGenericParameters(interfaceMethod.GenericParameters, currentNamespace);
+                    var parameters = string.Join(", ", interfaceMethod.Parameters.Select(p => $"{EscapeIdentifier(p.Name)}: {ToTypeScriptType(p.Type, currentNamespace)}"));
+                    var returnType = ToTypeScriptType(interfaceMethod.ReturnType, currentNamespace);
+                    var modifiers = interfaceMethod.IsStatic ? "static " : "";
+
+                    builder.AppendLine($"{indent}{modifiers}{memberName}{genericParams}({parameters}): {returnType};");
+
+                    // Track in bindings
+                    typeBindings.Members[memberName] = new MemberBindingInfo(
+                        Kind: "method",
+                        ClrName: interfaceMethod.ClrName,
+                        ClrMemberType: "method");
+
+                    existingMembers.Add(memberName);
+                }
+            }
+
+            // Check for missing events
+            foreach (var interfaceEvent in interfaceType.Members.Events)
+            {
+                var memberName = interfaceEvent.TsAlias;
+
+                if (!existingMembers.Contains(memberName))
+                {
+                    // Check if event type references type parameters not defined on the class
+                    var referencedTypeParams = CollectTypeParameters(interfaceEvent.Type);
+                    var classTypeParams = new HashSet<string>(type.GenericParameters.Select(p => p.TsAlias));
+
+                    // Skip if event uses type parameters not available on the class
+                    if (referencedTypeParams.Any(tp => !classTypeParams.Contains(tp)))
+                        continue;
+
+                    // Emit event as readonly property (events are readonly in TypeScript declarations)
+                    var eventType = ToTypeScriptType(interfaceEvent.Type, currentNamespace);
+                    var modifiers = interfaceEvent.IsStatic ? "static " : "";
+
+                    builder.AppendLine($"{indent}{modifiers}readonly {memberName}: {eventType};");
+
+                    // Track in bindings
+                    typeBindings.Members[memberName] = new MemberBindingInfo(
+                        Kind: "event",
+                        ClrName: interfaceEvent.ClrName,
+                        ClrMemberType: "event");
+
+                    existingMembers.Add(memberName);
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Resolves name conflicts by appending numeric suffix.
     /// Also adds the resolved name to the existing names set.
     /// </summary>
@@ -589,47 +730,6 @@ public static class TypeScriptEmit
         return $"<{string.Join(", ", formatted)}>";
     }
 
-    /// <summary>
-    /// Converts PascalCase identifier to camelCase.
-    /// Escapes TypeScript reserved keywords by prefixixng with "$$".
-    /// </summary>
-    private static string ToCamelCase(string name)
-    {
-        if (string.IsNullOrEmpty(name))
-            return name;
-
-        // Convert first character to lowercase if needed
-        var camelName = char.IsLower(name[0])
-            ? name
-            : char.ToLowerInvariant(name[0]) + name.Substring(1);
-
-        // Escape TypeScript reserved keywords
-        if (IsTypeScriptReservedWord(camelName))
-            return "$$" + camelName;
-
-        return camelName;
-    }
-
-    /// <summary>
-    /// Checks if a name is a TypeScript reserved keyword.
-    /// </summary>
-    private static bool IsTypeScriptReservedWord(string name)
-    {
-        // TypeScript/JavaScript reserved keywords that can conflict with property names
-        return name switch
-        {
-            "break" or "case" or "catch" or "class" or "const" or "continue" or
-            "debugger" or "default" or "delete" or "do" or "else" or "enum" or
-            "export" or "extends" or "false" or "finally" or "for" or "function" or
-            "if" or "import" or "in" or "instanceof" or "new" or "null" or
-            "return" or "super" or "switch" or "this" or "throw" or "true" or
-            "try" or "typeof" or "var" or "void" or "while" or "with" or "yield" or
-            "let" or "static" or "implements" or "interface" or "package" or
-            "private" or "protected" or "public" or "as" or "async" or "await" or
-            "constructor" or "get" or "set" or "from" or "of" => true,
-            _ => false
-        };
-    }
 
     /// <summary>
     /// Checks if a TypeReference represents a generic type parameter (T, TKey, etc.)

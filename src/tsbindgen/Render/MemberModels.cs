@@ -10,7 +10,7 @@ public sealed record ConstructorModel(
     IReadOnlyList<ParameterModel> Parameters);
 
 /// <summary>
-/// Method model with both CLR and TS names.
+/// Method model with CLR and TS names (Phase 3).
 /// </summary>
 public sealed record MethodModel(
     string ClrName,
@@ -26,7 +26,7 @@ public sealed record MethodModel(
     MemberBinding Binding);
 
 /// <summary>
-/// Property model with both CLR and TS names.
+/// Property model with CLR and TS names (Phase 3).
 /// </summary>
 public sealed record PropertyModel(
     string ClrName,
@@ -41,7 +41,7 @@ public sealed record PropertyModel(
     TypeReference? ContractType);  // If not null, property has covariant return type
 
 /// <summary>
-/// Field model with both CLR and TS names.
+/// Field model with CLR and TS names (Phase 3).
 /// </summary>
 public sealed record FieldModel(
     string ClrName,
@@ -53,7 +53,7 @@ public sealed record FieldModel(
     MemberBinding Binding);
 
 /// <summary>
-/// Event model with both CLR and TS names.
+/// Event model with CLR and TS names (Phase 3).
 /// </summary>
 public sealed record EventModel(
     string ClrName,

@@ -251,38 +251,111 @@ Enable TypeScript code in the Tsonic compiler to reference .NET BCL types with f
 
 ## Architecture
 
-### Three-File System
+### Four-Phase Pipeline
 
-Every .NET assembly generates two companion files:
+**🚨 CRITICAL: The pipeline has FOUR distinct phases! 🚨**
 
-1. **TypeScript Declarations** (`*.d.ts`)
+The generator uses a strict four-phase pipeline:
+
+**Phase 1: Reflection** (Pure CLR domain)
+- Input: .NET assembly DLL files
+- Process: System.Reflection over assemblies
+- Output: `AssemblySnapshot` - pure CLR metadata (no TypeScript concepts)
+- Files: `*.snapshot.json` (optional debug output)
+- Code: `src/tsbindgen/Reflection/Reflect.cs`
+
+**Phase 2: Aggregation** (Pure CLR domain)
+- Input: Multiple `AssemblySnapshot` files
+- Process: Merge types from multiple assemblies by namespace
+- Output: `NamespaceBundle` - aggregated CLR data (still no TypeScript concepts)
+- Files: `namespaces/*.snapshot.json` (optional debug output)
+- Code: `src/tsbindgen/Snapshot/Aggregate.cs`
+
+**Phase 3: Transform** (CLR→TypeScript bridge - creates TsAlias)
+- Input: `NamespaceBundle` (CLR)
+- Process:
+  - `ModelTransform.Build()` - Apply name transformations via `NameTransformation.Apply()`
+  - Analysis passes (covariance, diamond inheritance, explicit interfaces, etc.)
+- Output: `NamespaceModel` (in-memory, has both CLR names and TS aliases)
+- Code: `src/tsbindgen/Render/Transform/ModelTransform.cs`
+- **This is where `TsAlias` is created based on CLI options**
+
+**Phase 4: Emit** (TypeScript domain - generates files)
+- Input: `NamespaceModel` (with TsAlias already set)
+- Process:
+  - `TypeScriptEmit` - Generate `.d.ts` declarations
+  - `MetadataEmit` - Generate `.metadata.json`
+  - `BindingEmit` - Generate `.bindings.json` (CLR→TS name mappings)
+  - `ModuleStubEmit` - Generate `.js` module stubs
+- Output: String content for files
+- Write to disk:
+  - `index.d.ts` - TypeScript declarations
+  - `metadata.json` - CLR-specific info for Tsonic compiler
+  - `bindings.json` - CLR name → TS name mappings
+  - `index.js` - Module stub for imports
+  - `snapshot.json` - Post-analysis debug snapshot
+- Code: `src/tsbindgen/Render/Output/*.cs`
+
+**CRITICAL**:
+- `TsAlias` is created in **Phase 3** (Transform) using `NameTransformation.Apply()`
+- Phases 1-2 use **only CLR names** (no TypeScript concepts)
+- Phase 3 creates **both CLR names and TsAlias** in models
+- Phase 4 uses the **TsAlias** from models (no further name transformation)
+
+### Output Files Per Namespace
+
+Each namespace generates multiple companion files:
+
+1. **TypeScript Declarations** (`index.d.ts`)
    - Standard TypeScript type definitions
    - Namespaces map to C# namespaces
    - Classes, interfaces, enums, delegates
    - Generic types with proper constraints
    - Branded numeric types (int, decimal, etc.)
 
-2. **Metadata Sidecars** (`*.metadata.json`)
+2. **Metadata Sidecars** (`metadata.json`)
    - CLR-specific information (virtual/override, static, ref/out)
    - Used by Tsonic compiler for correct C# code generation
    - Tracks intentional omissions (indexers, generic static members)
-   - Full type signatures for ambiguous cases
+
+3. **Binding Metadata** (`bindings.json`)
+   - Maps TypeScript names to CLR names
+   - Tracks member name transformations
+   - Used for runtime binding
 
 ### Code Organization
 
 ```
-src/tsbindgen/                 # C# implementation
-├── Program.cs                    # CLI entry point
-├── AssemblyProcessor.cs          # Reflection and type extraction
-├── TypeMapper.cs                 # C# → TypeScript type mapping
-├── DeclarationRenderer.cs        # TypeScript output generation
-├── MetadataAssemblyLoader.cs     # MetadataLoadContext handling
-└── TypeInfo.cs                   # Data structures
+src/tsbindgen/
+├── Cli/
+│   ├── Program.cs                    # CLI entry point
+│   └── GenerateCommand.cs            # Pipeline orchestration (Phases 1-4)
+├── Reflection/
+│   └── Reflect.cs                    # Phase 1: Assembly reflection
+├── Snapshot/
+│   ├── SnapshotModels.cs             # Phase 1-2 data structures (CLR only, no TsAlias)
+│   ├── SnapshotIO.cs                 # Snapshot persistence
+│   └── Aggregate.cs                  # Phase 2: Namespace aggregation
+├── Render/
+│   ├── Pipeline/
+│   │   └── NamespacePipeline.cs      # Phase 3-4 orchestration
+│   ├── Transform/
+│   │   └── ModelTransform.cs         # Phase 3: Transform (creates TsAlias)
+│   ├── Analysis/                     # Phase 3: Analysis passes
+│   ├── Output/
+│   │   ├── TypeScriptEmit.cs         # Phase 4: .d.ts emission
+│   │   ├── MetadataEmit.cs           # Phase 4: metadata.json emission
+│   │   └── BindingEmit.cs            # Phase 4: bindings.json emission
+│   ├── MemberModels.cs               # Phase 3 data structures (has TsAlias)
+│   ├── TypeModel.cs                  # Phase 3 type models (has TsAlias)
+│   └── NamespaceModel.cs             # Phase 3 namespace model (has TsAlias)
+└── Config/
+    └── NameTransformation.cs         # Name transformation logic (used in Phase 3)
 
 scripts/
-└── validate.js                   # Full BCL validation script
+└── validate.js                       # Full BCL validation script
 
-.analysis/                        # Generated analysis reports
+.analysis/                            # Generated analysis reports
 ├── session-status-report-*.md
 ├── remaining-errors-comprehensive.md
 └── boolean-fix-impact.md

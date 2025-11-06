@@ -5,8 +5,9 @@ using tsbindgen.Snapshot;
 namespace tsbindgen.Render.Transform;
 
 /// <summary>
-/// Converts NamespaceBundle (from Phase 2) to NamespaceModel (for Phase 3).
-/// Applies naming transforms and normalizes structure.
+/// Phase 3: Converts NamespaceBundle (from Phase 2) to NamespaceModel.
+/// Applies name transformations (creates TsAlias via NameTransformation.Apply).
+/// This is the CLR→TypeScript bridge.
 /// </summary>
 public static class ModelTransform
 {
