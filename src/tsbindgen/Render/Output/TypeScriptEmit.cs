@@ -307,7 +307,8 @@ public static class TypeScriptEmit
                 // If not readonly, emit setter as overload of same method
                 if (!prop.IsReadonly)
                 {
-                    builder.AppendLine($"{indent}{modifiers}{methodName}(value: {propertyType}): System.Void;");
+                    var voidType = currentNamespace == "System" ? "Void" : "System.Void";
+                    builder.AppendLine($"{indent}{modifiers}{methodName}(value: {propertyType}): {voidType};");
                 }
             }
         }
@@ -346,7 +347,8 @@ public static class TypeScriptEmit
             // If not readonly, emit setter as overload
             if (!field.IsReadonly)
             {
-                builder.AppendLine($"{indent}{modifiers}{methodName}{genericParams}(value: {fieldType}): System.Void;");
+                var voidType = currentNamespace == "System" ? "Void" : "System.Void";
+                builder.AppendLine($"{indent}{modifiers}{methodName}{genericParams}(value: {fieldType}): {voidType};");
             }
 
             // Track binding
@@ -448,14 +450,16 @@ public static class TypeScriptEmit
             // If not readonly, emit setter overloads as additional overloads of the same method
             if (!prop.IsReadonly)
             {
+                var voidType = currentNamespace == "System" ? "Void" : "System.Void";
+
                 // Emit setter overloads
                 foreach (var interfaceType in interfaceTypes.OrderBy(t => t))
                 {
-                    builder.AppendLine($"{indent}{methodName}(value: {interfaceType}): System.Void;");
+                    builder.AppendLine($"{indent}{methodName}(value: {interfaceType}): {voidType};");
                 }
 
                 // Emit setter implementation signature
-                builder.AppendLine($"{indent}{methodName}(value: {propertyType}): System.Void;");
+                builder.AppendLine($"{indent}{methodName}(value: {propertyType}): {voidType};");
             }
 
             // Track binding (single entry for both getter and setter)
