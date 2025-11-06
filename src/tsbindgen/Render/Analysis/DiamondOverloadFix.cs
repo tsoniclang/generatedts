@@ -63,6 +63,18 @@ public static class DiamondOverloadFix
                 var methods1 = GetAllMethods(interface1, typeLookup);
                 var methods2 = GetAllMethods(interface2, typeLookup);
 
+                // Build substitution maps for both interfaces
+                var interface1Type = FindInterfaceType(interface1, typeLookup);
+                var interface2Type = FindInterfaceType(interface2, typeLookup);
+
+                var substitutions1 = interface1Type != null
+                    ? GenericSubstitution.BuildSubstitutionMap(interface1, interface1Type.GenericParameters)
+                    : new Dictionary<string, TypeReference>();
+
+                var substitutions2 = interface2Type != null
+                    ? GenericSubstitution.BuildSubstitutionMap(interface2, interface2Type.GenericParameters)
+                    : new Dictionary<string, TypeReference>();
+
                 // Find methods with same name but different signatures
                 foreach (var method1 in methods1)
                 {
@@ -71,15 +83,26 @@ public static class DiamondOverloadFix
                         if (method1.TsAlias == method2.TsAlias &&
                             !AreSameSignature(method1, method2))
                         {
+                            // Substitute generic parameters before adding
+                            var substitutedMethod1 = GenericSubstitution.SubstituteMethod(method1, substitutions1);
+                            var substitutedMethod2 = GenericSubstitution.SubstituteMethod(method2, substitutions2);
+
+                            // Check if substituted methods still reference undefined type parameters
+                            if (ReferencesUndefinedTypeParams(substitutedMethod1, type.GenericParameters))
+                                continue;
+
+                            if (ReferencesUndefinedTypeParams(substitutedMethod2, type.GenericParameters))
+                                continue;
+
                             // Found a conflict - need to add both overloads
                             if (!conflictingMethods.ContainsKey(method1.TsAlias))
                                 conflictingMethods[method1.TsAlias] = new List<MethodModel>();
 
-                            if (!conflictingMethods[method1.TsAlias].Any(m => AreSameSignature(m, method1)))
-                                conflictingMethods[method1.TsAlias].Add(method1);
+                            if (!conflictingMethods[method1.TsAlias].Any(m => AreSameSignature(m, substitutedMethod1)))
+                                conflictingMethods[method1.TsAlias].Add(substitutedMethod1);
 
-                            if (!conflictingMethods[method1.TsAlias].Any(m => AreSameSignature(m, method2)))
-                                conflictingMethods[method1.TsAlias].Add(method2);
+                            if (!conflictingMethods[method1.TsAlias].Any(m => AreSameSignature(m, substitutedMethod2)))
+                                conflictingMethods[method1.TsAlias].Add(substitutedMethod2);
                         }
                     }
                 }
@@ -179,6 +202,55 @@ public static class DiamondOverloadFix
             return false;
 
         return true;
+    }
+
+    private static TypeModel? FindInterfaceType(TypeReference typeRef, Dictionary<string, TypeModel> typeLookup)
+    {
+        var key = GetTypeKey(typeRef);
+        typeLookup.TryGetValue(key, out var type);
+        return type;
+    }
+
+    private static bool ReferencesUndefinedTypeParams(MethodModel method, IReadOnlyList<GenericParameterModel> availableTypeParams)
+    {
+        var availableNames = new HashSet<string>(availableTypeParams.Select(p => p.TsAlias));
+
+        // Add method-level type parameters
+        foreach (var gp in method.GenericParameters)
+            availableNames.Add(gp.TsAlias);
+
+        // Check return type
+        if (ReferencesUndefinedTypeParamsInType(method.ReturnType, availableNames))
+            return true;
+
+        // Check parameters
+        foreach (var param in method.Parameters)
+        {
+            if (ReferencesUndefinedTypeParamsInType(param.Type, availableNames))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool ReferencesUndefinedTypeParamsInType(TypeReference type, HashSet<string> availableNames)
+    {
+        // Check if this is an undefined type parameter
+        if (type.Namespace == null && !availableNames.Contains(type.TypeName))
+        {
+            // Type parameter names are typically single letters or start with T
+            if (type.TypeName.Length <= 2 || type.TypeName.StartsWith("T"))
+                return true;
+        }
+
+        // Check generic arguments recursively
+        foreach (var arg in type.GenericArgs)
+        {
+            if (ReferencesUndefinedTypeParamsInType(arg, availableNames))
+                return true;
+        }
+
+        return false;
     }
 
     private static string GetTypeKey(TypeReference typeRef)

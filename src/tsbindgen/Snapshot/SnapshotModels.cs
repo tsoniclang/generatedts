@@ -120,7 +120,13 @@ public enum SyntheticOverloadReason
     /// <summary>
     /// Added to satisfy base class method with covariant return type.
     /// </summary>
-    BaseClassCovariance
+    BaseClassCovariance,
+
+    /// <summary>
+    /// Added because base class has method with same name but different arity (parameter count).
+    /// TypeScript requires both signatures to be present on the derived class.
+    /// </summary>
+    BaseClassArityMismatch
 }
 
 /// <summary>

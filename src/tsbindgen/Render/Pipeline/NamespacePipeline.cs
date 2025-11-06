@@ -48,19 +48,35 @@ public static class NamespacePipeline
             reducedModels[clrName] = reducedModel;
         }
 
-        // Apply DiamondOverloadFix to resolve remaining diamond inheritance conflicts
-        var diamondFixedModels = new Dictionary<string, NamespaceModel>();
+        // Apply ExplicitInterfaceImplementation to add missing interface members
+        var interfaceFixedModels = new Dictionary<string, NamespaceModel>();
         foreach (var (clrName, model) in reducedModels)
         {
-            var fixedModel = DiamondOverloadFix.Apply(model, reducedModels);
+            var fixedModel = ExplicitInterfaceImplementation.Apply(model, reducedModels);
+            interfaceFixedModels[clrName] = fixedModel;
+        }
+
+        // Apply DiamondOverloadFix to resolve remaining diamond inheritance conflicts
+        var diamondFixedModels = new Dictionary<string, NamespaceModel>();
+        foreach (var (clrName, model) in interfaceFixedModels)
+        {
+            var fixedModel = DiamondOverloadFix.Apply(model, interfaceFixedModels);
             diamondFixedModels[clrName] = fixedModel;
+        }
+
+        // Apply BaseClassOverloadFix to add base class method overloads with substituted generics
+        var baseClassFixedModels = new Dictionary<string, NamespaceModel>();
+        foreach (var (clrName, model) in diamondFixedModels)
+        {
+            var fixedModel = BaseClassOverloadFix.Apply(model, diamondFixedModels);
+            baseClassFixedModels[clrName] = fixedModel;
         }
 
         // Apply StaticMethodOverloadFix to resolve TS2417 errors
         var staticFixedModels = new Dictionary<string, NamespaceModel>();
-        foreach (var (clrName, model) in diamondFixedModels)
+        foreach (var (clrName, model) in baseClassFixedModels)
         {
-            var fixedModel = StaticMethodOverloadFix.Apply(model, diamondFixedModels);
+            var fixedModel = StaticMethodOverloadFix.Apply(model, baseClassFixedModels);
             staticFixedModels[clrName] = fixedModel;
         }
 

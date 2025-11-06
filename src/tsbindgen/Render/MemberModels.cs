@@ -44,7 +44,10 @@ public sealed record PropertyModel(
     bool IsOverride,
     string Visibility,
     MemberBinding Binding,
-    TypeReference? ContractType);  // If not null, property has covariant return type
+    TypeReference? ContractType)  // If not null, property has covariant return type
+{
+    public bool SyntheticMember { get; init; }  // If true, added by analysis pass
+}
 
 /// <summary>
 /// Field model with CLR and TS names (Phase 3).
@@ -67,7 +70,10 @@ public sealed record EventModel(
     TypeReference Type,
     bool IsStatic,
     string Visibility,
-    MemberBinding Binding);
+    MemberBinding Binding)
+{
+    public bool SyntheticMember { get; init; }  // If true, added by analysis pass
+}
 
 /// <summary>
 /// Parameter model.
