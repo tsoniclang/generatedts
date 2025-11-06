@@ -5,73 +5,63 @@ namespace tsbindgen.Config;
 
 /// <summary>
 /// Single source of truth for TypeScript naming.
-/// All name transformations happen here - no heuristics in emitters.
+/// All names derived from TypeReference structure - no heuristics, no string parsing.
 /// </summary>
 public static class TsNaming
 {
     /// <summary>
-    /// Generates TypeScript alias for Phase 3 analysis.
-    /// Uses underscore for both nesting and arity: "Console_Error_1"
+    /// Generates TypeScript alias for analysis and lookups.
+    /// Uses underscore between all segments: "Console_Error_1"
     /// </summary>
-    public static string Phase3Alias(in ClrPath path)
+    /// <remarks>
+    /// Analysis naming joins all nesting levels with underscore.
+    /// Arity is preserved as-is in TypeName (e.g., "List_1").
+    /// Used as stable key for analysis passes and type lookups.
+    /// </remarks>
+    public static string ForAnalysis(TypeReference type)
     {
-        if (path.Segments.Count == 0)
-        {
-            return string.Empty;
-        }
-
-        var sb = new StringBuilder();
-
-        for (int i = 0; i < path.Segments.Count; i++)
-        {
-            if (i > 0)
-            {
-                sb.Append('_');
-            }
-
-            var segment = path.Segments[i];
-            sb.Append(segment.Identifier);
-
-            if (segment.GenericArity > 0)
-            {
-                sb.Append('_');
-                sb.Append(segment.GenericArity);
-            }
-        }
-
-        return sb.ToString();
+        var segments = CollectSegments(type);
+        return string.Join("_", segments);
     }
 
     /// <summary>
-    /// Generates TypeScript emit name for Phase 4 rendering.
-    /// Uses dollar sign for nesting, underscore for arity: "Console$Error_1"
+    /// Generates TypeScript emit name for rendering to .d.ts files.
+    /// Uses dollar sign between nested segments: "Console$Error_1"
     /// </summary>
-    public static string Phase4EmitName(in ClrPath path)
+    /// <remarks>
+    /// Emit naming uses $ for nesting to match TypeScript conventions.
+    /// Top-level types: "List_1"
+    /// Nested types: "Console$Error_1"
+    /// Deep nesting: "Outer_1$Middle$Inner_2"
+    /// Types with underscores: "BIND_OPTS" (unchanged, not nested)
+    /// </remarks>
+    public static string ForEmit(TypeReference type)
     {
-        if (path.Segments.Count == 0)
+        var segments = CollectSegments(type);
+        return string.Join("$", segments);
+    }
+
+    /// <summary>
+    /// Collects type name segments from leaf to root via DeclaringType chain.
+    /// Returns segments in correct order (root..leaf).
+    /// </summary>
+    /// <remarks>
+    /// TypeName already contains arity suffix (e.g., "List_1", "Error_1").
+    /// Underscores in TypeName are preserved (e.g., "BIND_OPTS", "Inner_With_Underscore").
+    /// DeclaringType chain provides exact nesting hierarchy with no ambiguity.
+    /// </remarks>
+    private static List<string> CollectSegments(TypeReference type)
+    {
+        var segments = new List<string>();
+        var current = type;
+
+        // Walk up declaring type chain
+        while (current != null)
         {
-            return string.Empty;
+            segments.Insert(0, current.TypeName); // Insert at front for correct order
+            current = current.DeclaringType;
         }
 
-        var sb = new StringBuilder();
-
-        for (int i = 0; i < path.Segments.Count; i++)
-        {
-            if (i > 0)
-            {
-                sb.Append('$');
-            }
-
-            var segment = path.Segments[i];
-            sb.Append(segment.Identifier);
-
-            if (segment.GenericArity > 0)
-            {
-                sb.Append('_');
-                sb.Append(segment.GenericArity);
-            }
-        }
-
-        return sb.ToString();
+        return segments;
     }
 }
