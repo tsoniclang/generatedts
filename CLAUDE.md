@@ -4,6 +4,86 @@ This file provides guidance to Claude Code when working with the tsbindgen proje
 
 ## Critical Guidelines
 
+### FUNCTIONAL PROGRAMMING STYLE - MANDATORY
+
+**🚨 CRITICAL ARCHITECTURAL RULE: This codebase uses strict functional programming. 🚨**
+
+#### All Implementation Code Must Be:
+
+1. **Static classes only** - No instance classes for logic
+2. **Pure functions** - No mutable state, no side effects (except I/O)
+3. **Immutable data** - Records and data classes are immutable
+
+#### File Naming Convention - NO "-ER" SUFFIX
+
+**NEVER use "-er" or "-or" suffix in file names. This implies agent/doer patterns (OOP thinking).**
+
+```
+✅ CORRECT naming (functional style):
+- TypeScriptEmit.cs      (noun phrase - "the TypeScript emission")
+- MetadataEmit.cs        (noun phrase - "the metadata emission")
+- Reflect.cs             (verb as noun - "reflection operations")
+- NameTransformation.cs  (noun phrase - "name transformation")
+- ModelBuild.cs          (noun phrase - "model building")
+
+❌ WRONG naming (OOP agent/doer pattern):
+- TypeScriptEmitter.cs   (agent that emits)
+- MetadataGenerator.cs   (agent that generates)
+- TypeMapper.cs          (agent that maps)
+- AssemblyProcessor.cs   (agent that processes)
+- ModelBuilder.cs        (agent that builds) ← FIX THIS
+```
+
+#### Code Structure Examples
+
+```csharp
+// ✅ CORRECT - Static class with pure functions
+public static class TypeScriptEmit
+{
+    public static string Emit(NamespaceModel model)
+    {
+        // Pure function - takes input, returns output, no state
+        var builder = new StringBuilder();
+        // ... build output ...
+        return builder.ToString();
+    }
+}
+
+// ❌ WRONG - Instance class with state
+public class TypeScriptEmitter
+{
+    private readonly Config _config;  // State - not allowed!
+
+    public string Emit(NamespaceModel model)
+    {
+        // Instance method - not allowed!
+    }
+}
+```
+
+**Immutable Data Classes (Records/Models)**:
+```csharp
+// ✅ CORRECT - Immutable record
+public sealed record TypeModel(
+    string ClrName,
+    string TsAlias,
+    IReadOnlyList<MethodModel> Methods);
+
+// ❌ WRONG - Mutable class
+public class TypeModel
+{
+    public string ClrName { get; set; }  // Mutable - not allowed!
+}
+```
+
+**Rationale**:
+- Functional style = operations/transformations, not agents that perform actions
+- Think "emit TypeScript" not "an emitter that emits"
+- File name describes WHAT the module does, not WHO does it
+- Eliminates mutable state bugs, makes code easier to reason about
+
+**See CODING-STANDARDS.md for complete functional programming guidelines.**
+
 ### NEVER ACT WITHOUT EXPLICIT USER APPROVAL
 
 **YOU MUST ALWAYS ASK FOR PERMISSION BEFORE:**
