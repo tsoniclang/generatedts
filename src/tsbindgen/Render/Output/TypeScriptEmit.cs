@@ -15,10 +15,16 @@ public static class TypeScriptEmit
     // Store all namespace models for cross-namespace lookups
     private static IReadOnlyDictionary<string, NamespaceModel> _allModels = new Dictionary<string, NamespaceModel>();
 
+    // Track all type names defined in current namespace (for filtering undefined implements/extends)
+    private static HashSet<string> _definedTypes = new();
+
     public static string Emit(NamespaceModel model, IReadOnlyDictionary<string, NamespaceModel> allModels)
     {
         // Reset bindings for this namespace
         _bindingsMap = new Dictionary<string, TypeBindings>();
+
+        // Reset type tracking
+        _definedTypes = new HashSet<string>();
 
         // Store all models for cross-namespace interface lookups
         _allModels = allModels;
@@ -55,6 +61,13 @@ public static class TypeScriptEmit
                 builder.AppendLine($"export {helper.TsDefinition}");
                 builder.AppendLine();
             }
+        }
+
+        // Track all defined types for filtering implements/extends
+        foreach (var type in model.Types)
+        {
+            var tsTypeName = ToTypeScriptType(type.Binding.Type, model.ClrName, includeNamespacePrefix: false, includeGenericArgs: false);
+            _definedTypes.Add(tsTypeName);
         }
 
         // Types - export each type directly
@@ -111,8 +124,14 @@ public static class TypeScriptEmit
     {
         var typeName = ToTypeScriptType(type.Binding.Type, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
         var genericParams = FormatGenericParameters(type.GenericParameters, currentNamespace);
-        var extends = type.Implements.Count > 0
-            ? " extends " + string.Join(", ", type.Implements.Select(i => ToTypeScriptType(i, currentNamespace)))
+
+        // Filter out implements that reference undefined types (internal types)
+        var validImplements = type.Implements
+            .Where(i => IsTypeDefinedInCurrentNamespace(i, currentNamespace))
+            .ToList();
+
+        var extends = validImplements.Count > 0
+            ? " extends " + string.Join(", ", validImplements.Select(i => ToTypeScriptType(i, currentNamespace)))
             : "";
 
         builder.AppendLine($"{indent}export interface {typeName}{genericParams}{extends} {{");
@@ -138,15 +157,22 @@ public static class TypeScriptEmit
         }
         else if (type.Kind == TypeKind.Struct)
         {
-            extends = " extends System.ValueType";
+            // Use qualified name only if not in System namespace
+            var valueTypeName = currentNamespace == "System" ? "ValueType" : "System.ValueType";
+            extends = $" extends {valueTypeName}";
         }
         else
         {
             extends = "";
         }
 
-        var implements = type.Implements.Count > 0
-            ? " implements " + string.Join(", ", type.Implements.Select(i => ToTypeScriptType(i, currentNamespace)))
+        // Filter out implements that reference undefined types (internal types)
+        var validImplements = type.Implements
+            .Where(i => IsTypeDefinedInCurrentNamespace(i, currentNamespace))
+            .ToList();
+
+        var implements = validImplements.Count > 0
+            ? " implements " + string.Join(", ", validImplements.Select(i => ToTypeScriptType(i, currentNamespace)))
             : "";
 
         var modifiers = type.IsAbstract ? "abstract " : "";
@@ -184,7 +210,8 @@ public static class TypeScriptEmit
     private static void EmitStaticNamespace(StringBuilder builder, TypeModel type, string indent, string currentNamespace)
     {
         var typeName = ToTypeScriptType(type.Binding.Type, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
-        builder.AppendLine($"{indent}export class {typeName} {{");
+        var genericParams = FormatGenericParameters(type.GenericParameters, currentNamespace);
+        builder.AppendLine($"{indent}export class {typeName}{genericParams} {{");
 
         // Only static members
         EmitMembers(builder, type.Members, typeBindings: null, indent + "    ", staticOnly: true, currentNamespace: currentNamespace);
@@ -535,6 +562,23 @@ public static class TypeScriptEmit
     }
 
     /// <summary>
+    /// Checks if a type is defined in the current namespace or is cross-namespace.
+    /// Returns true for cross-namespace types (always available via imports).
+    /// Returns true for types defined in current namespace.
+    /// Returns false for internal/private types that aren't generated.
+    /// </summary>
+    private static bool IsTypeDefinedInCurrentNamespace(TypeReference typeRef, string currentNamespace)
+    {
+        // Cross-namespace types are fine (they're imported)
+        if (typeRef.Namespace != null && typeRef.Namespace != currentNamespace)
+            return true;
+
+        // Check if the type is defined in our set of generated types
+        var typeName = ToTypeScriptType(typeRef, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
+        return _definedTypes.Contains(typeName);
+    }
+
+    /// <summary>
     /// Escapes TypeScript/JavaScript reserved keywords using $$name$$ format.
     /// This is the standard Tsonic escaping format for reserved identifiers.
     /// </summary>
@@ -567,6 +611,10 @@ public static class TypeScriptEmit
     /// <param name="includeGenericArgs">If true, includes generic type arguments. If false, omits them (for type declarations).</param>
     private static string ToTypeScriptType(TypeReference typeRef, string currentNamespace, bool includeNamespacePrefix = true, bool includeGenericArgs = true)
     {
+        // Function pointers are mapped to 'any'
+        if (typeRef.TypeName == "__FunctionPointer")
+            return "any";
+
         var sb = new StringBuilder();
 
         // Type parameters (generic parameters) should never get namespace prefixes
