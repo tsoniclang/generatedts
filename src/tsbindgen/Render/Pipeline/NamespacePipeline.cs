@@ -89,6 +89,7 @@ public static class NamespacePipeline
     public static NamespaceArtifacts RenderNamespace(NamespaceModel model, IReadOnlyDictionary<string, NamespaceModel> allModels)
     {
         var dtsContent = TypeScriptEmit.Emit(model, allModels);
+        var facadeDtsContent = FacadeEmit.Generate(model);
         var metadataContent = MetadataEmit.Emit(model);
         var bindingsContent = BindingEmit.Emit(model);
         var jsStubContent = ModuleStubEmit.Emit(model);
@@ -104,6 +105,7 @@ public static class NamespacePipeline
             model.ClrName,
             model.TsAlias,
             dtsContent,
+            facadeDtsContent,
             metadataContent,
             bindingsContent,
             jsStubContent,
@@ -137,14 +139,21 @@ public static class NamespacePipeline
         {
             var artifacts = RenderNamespace(model, models);
 
-            // Create namespace directory
+            // Create namespace directory structure
             var nsDir = Path.Combine(namespacesDir, model.TsAlias);
+            var internalDir = Path.Combine(nsDir, "internal");
             Directory.CreateDirectory(nsDir);
+            Directory.CreateDirectory(internalDir);
 
-            // Write files
-            File.WriteAllText(Path.Combine(nsDir, "index.d.ts"), artifacts.DtsContent);
+            // Write internal files (with _1, _2 suffixes)
+            File.WriteAllText(Path.Combine(internalDir, "index.d.ts"), artifacts.DtsContent);
+            File.WriteAllText(Path.Combine(internalDir, "index.js"), artifacts.JsStubContent);
+
+            // Write facade (clean names)
+            File.WriteAllText(Path.Combine(nsDir, "index.d.ts"), artifacts.FacadeDtsContent);
+
+            // Write metadata and other files at namespace root
             File.WriteAllText(Path.Combine(nsDir, "metadata.json"), artifacts.MetadataContent);
-            File.WriteAllText(Path.Combine(nsDir, "index.js"), artifacts.JsStubContent);
 
             if (artifacts.BindingsContent != null)
             {

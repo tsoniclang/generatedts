@@ -48,7 +48,7 @@ public static class TypeScriptEmit
             foreach (var ns in allNamespaces)
             {
                 var nsAlias = ns.Replace(".", "$");
-                builder.AppendLine($"import type * as {nsAlias} from \"../{ns}/index.js\";");
+                builder.AppendLine($"import type * as {nsAlias} from \"../../{ns}/internal/index.js\";");
             }
             builder.AppendLine();
         }
