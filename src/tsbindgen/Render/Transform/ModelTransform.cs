@@ -17,38 +17,8 @@ public static class ModelTransform
     {
         var tsAlias = NameTransformation.Apply(bundle.ClrName, config.NamespaceNames);
 
-        // Build import aliases for type reference rewriting
-        var importAliases = bundle.Imports
-            .SelectMany(kvp => kvp.Value.Select(ns => ns))
-            .Where(ns => ns != bundle.ClrName) // Exclude self-references
-            .ToHashSet();
-
-        // Build type name lookup for nested type resolution
-        // Maps short CLR type names to their qualified TypeScript names within this namespace
-        var typeNameLookup = new Dictionary<string, string>();
-        foreach (var type in bundle.Types)
-        {
-            var tsName = BuildTypeScriptName(type.FullName, type.ClrName);
-            var shortName = type.ClrName.Replace('`', '_');
-
-            // For nested types, also register by their simple name (e.g., "Enumerator")
-            // This handles cases where return types use just the simple name
-            if (type.FullName.Contains('+'))
-            {
-                var parts = type.ClrName.Split('+');
-                var simpleName = parts[parts.Length - 1].Replace('`', '_');
-
-                if (!typeNameLookup.ContainsKey(simpleName))
-                {
-                    typeNameLookup[simpleName] = tsName;
-                }
-            }
-
-            typeNameLookup[shortName] = tsName;
-        }
-
         var types = bundle.Types
-            .Select(t => BuildType(t, config, bundle.ClrName, importAliases, typeNameLookup))
+            .Select(t => BuildType(t, config, bundle.ClrName))
             .ToList();
 
         var imports = bundle.Imports
@@ -65,19 +35,8 @@ public static class ModelTransform
             bundle.SourceAssemblies.ToList());
     }
 
-    private static TypeModel BuildType(TypeSnapshot snapshot, GeneratorConfig config, string currentNamespace, HashSet<string> importAliases, Dictionary<string, string> typeNameLookup)
+    private static TypeModel BuildType(TypeSnapshot snapshot, GeneratorConfig config, string currentNamespace)
     {
-        // Build unique TypeScript name for nested types to avoid collisions
-        // E.g., "Dictionary`2+KeyCollection+Enumerator" becomes "Dictionary_2_KeyCollection_Enumerator"
-        var cleanedName = BuildTypeScriptName(snapshot.FullName, snapshot.ClrName);
-
-        var tsAlias = snapshot.Kind switch
-        {
-            TypeKind.Interface => NameTransformation.Apply(cleanedName, config.InterfaceNames),
-            TypeKind.Class => NameTransformation.Apply(cleanedName, config.ClassNames),
-            _ => cleanedName
-        };
-
         var genericParams = snapshot.GenericParameters
             .Select(gp => new GenericParameterModel(
                 gp.Name,
@@ -86,11 +45,10 @@ public static class ModelTransform
                 gp.Variance))
             .ToList();
 
-        var members = BuildMembers(snapshot.Members, config, currentNamespace, importAliases, typeNameLookup);
+        var members = BuildMembers(snapshot.Members, config, currentNamespace);
 
         return new TypeModel(
             snapshot.ClrName,
-            tsAlias,
             snapshot.Kind,
             snapshot.IsStatic,
             snapshot.IsSealed,
@@ -105,43 +63,41 @@ public static class ModelTransform
             Array.Empty<HelperDeclaration>(), // Helpers added by analysis passes
             snapshot.UnderlyingType,
             snapshot.EnumMembers,
-            snapshot.DelegateParameters?.Select(p => BuildParameter(p, currentNamespace, importAliases, typeNameLookup)).ToList(),
+            snapshot.DelegateParameters?.Select(p => BuildParameter(p)).ToList(),
             snapshot.DelegateReturnType);
     }
 
     private static MemberCollectionModel BuildMembers(
         MemberCollection members,
         GeneratorConfig config,
-        string currentNamespace,
-        HashSet<string> importAliases,
-        Dictionary<string, string> typeNameLookup)
+        string currentNamespace)
     {
         var constructors = members.Constructors
             .Select(c => new ConstructorModel(
                 c.Visibility,
-                c.Parameters.Select(p => BuildParameter(p, currentNamespace, importAliases, typeNameLookup)).ToList()))
+                c.Parameters.Select(p => BuildParameter(p)).ToList()))
             .ToList();
 
         var methods = members.Methods
-            .Select(m => BuildMethod(m, config, currentNamespace, importAliases, typeNameLookup))
+            .Select(m => BuildMethod(m, config))
             .ToList();
 
         var properties = members.Properties
-            .Select(p => BuildProperty(p, config, currentNamespace, importAliases, typeNameLookup))
+            .Select(p => BuildProperty(p, config))
             .ToList();
 
         var fields = members.Fields
-            .Select(f => BuildField(f, config, currentNamespace, importAliases, typeNameLookup))
+            .Select(f => BuildField(f, config))
             .ToList();
 
         var events = members.Events
-            .Select(e => BuildEvent(e, config, currentNamespace, importAliases, typeNameLookup))
+            .Select(e => BuildEvent(e, config))
             .ToList();
 
         return new MemberCollectionModel(constructors, methods, properties, fields, events);
     }
 
-    private static MethodModel BuildMethod(MethodSnapshot snapshot, GeneratorConfig config, string currentNamespace, HashSet<string> importAliases, Dictionary<string, string> typeNameLookup)
+    private static MethodModel BuildMethod(MethodSnapshot snapshot, GeneratorConfig config)
     {
         var tsAlias = NameTransformation.Apply(snapshot.ClrName, config.MethodNames);
 
@@ -162,12 +118,12 @@ public static class ModelTransform
             snapshot.IsAbstract,
             snapshot.Visibility,
             genericParams,
-            snapshot.Parameters.Select(p => BuildParameter(p, currentNamespace, importAliases, typeNameLookup)).ToList(),
+            snapshot.Parameters.Select(p => BuildParameter(p)).ToList(),
             snapshot.ReturnType,
             snapshot.Binding);
     }
 
-    private static PropertyModel BuildProperty(PropertySnapshot snapshot, GeneratorConfig config, string currentNamespace, HashSet<string> importAliases, Dictionary<string, string> typeNameLookup)
+    private static PropertyModel BuildProperty(PropertySnapshot snapshot, GeneratorConfig config)
     {
         var tsAlias = NameTransformation.Apply(snapshot.ClrName, config.PropertyNames);
 
@@ -184,7 +140,7 @@ public static class ModelTransform
             snapshot.ContractType);
     }
 
-    private static FieldModel BuildField(FieldSnapshot snapshot, GeneratorConfig config, string currentNamespace, HashSet<string> importAliases, Dictionary<string, string> typeNameLookup)
+    private static FieldModel BuildField(FieldSnapshot snapshot, GeneratorConfig config)
     {
         var tsAlias = NameTransformation.Apply(snapshot.ClrName, config.PropertyNames);
 
@@ -198,7 +154,7 @@ public static class ModelTransform
             snapshot.Binding);
     }
 
-    private static EventModel BuildEvent(EventSnapshot snapshot, GeneratorConfig config, string currentNamespace, HashSet<string> importAliases, Dictionary<string, string> typeNameLookup)
+    private static EventModel BuildEvent(EventSnapshot snapshot, GeneratorConfig config)
     {
         var tsAlias = NameTransformation.Apply(snapshot.ClrName, config.PropertyNames);
 
@@ -211,7 +167,7 @@ public static class ModelTransform
             snapshot.Binding);
     }
 
-    private static ParameterModel BuildParameter(ParameterSnapshot snapshot, string currentNamespace, HashSet<string> importAliases, Dictionary<string, string> typeNameLookup)
+    private static ParameterModel BuildParameter(ParameterSnapshot snapshot)
     {
         return new ParameterModel(
             snapshot.Name,
@@ -222,41 +178,4 @@ public static class ModelTransform
             snapshot.IsParams);
     }
 
-    /// <summary>
-    /// Builds a unique TypeScript name for a type, handling nested types to avoid collisions.
-    /// For nested types, includes parent type names in the hierarchy.
-    /// E.g., "Dictionary`2+KeyCollection+Enumerator" becomes "Dictionary_2_KeyCollection_Enumerator"
-    /// </summary>
-    private static string BuildTypeScriptName(string fullName, string clrName)
-    {
-        // Extract just the type part (remove namespace)
-        var lastDotIndex = fullName.LastIndexOf('.');
-        var typeFullName = lastDotIndex >= 0 ? fullName.Substring(lastDotIndex + 1) : fullName;
-
-        // Check if this is a nested type (contains '+' separator)
-        if (!typeFullName.Contains('+'))
-        {
-            // Not nested - just clean the backticks
-            return clrName.Replace('`', '_');
-        }
-
-        // Split by '+' to get parent hierarchy
-        var parts = typeFullName.Split('+');
-
-        // Build qualified name: ParentType_NestedType
-        var nameBuilder = new System.Text.StringBuilder();
-
-        foreach (var part in parts)
-        {
-            if (nameBuilder.Length > 0)
-            {
-                nameBuilder.Append('_');
-            }
-
-            // Clean backticks from each part (e.g., "Dictionary`2" -> "Dictionary_2")
-            nameBuilder.Append(part.Replace('`', '_'));
-        }
-
-        return nameBuilder.ToString();
-    }
 }

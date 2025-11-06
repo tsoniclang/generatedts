@@ -1,3 +1,4 @@
+using tsbindgen.Config;
 using tsbindgen.Snapshot;
 
 namespace tsbindgen.Render;
@@ -7,7 +8,6 @@ namespace tsbindgen.Render;
 /// </summary>
 public sealed record TypeModel(
     string ClrName,
-    string TsAlias,
     TypeKind Kind,
     bool IsStatic,
     bool IsSealed,
@@ -25,7 +25,24 @@ public sealed record TypeModel(
     IReadOnlyList<EnumMember>? EnumMembers = null,
     // Delegate-specific
     IReadOnlyList<ParameterModel>? DelegateParameters = null,
-    TypeReference? DelegateReturnType = null);
+    TypeReference? DelegateReturnType = null)
+{
+    /// <summary>
+    /// TypeScript alias for analysis and lookups (uses underscore for nesting).
+    /// Computed from TypeReference structure - no heuristics.
+    /// Example: "Console_Error_1"
+    /// </summary>
+    public string TsAlias => TsNaming.ForAnalysis(Binding.Type);
+
+    private string? _tsEmitName;
+
+    /// <summary>
+    /// TypeScript emit name for .d.ts declarations (uses dollar for nesting).
+    /// Computed from TypeReference structure - no heuristics.
+    /// Example: "Console$Error_1"
+    /// </summary>
+    public string TsEmitName => _tsEmitName ??= TsNaming.ForEmit(Binding.Type);
+};
 
 /// <summary>
 /// Generic parameter with constraints.
