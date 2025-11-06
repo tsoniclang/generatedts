@@ -138,7 +138,7 @@ public static class TypeScriptEmit
 
         // Members - skip static members (TypeScript doesn't support static interface members)
         // For interfaces, emit properties as getter/setter methods
-        EmitMembers(builder, type.Members, typeBindings: null, indent + "    ", skipStatic: true, currentNamespace: currentNamespace, isInterface: true);
+        EmitMembers(builder, type.Members, typeBindings: null, indent + "    ", skipStatic: true, currentNamespace: currentNamespace, isInterface: true, typeModel: type);
 
         builder.AppendLine($"{indent}}}");
     }
@@ -186,7 +186,7 @@ public static class TypeScriptEmit
         _bindingsMap[typeName] = typeBindings;
 
         // Members - emit methods (properties become methods too)
-        EmitMembers(builder, type.Members, typeBindings, indent + "    ", currentNamespace: currentNamespace);
+        EmitMembers(builder, type.Members, typeBindings, indent + "    ", currentNamespace: currentNamespace, typeModel: type);
 
         // Emit getter/setter methods for properties to satisfy interface contracts
         // Pass the namespace model so we can look up interface types
@@ -214,12 +214,12 @@ public static class TypeScriptEmit
         builder.AppendLine($"{indent}export class {typeName}{genericParams} {{");
 
         // Only static members
-        EmitMembers(builder, type.Members, typeBindings: null, indent + "    ", staticOnly: true, currentNamespace: currentNamespace);
+        EmitMembers(builder, type.Members, typeBindings: null, indent + "    ", staticOnly: true, currentNamespace: currentNamespace, typeModel: type);
 
         builder.AppendLine($"{indent}}}");
     }
 
-    private static void EmitMembers(StringBuilder builder, MemberCollectionModel members, TypeBindings? typeBindings, string indent, bool staticOnly = false, bool skipStatic = false, string currentNamespace = "", bool isInterface = false)
+    private static void EmitMembers(StringBuilder builder, MemberCollectionModel members, TypeBindings? typeBindings, string indent, bool staticOnly = false, bool skipStatic = false, string currentNamespace = "", bool isInterface = false, TypeModel? typeModel = null)
     {
         // Constructors (if not staticOnly and not skipStatic)
         if (!staticOnly && !skipStatic)
@@ -238,7 +238,39 @@ public static class TypeScriptEmit
             if (skipStatic && method.IsStatic) continue;
 
             var modifiers = method.IsStatic ? "static " : "";
-            var genericParams = FormatGenericParameters(method.GenericParameters, currentNamespace);
+
+            // For static methods, check if they reference class-level type parameters
+            // If so, add those type parameters to the method level
+            var methodGenericParams = method.GenericParameters.ToList();
+            if (method.IsStatic && typeModel != null && typeModel.GenericParameters.Count > 0)
+            {
+                // Collect all type parameters referenced in parameters and return type
+                var referencedTypeParams = new HashSet<string>();
+                foreach (var param in method.Parameters)
+                {
+                    referencedTypeParams.UnionWith(CollectTypeParameters(param.Type));
+                }
+                referencedTypeParams.UnionWith(CollectTypeParameters(method.ReturnType));
+
+                // Check which class-level type parameters are referenced
+                var classTypeParamNames = new HashSet<string>(typeModel.GenericParameters.Select(p => p.TsAlias));
+                var referencedClassTypeParams = referencedTypeParams.Where(tp => classTypeParamNames.Contains(tp)).ToList();
+
+                // Add referenced class type parameters to method's generic parameters (at the beginning)
+                foreach (var classTypeParam in typeModel.GenericParameters)
+                {
+                    if (referencedClassTypeParams.Contains(classTypeParam.TsAlias))
+                    {
+                        // Only add if not already in method's generic parameters
+                        if (!methodGenericParams.Any(mp => mp.TsAlias == classTypeParam.TsAlias))
+                        {
+                            methodGenericParams.Insert(0, classTypeParam);
+                        }
+                    }
+                }
+            }
+
+            var genericParams = FormatGenericParameters(methodGenericParams, currentNamespace);
             var parameters = string.Join(", ", method.Parameters.Select(p => $"{EscapeIdentifier(p.Name)}: {ToTypeScriptType(p.Type, currentNamespace)}"));
 
             builder.AppendLine($"{indent}{modifiers}{method.TsAlias}{genericParams}({parameters}): {ToTypeScriptType(method.ReturnType, currentNamespace)};");
@@ -280,16 +312,52 @@ public static class TypeScriptEmit
             }
         }
 
-        // Fields
+        // Fields - convert to methods (same as properties)
         foreach (var field in members.Fields)
         {
             if (staticOnly && !field.IsStatic) continue;
             if (skipStatic && field.IsStatic) continue;
 
             var modifiers = field.IsStatic ? "static " : "";
-            var readonlyModifier = field.IsReadonly ? "readonly " : "";
+            var fieldType = ToTypeScriptType(field.Type, currentNamespace);
+            var methodName = ToCamelCase(field.TsAlias);
 
-            builder.AppendLine($"{indent}{modifiers}{readonlyModifier}{field.TsAlias}: {ToTypeScriptType(field.Type, currentNamespace)};");
+            // For static fields that reference class type parameters, add them as method-level generics
+            var methodGenericParams = new List<GenericParameterModel>();
+            if (field.IsStatic && typeModel != null && typeModel.GenericParameters.Count > 0)
+            {
+                var referencedTypeParams = CollectTypeParameters(field.Type);
+                var classTypeParamNames = new HashSet<string>(typeModel.GenericParameters.Select(p => p.TsAlias));
+
+                foreach (var classTypeParam in typeModel.GenericParameters)
+                {
+                    if (referencedTypeParams.Contains(classTypeParam.TsAlias))
+                    {
+                        methodGenericParams.Add(classTypeParam);
+                    }
+                }
+            }
+
+            var genericParams = FormatGenericParameters(methodGenericParams, currentNamespace);
+
+            // Emit getter
+            builder.AppendLine($"{indent}{modifiers}{methodName}{genericParams}(): {fieldType};");
+
+            // If not readonly, emit setter as overload
+            if (!field.IsReadonly)
+            {
+                builder.AppendLine($"{indent}{modifiers}{methodName}{genericParams}(value: {fieldType}): System.Void;");
+            }
+
+            // Track binding
+            if (typeBindings != null)
+            {
+                typeBindings.Members[methodName] = new MemberBindingInfo(
+                    Kind: "method",
+                    ClrName: field.ClrName,
+                    ClrMemberType: "field",
+                    Access: field.IsReadonly ? "get" : "get+set");
+            }
         }
 
         // Events
