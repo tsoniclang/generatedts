@@ -49,14 +49,22 @@ public static class NamespacePipeline
         }
 
         // Apply DiamondOverloadFix to resolve remaining diamond inheritance conflicts
-        var fixedModels = new Dictionary<string, NamespaceModel>();
+        var diamondFixedModels = new Dictionary<string, NamespaceModel>();
         foreach (var (clrName, model) in reducedModels)
         {
             var fixedModel = DiamondOverloadFix.Apply(model, reducedModels);
-            fixedModels[clrName] = fixedModel;
+            diamondFixedModels[clrName] = fixedModel;
         }
 
-        return fixedModels;
+        // Apply StaticMethodOverloadFix to resolve TS2417 errors
+        var staticFixedModels = new Dictionary<string, NamespaceModel>();
+        foreach (var (clrName, model) in diamondFixedModels)
+        {
+            var fixedModel = StaticMethodOverloadFix.Apply(model, diamondFixedModels);
+            staticFixedModels[clrName] = fixedModel;
+        }
+
+        return staticFixedModels;
     }
 
     /// <summary>
