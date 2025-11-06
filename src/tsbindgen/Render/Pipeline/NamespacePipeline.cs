@@ -48,7 +48,15 @@ public static class NamespacePipeline
             reducedModels[clrName] = reducedModel;
         }
 
-        return reducedModels;
+        // Apply DiamondOverloadFix to resolve remaining diamond inheritance conflicts
+        var fixedModels = new Dictionary<string, NamespaceModel>();
+        foreach (var (clrName, model) in reducedModels)
+        {
+            var fixedModel = DiamondOverloadFix.Apply(model, reducedModels);
+            fixedModels[clrName] = fixedModel;
+        }
+
+        return fixedModels;
     }
 
     /// <summary>

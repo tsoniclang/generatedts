@@ -23,7 +23,13 @@ public sealed record MethodModel(
     IReadOnlyList<GenericParameterModel> GenericParameters,
     IReadOnlyList<ParameterModel> Parameters,
     TypeReference ReturnType,
-    MemberBinding Binding);
+    MemberBinding Binding)
+{
+    /// <summary>
+    /// If not null, indicates this is a synthetic method added by analysis passes.
+    /// </summary>
+    public SyntheticOverloadInfo? SyntheticOverload { get; init; }
+}
 
 /// <summary>
 /// Property model with CLR and TS names (Phase 3).
