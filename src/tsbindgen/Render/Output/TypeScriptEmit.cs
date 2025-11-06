@@ -454,6 +454,31 @@ public static class TypeScriptEmit
     }
 
     /// <summary>
+    /// Checks if a TypeReference represents a generic type parameter (T, TKey, etc.)
+    /// rather than an actual type from a namespace.
+    /// Type parameters should never get namespace prefixes.
+    /// </summary>
+    private static bool IsTypeParameter(TypeReference typeRef)
+    {
+        // Type parameters have no declaring type, no generic args, no arrays, no pointers
+        if (typeRef.DeclaringType != null) return false;
+        if (typeRef.GenericArgs.Count > 0) return false;
+        if (typeRef.ArrayRank > 0) return false;
+        if (typeRef.PointerDepth > 0) return false;
+
+        // Type parameters typically start with 'T' followed by uppercase or end immediately
+        // Examples: T, TKey, TValue, TResult, TSource, TElement, etc.
+        var name = typeRef.TypeName;
+        if (name.Length == 1 && char.IsUpper(name[0]))
+            return true; // Single letter: T, U, V, etc.
+
+        if (name.Length > 1 && name[0] == 'T' && char.IsUpper(name[1]))
+            return true; // TKey, TValue, TResult, etc.
+
+        return false;
+    }
+
+    /// <summary>
     /// Escapes TypeScript/JavaScript reserved keywords using $$name$$ format.
     /// This is the standard Tsonic escaping format for reserved identifiers.
     /// </summary>
@@ -488,6 +513,11 @@ public static class TypeScriptEmit
     {
         var sb = new StringBuilder();
 
+        // Type parameters (generic parameters) should never get namespace prefixes
+        // They're resolved in the current generic context, not as types from a namespace
+        // Examples: T, TKey, TValue, TResult, etc.
+        var isTypeParameter = IsTypeParameter(typeRef);
+
         // Build the base type name with declaring type hierarchy
         if (typeRef.DeclaringType != null)
         {
@@ -507,8 +537,8 @@ public static class TypeScriptEmit
 
             var ns = current.Namespace;
 
-            // Namespace prefix if cross-namespace and requested
-            if (includeNamespacePrefix && ns != null && ns != currentNamespace)
+            // Namespace prefix if cross-namespace and requested (but NOT for type parameters)
+            if (!isTypeParameter && includeNamespacePrefix && ns != null && ns != currentNamespace)
             {
                 sb.Append(ns.Replace(".", "$"));
                 sb.Append(".");
@@ -520,7 +550,7 @@ public static class TypeScriptEmit
         else
         {
             // Top-level type
-            if (includeNamespacePrefix && typeRef.Namespace != null && typeRef.Namespace != currentNamespace)
+            if (!isTypeParameter && includeNamespacePrefix && typeRef.Namespace != null && typeRef.Namespace != currentNamespace)
             {
                 sb.Append(typeRef.Namespace.Replace(".", "$"));
                 sb.Append(".");
