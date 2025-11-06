@@ -48,40 +48,41 @@ public static class TypeScriptEmit
         // Types - export each type directly
         foreach (var type in model.Types)
         {
-            EmitType(builder, type, "");
+            EmitType(builder, type, "", model.ClrName);
         }
 
         return builder.ToString();
     }
 
-    private static void EmitType(StringBuilder builder, TypeModel type, string indent)
+    private static void EmitType(StringBuilder builder, TypeModel type, string indent, string currentNamespace)
     {
         switch (type.Kind)
         {
             case TypeKind.Enum:
-                EmitEnum(builder, type, indent);
+                EmitEnum(builder, type, indent, currentNamespace);
                 break;
             case TypeKind.Interface:
-                EmitInterface(builder, type, indent);
+                EmitInterface(builder, type, indent, currentNamespace);
                 break;
             case TypeKind.Class:
             case TypeKind.Struct:
-                EmitClass(builder, type, indent);
+                EmitClass(builder, type, indent, currentNamespace);
                 break;
             case TypeKind.Delegate:
-                EmitDelegate(builder, type, indent);
+                EmitDelegate(builder, type, indent, currentNamespace);
                 break;
             case TypeKind.StaticNamespace:
-                EmitStaticNamespace(builder, type, indent);
+                EmitStaticNamespace(builder, type, indent, currentNamespace);
                 break;
         }
 
         builder.AppendLine();
     }
 
-    private static void EmitEnum(StringBuilder builder, TypeModel type, string indent)
+    private static void EmitEnum(StringBuilder builder, TypeModel type, string indent, string currentNamespace)
     {
-        builder.AppendLine($"{indent}export enum {type.TsAlias} {{");
+        var typeName = ToTypeScriptType(type.Binding.Type, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
+        builder.AppendLine($"{indent}export enum {typeName} {{");
 
         if (type.EnumMembers != null)
         {
@@ -94,67 +95,71 @@ public static class TypeScriptEmit
         builder.AppendLine($"{indent}}}");
     }
 
-    private static void EmitInterface(StringBuilder builder, TypeModel type, string indent)
+    private static void EmitInterface(StringBuilder builder, TypeModel type, string indent, string currentNamespace)
     {
-        var genericParams = FormatGenericParameters(type.GenericParameters);
+        var typeName = ToTypeScriptType(type.Binding.Type, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
+        var genericParams = FormatGenericParameters(type.GenericParameters, currentNamespace);
         var extends = type.Implements.Count > 0
-            ? " extends " + string.Join(", ", type.Implements.Select(i => i.TsType))
+            ? " extends " + string.Join(", ", type.Implements.Select(i => ToTypeScriptType(i, currentNamespace)))
             : "";
 
-        builder.AppendLine($"{indent}export interface {type.TsAlias}{genericParams}{extends} {{");
+        builder.AppendLine($"{indent}export interface {typeName}{genericParams}{extends} {{");
 
         // Members - skip static members (TypeScript doesn't support static interface members)
-        EmitMembers(builder, type.Members, indent + "    ", skipStatic: true);
+        EmitMembers(builder, type.Members, indent + "    ", skipStatic: true, currentNamespace: currentNamespace);
 
         builder.AppendLine($"{indent}}}");
     }
 
-    private static void EmitClass(StringBuilder builder, TypeModel type, string indent)
+    private static void EmitClass(StringBuilder builder, TypeModel type, string indent, string currentNamespace)
     {
-        var genericParams = FormatGenericParameters(type.GenericParameters);
-        var extends = type.BaseType != null ? $" extends {type.BaseType.TsType}" : "";
+        var typeName = ToTypeScriptType(type.Binding.Type, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
+        var genericParams = FormatGenericParameters(type.GenericParameters, currentNamespace);
+        var extends = type.BaseType != null ? $" extends {ToTypeScriptType(type.BaseType, currentNamespace)}" : "";
         var implements = type.Implements.Count > 0
-            ? " implements " + string.Join(", ", type.Implements.Select(i => i.TsType))
+            ? " implements " + string.Join(", ", type.Implements.Select(i => ToTypeScriptType(i, currentNamespace)))
             : "";
 
         var modifiers = type.IsAbstract ? "abstract " : "";
-        builder.AppendLine($"{indent}export {modifiers}class {type.TsAlias}{genericParams}{extends}{implements} {{");
+        builder.AppendLine($"{indent}export {modifiers}class {typeName}{genericParams}{extends}{implements} {{");
 
         // Members
-        EmitMembers(builder, type.Members, indent + "    ");
+        EmitMembers(builder, type.Members, indent + "    ", currentNamespace: currentNamespace);
 
         builder.AppendLine($"{indent}}}");
     }
 
-    private static void EmitDelegate(StringBuilder builder, TypeModel type, string indent)
+    private static void EmitDelegate(StringBuilder builder, TypeModel type, string indent, string currentNamespace)
     {
-        var genericParams = FormatGenericParameters(type.GenericParameters);
+        var typeName = ToTypeScriptType(type.Binding.Type, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
+        var genericParams = FormatGenericParameters(type.GenericParameters, currentNamespace);
         var parameters = type.DelegateParameters != null
-            ? string.Join(", ", type.DelegateParameters.Select(p => $"{EscapeIdentifier(p.Name)}: {p.TsType}"))
+            ? string.Join(", ", type.DelegateParameters.Select(p => $"{EscapeIdentifier(p.Name)}: {ToTypeScriptType(p.Type, currentNamespace)}"))
             : "";
-        var returnType = type.DelegateReturnType?.TsType ?? "void";
+        var returnType = type.DelegateReturnType != null ? ToTypeScriptType(type.DelegateReturnType, currentNamespace) : "void";
 
-        builder.AppendLine($"{indent}export type {type.TsAlias}{genericParams} = ({parameters}) => {returnType};");
+        builder.AppendLine($"{indent}export type {typeName}{genericParams} = ({parameters}) => {returnType};");
     }
 
-    private static void EmitStaticNamespace(StringBuilder builder, TypeModel type, string indent)
+    private static void EmitStaticNamespace(StringBuilder builder, TypeModel type, string indent, string currentNamespace)
     {
-        builder.AppendLine($"{indent}export class {type.TsAlias} {{");
+        var typeName = ToTypeScriptType(type.Binding.Type, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
+        builder.AppendLine($"{indent}export class {typeName} {{");
 
         // Only static members
-        EmitMembers(builder, type.Members, indent + "    ", staticOnly: true);
+        EmitMembers(builder, type.Members, indent + "    ", staticOnly: true, currentNamespace: currentNamespace);
 
         builder.AppendLine($"{indent}}}");
     }
 
-    private static void EmitMembers(StringBuilder builder, MemberCollectionModel members, string indent, bool staticOnly = false, bool skipStatic = false)
+    private static void EmitMembers(StringBuilder builder, MemberCollectionModel members, string indent, bool staticOnly = false, bool skipStatic = false, string currentNamespace = "")
     {
         // Constructors (if not staticOnly and not skipStatic)
         if (!staticOnly && !skipStatic)
         {
             foreach (var ctor in members.Constructors)
             {
-                var parameters = string.Join(", ", ctor.Parameters.Select(p => $"{EscapeIdentifier(p.Name)}: {p.TsType}"));
+                var parameters = string.Join(", ", ctor.Parameters.Select(p => $"{EscapeIdentifier(p.Name)}: {ToTypeScriptType(p.Type, currentNamespace)}"));
                 builder.AppendLine($"{indent}constructor({parameters});");
             }
         }
@@ -166,10 +171,10 @@ public static class TypeScriptEmit
             if (skipStatic && method.IsStatic) continue;
 
             var modifiers = method.IsStatic ? "static " : "";
-            var genericParams = FormatGenericParameters(method.GenericParameters);
-            var parameters = string.Join(", ", method.Parameters.Select(p => $"{EscapeIdentifier(p.Name)}: {p.TsType}"));
+            var genericParams = FormatGenericParameters(method.GenericParameters, currentNamespace);
+            var parameters = string.Join(", ", method.Parameters.Select(p => $"{EscapeIdentifier(p.Name)}: {ToTypeScriptType(p.Type, currentNamespace)}"));
 
-            builder.AppendLine($"{indent}{modifiers}{method.TsAlias}{genericParams}({parameters}): {method.ReturnType.TsType};");
+            builder.AppendLine($"{indent}{modifiers}{method.TsAlias}{genericParams}({parameters}): {ToTypeScriptType(method.ReturnType, currentNamespace)};");
         }
 
         // Properties
@@ -183,7 +188,7 @@ public static class TypeScriptEmit
 
             // Use contract type directly for covariant properties (TypeScript doesn't support property covariance)
             // This trades type precision for TypeScript compatibility
-            var propertyType = prop.ContractTsType ?? prop.TsType;
+            var propertyType = prop.ContractType != null ? ToTypeScriptType(prop.ContractType, currentNamespace) : ToTypeScriptType(prop.Type, currentNamespace);
 
             builder.AppendLine($"{indent}{modifiers}{readonlyModifier}{prop.TsAlias}: {propertyType};");
         }
@@ -197,7 +202,7 @@ public static class TypeScriptEmit
             var modifiers = field.IsStatic ? "static " : "";
             var readonlyModifier = field.IsReadonly ? "readonly " : "";
 
-            builder.AppendLine($"{indent}{modifiers}{readonlyModifier}{field.TsAlias}: {field.TsType};");
+            builder.AppendLine($"{indent}{modifiers}{readonlyModifier}{field.TsAlias}: {ToTypeScriptType(field.Type, currentNamespace)};");
         }
 
         // Events
@@ -208,11 +213,11 @@ public static class TypeScriptEmit
 
             var modifiers = evt.IsStatic ? "static " : "";
 
-            builder.AppendLine($"{indent}{modifiers}readonly {evt.TsAlias}: {evt.TsType};");
+            builder.AppendLine($"{indent}{modifiers}readonly {evt.TsAlias}: {ToTypeScriptType(evt.Type, currentNamespace)};");
         }
     }
 
-    private static string FormatGenericParameters(IReadOnlyList<GenericParameterModel> parameters)
+    private static string FormatGenericParameters(IReadOnlyList<GenericParameterModel> parameters, string currentNamespace)
     {
         if (parameters.Count == 0)
             return "";
@@ -220,7 +225,7 @@ public static class TypeScriptEmit
         var formatted = parameters.Select(p =>
         {
             var constraints = p.Constraints.Count > 0
-                ? " extends " + string.Join(" & ", p.Constraints)
+                ? " extends " + string.Join(" & ", p.Constraints.Select(c => ToTypeScriptType(c, currentNamespace)))
                 : "";
             return $"{p.TsAlias}{constraints}";
         });
@@ -249,5 +254,84 @@ public static class TypeScriptEmit
         };
 
         return reservedKeywords.Contains(name) ? $"$${name}$$" : name;
+    }
+
+    /// <summary>
+    /// Converts a TypeReference to TypeScript type syntax.
+    /// Handles nested types, generics, arrays, pointers, and namespace prefixes.
+    /// </summary>
+    /// <param name="typeRef">The type reference to convert</param>
+    /// <param name="currentNamespace">Current namespace context (for determining if cross-namespace prefix needed)</param>
+    /// <param name="includeNamespacePrefix">If true, includes namespace prefix for cross-namespace types. If false, only includes type name.</param>
+    /// <param name="includeGenericArgs">If true, includes generic type arguments. If false, omits them (for type declarations).</param>
+    private static string ToTypeScriptType(TypeReference typeRef, string currentNamespace, bool includeNamespacePrefix = true, bool includeGenericArgs = true)
+    {
+        var sb = new StringBuilder();
+
+        // Build the base type name with declaring type hierarchy
+        if (typeRef.DeclaringType != null)
+        {
+            // Nested type: build qualified name with $ separator
+            var parts = new List<string>();
+            var current = typeRef;
+            while (current != null)
+            {
+                parts.Insert(0, current.TypeName);
+                current = current.DeclaringType;
+            }
+
+            // Get namespace from root declaring type
+            current = typeRef;
+            while (current.DeclaringType != null)
+                current = current.DeclaringType;
+
+            var ns = current.Namespace;
+
+            // Namespace prefix if cross-namespace and requested
+            if (includeNamespacePrefix && ns != null && ns != currentNamespace)
+            {
+                sb.Append(ns.Replace(".", "$"));
+                sb.Append(".");
+            }
+
+            // Join nested type names with $ separator
+            sb.Append(string.Join("$", parts));
+        }
+        else
+        {
+            // Top-level type
+            if (includeNamespacePrefix && typeRef.Namespace != null && typeRef.Namespace != currentNamespace)
+            {
+                sb.Append(typeRef.Namespace.Replace(".", "$"));
+                sb.Append(".");
+            }
+            sb.Append(typeRef.TypeName);
+        }
+
+        // Generic arguments
+        if (includeGenericArgs && typeRef.GenericArgs.Count > 0)
+        {
+            sb.Append('<');
+            for (int i = 0; i < typeRef.GenericArgs.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(ToTypeScriptType(typeRef.GenericArgs[i], currentNamespace, includeNamespacePrefix, includeGenericArgs));
+            }
+            sb.Append('>');
+        }
+
+        // Pointers become 'any'
+        if (typeRef.PointerDepth > 0)
+        {
+            return "any";
+        }
+
+        // Arrays
+        for (int i = 0; i < typeRef.ArrayRank; i++)
+        {
+            sb.Append("[]");
+        }
+
+        return sb.ToString();
     }
 }

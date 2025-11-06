@@ -166,7 +166,7 @@ public sealed record FieldSnapshot(
 /// </summary>
 public sealed record EventSnapshot(
     string ClrName,
-    string ClrType,
+    TypeReference Type,
     bool IsStatic,
     string Visibility,
     MemberBinding Binding);
@@ -176,65 +176,78 @@ public sealed record EventSnapshot(
 /// Fully parsed with namespace, type name, generic arguments, arrays, and pointers.
 /// </summary>
 public sealed record TypeReference(
-    string? Namespace,                           // "System" (null if no namespace or primitive)
-    string TypeName,                             // "Nullable_1", "Int32", "T" (generic param)
+    string? Namespace,                           // "System.Collections.Generic" (null if no namespace or primitive)
+    string TypeName,                             // "Enumerator", "LinkedList_1", "Int32", "T" (generic param)
     IReadOnlyList<TypeReference> GenericArgs,    // Recursive: generic type arguments
     int ArrayRank,                                // 0 = not array, 1 = [], 2 = [][], etc.
     int PointerDepth,                            // 0 = not pointer, 1 = *, 2 = **, etc.
+    TypeReference? DeclaringType,                // Recursive: parent type for nested types (null for top-level)
     string? Assembly = null)                     // Assembly alias for cross-assembly refs
 {
     /// <summary>
     /// Gets the full CLR type string representation.
     /// Reconstructs the original type string from parsed components.
+    /// Handles nested types with + separator.
+    /// USE THIS ONLY FOR: metadata JSON, debugging, CLR interop.
+    /// DO NOT USE FOR: TypeScript emission (use ToTypeScriptType instead).
     /// </summary>
-    public string ClrType
+    public string GetClrType()
     {
-        get
-        {
-            var sb = new System.Text.StringBuilder();
+        var sb = new System.Text.StringBuilder();
 
-            // Namespace.TypeName
+        // For nested types, build the declaring type chain first
+        if (DeclaringType != null)
+        {
+            // Recursively get declaring type's CLR representation
+            // But we need just the type path, not full namespace
+            sb.Append(DeclaringType.GetClrType());
+            sb.Append('+');
+            sb.Append(TypeName);
+        }
+        else
+        {
+            // Top-level type: Namespace.TypeName
             if (Namespace != null)
             {
                 sb.Append(Namespace);
                 sb.Append('.');
             }
             sb.Append(TypeName);
-
-            // Generic arguments
-            if (GenericArgs.Count > 0)
-            {
-                sb.Append('<');
-                for (int i = 0; i < GenericArgs.Count; i++)
-                {
-                    if (i > 0) sb.Append(", ");
-                    sb.Append(GenericArgs[i].ClrType);
-                }
-                sb.Append('>');
-            }
-
-            // Pointers
-            for (int i = 0; i < PointerDepth; i++)
-            {
-                sb.Append('*');
-            }
-
-            // Arrays
-            for (int i = 0; i < ArrayRank; i++)
-            {
-                sb.Append("[]");
-            }
-
-            return sb.ToString();
         }
+
+        // Generic arguments
+        if (GenericArgs.Count > 0)
+        {
+            sb.Append('<');
+            for (int i = 0; i < GenericArgs.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(GenericArgs[i].GetClrType());
+            }
+            sb.Append('>');
+        }
+
+        // Pointers
+        for (int i = 0; i < PointerDepth; i++)
+        {
+            sb.Append('*');
+        }
+
+        // Arrays
+        for (int i = 0; i < ArrayRank; i++)
+        {
+            sb.Append("[]");
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>
-    /// Creates a simple TypeReference (no generics, arrays, pointers).
+    /// Creates a simple TypeReference (no generics, arrays, pointers, declaring type).
     /// </summary>
     public static TypeReference CreateSimple(string? ns, string typeName, string? assembly = null)
     {
-        return new TypeReference(ns, typeName, Array.Empty<TypeReference>(), 0, 0, assembly);
+        return new TypeReference(ns, typeName, Array.Empty<TypeReference>(), 0, 0, null, assembly);
     }
 
     /// <summary>
@@ -242,7 +255,7 @@ public sealed record TypeReference(
     /// </summary>
     public static TypeReference CreateGeneric(string? ns, string typeName, IReadOnlyList<TypeReference> genericArgs, string? assembly = null)
     {
-        return new TypeReference(ns, typeName, genericArgs, 0, 0, assembly);
+        return new TypeReference(ns, typeName, genericArgs, 0, 0, null, assembly);
     }
 
     /// <summary>
@@ -250,7 +263,7 @@ public sealed record TypeReference(
     /// </summary>
     public static TypeReference CreateArray(TypeReference elementType, int rank)
     {
-        return new TypeReference(elementType.Namespace, elementType.TypeName, elementType.GenericArgs, rank, elementType.PointerDepth, elementType.Assembly);
+        return new TypeReference(elementType.Namespace, elementType.TypeName, elementType.GenericArgs, rank, elementType.PointerDepth, elementType.DeclaringType, elementType.Assembly);
     }
 
     /// <summary>
@@ -258,7 +271,7 @@ public sealed record TypeReference(
     /// </summary>
     public static TypeReference CreatePointer(TypeReference elementType)
     {
-        return new TypeReference(elementType.Namespace, elementType.TypeName, elementType.GenericArgs, elementType.ArrayRank, elementType.PointerDepth + 1, elementType.Assembly);
+        return new TypeReference(elementType.Namespace, elementType.TypeName, elementType.GenericArgs, elementType.ArrayRank, elementType.PointerDepth + 1, elementType.DeclaringType, elementType.Assembly);
     }
 };
 
@@ -267,7 +280,7 @@ public sealed record TypeReference(
 /// </summary>
 public sealed record GenericParameter(
     string Name,
-    IReadOnlyList<string> Constraints,
+    IReadOnlyList<TypeReference> Constraints,
     Variance Variance);
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -333,14 +346,14 @@ public enum DiagnosticSeverity
 /// </summary>
 public sealed record BindingInfo(
     string Assembly,
-    string Type);
+    TypeReference Type);
 
 /// <summary>
 /// Binding info for a member.
 /// </summary>
 public sealed record MemberBinding(
     string Assembly,
-    string Type,
+    TypeReference Type,
     string Member);
 
 /// <summary>

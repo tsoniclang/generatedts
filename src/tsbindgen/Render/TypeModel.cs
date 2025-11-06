@@ -14,8 +14,8 @@ public sealed record TypeModel(
     bool IsAbstract,
     string Visibility,
     IReadOnlyList<GenericParameterModel> GenericParameters,
-    TypeReferenceModel? BaseType,
-    IReadOnlyList<TypeReferenceModel> Implements,
+    TypeReference? BaseType,
+    IReadOnlyList<TypeReference> Implements,
     MemberCollectionModel Members,
     BindingInfo Binding,
     IReadOnlyList<Diagnostic> Diagnostics,
@@ -25,7 +25,7 @@ public sealed record TypeModel(
     IReadOnlyList<EnumMember>? EnumMembers = null,
     // Delegate-specific
     IReadOnlyList<ParameterModel>? DelegateParameters = null,
-    TypeReferenceModel? DelegateReturnType = null);
+    TypeReference? DelegateReturnType = null);
 
 /// <summary>
 /// Generic parameter with constraints.
@@ -33,16 +33,8 @@ public sealed record TypeModel(
 public sealed record GenericParameterModel(
     string Name,
     string TsAlias,
-    IReadOnlyList<string> Constraints,
+    IReadOnlyList<TypeReference> Constraints,
     Variance Variance);
-
-/// <summary>
-/// Type reference with both CLR and TS names.
-/// </summary>
-public sealed record TypeReferenceModel(
-    string ClrType,
-    string TsType,
-    string? Assembly);
 
 /// <summary>
 /// Collection of all members for a type.

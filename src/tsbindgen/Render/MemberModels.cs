@@ -22,7 +22,7 @@ public sealed record MethodModel(
     string Visibility,
     IReadOnlyList<GenericParameterModel> GenericParameters,
     IReadOnlyList<ParameterModel> Parameters,
-    TypeReferenceModel ReturnType,
+    TypeReference ReturnType,
     MemberBinding Binding);
 
 /// <summary>
@@ -31,15 +31,14 @@ public sealed record MethodModel(
 public sealed record PropertyModel(
     string ClrName,
     string TsAlias,
-    string ClrType,
-    string TsType,
+    TypeReference Type,
     bool IsReadonly,
     bool IsStatic,
     bool IsVirtual,
     bool IsOverride,
     string Visibility,
     MemberBinding Binding,
-    string? ContractTsType);  // If not null, wrap TsType with Covariant<TsType, ContractTsType>
+    TypeReference? ContractType);  // If not null, property has covariant return type
 
 /// <summary>
 /// Field model with both CLR and TS names.
@@ -47,8 +46,7 @@ public sealed record PropertyModel(
 public sealed record FieldModel(
     string ClrName,
     string TsAlias,
-    string ClrType,
-    string TsType,
+    TypeReference Type,
     bool IsReadonly,
     bool IsStatic,
     string Visibility,
@@ -60,19 +58,17 @@ public sealed record FieldModel(
 public sealed record EventModel(
     string ClrName,
     string TsAlias,
-    string ClrType,
-    string TsType,
+    TypeReference Type,
     bool IsStatic,
     string Visibility,
     MemberBinding Binding);
 
 /// <summary>
-/// Parameter model with both CLR and TS types.
+/// Parameter model.
 /// </summary>
 public sealed record ParameterModel(
     string Name,
-    string ClrType,
-    string TsType,
+    TypeReference Type,
     ParameterKind Kind,
     bool IsOptional,
     string? DefaultValue,

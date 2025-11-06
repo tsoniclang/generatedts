@@ -123,7 +123,7 @@ public static class Reflect
             baseType,
             interfaces,
             members,
-            new BindingInfo(assembly.GetName().Name ?? "", type.FullName ?? type.Name));
+            new BindingInfo(assembly.GetName().Name ?? "", CreateTypeReference(type, assembly)));
 
         // Enum-specific
         if (kind == TypeKind.Enum)
@@ -241,7 +241,7 @@ public static class Reflect
             CreateTypeReference(method.ReturnType, assembly!),
             new MemberBinding(
                 assembly?.GetName().Name ?? "",
-                method.DeclaringType?.FullName ?? "",
+                CreateTypeReference(method.DeclaringType!, assembly!),
                 method.Name));
     }
 
@@ -290,7 +290,7 @@ public static class Reflect
             visibility,
             new MemberBinding(
                 assembly?.GetName().Name ?? "",
-                property.DeclaringType?.FullName ?? "",
+                CreateTypeReference(property.DeclaringType!, assembly!),
                 property.Name))
         {
             ContractType = contractType
@@ -313,7 +313,7 @@ public static class Reflect
             DetermineVisibility(field),
             new MemberBinding(
                 assembly?.GetName().Name ?? "",
-                field.DeclaringType?.FullName ?? "",
+                CreateTypeReference(field.DeclaringType!, assembly!),
                 field.Name));
     }
 
@@ -328,12 +328,12 @@ public static class Reflect
 
         return new EventSnapshot(
             evt.Name,
-            typeRef.ClrType,
+            typeRef,
             addMethod?.IsStatic ?? false,
             DetermineVisibility(addMethod!),
             new MemberBinding(
                 assembly?.GetName().Name ?? "",
-                evt.DeclaringType?.FullName ?? "",
+                CreateTypeReference(evt.DeclaringType!, assembly!),
                 evt.Name));
     }
 
@@ -366,7 +366,7 @@ public static class Reflect
             .Where(t => t.IsGenericParameter)
             .Select(t => new GenericParameter(
                 t.Name,
-                t.GetGenericParameterConstraints().Select(c => FormatTypeName(c, type.Assembly)).ToList(),
+                t.GetGenericParameterConstraints().Select(c => CreateTypeReference(c, type.Assembly)).ToList(),
                 DetermineVariance(t)))
             .ToList();
     }
@@ -380,7 +380,7 @@ public static class Reflect
             .Where(t => t.IsGenericParameter)
             .Select(t => new GenericParameter(
                 t.Name,
-                t.GetGenericParameterConstraints().Select(c => FormatTypeName(c, method.DeclaringType!.Assembly)).ToList(),
+                t.GetGenericParameterConstraints().Select(c => CreateTypeReference(c, method.DeclaringType!.Assembly)).ToList(),
                 Variance.None)) // Methods don't have variance
             .ToList();
     }
@@ -456,23 +456,33 @@ public static class Reflect
         var isCrossAssembly = actualType.Assembly != currentAssembly;
         var assembly = isCrossAssembly ? assemblyName?.Replace(".", "_") : null;
 
-        // Get namespace and type name
+        // Get namespace and type name (just the simple name, not full path)
         var ns = actualType.Namespace;
-        var typeName = actualType.Name.Replace('+', '.');
+        var typeName = actualType.Name;
+
+        // Handle declaring type for nested types - recursively build parent chain
+        // IMPORTANT: Don't do this for generic parameters to avoid infinite recursion
+        TypeReference? declaringTypeRef = null;
+        if (actualType.DeclaringType != null && !actualType.IsGenericParameter)
+        {
+            declaringTypeRef = CreateTypeReference(actualType.DeclaringType, currentAssembly);
+            // Nested types don't have namespace in the TypeReference - it's in the declaring type
+            ns = null;
+        }
 
         // Check for function pointer types (C# 9+ delegate*)
         // Keep full CLR fidelity - mark with special type name for Phase 3 transformation
         if (actualType.IsFunctionPointer)
         {
             // Store as special marker - Phase 3 will transform to 'any'
-            return TypeReference.CreateSimple(null, "__FunctionPointer", null);
+            return new TypeReference(null, "__FunctionPointer", Array.Empty<TypeReference>(), 0, 0, null, null);
         }
 
         // Check for other exotic types with empty names
         if (string.IsNullOrEmpty(typeName))
         {
             // Unknown type - use marker for Phase 3
-            return TypeReference.CreateSimple(null, "__UnknownType", null);
+            return new TypeReference(null, "__UnknownType", Array.Empty<TypeReference>(), 0, 0, null, null);
         }
 
         // Handle generic types - recursively create TypeReferences for generic arguments
@@ -485,11 +495,11 @@ public static class Reflect
                 .Select(arg => CreateTypeReference(arg, currentAssembly))
                 .ToList();
 
-            return TypeReference.CreateGeneric(ns, typeName, genericArgs, assembly);
+            return new TypeReference(ns, typeName, genericArgs, 0, 0, declaringTypeRef, assembly);
         }
 
         // Simple type (no generics)
-        return TypeReference.CreateSimple(ns, typeName, assembly);
+        return new TypeReference(ns, typeName, Array.Empty<TypeReference>(), 0, 0, declaringTypeRef, assembly);
     }
 
     /// <summary>
@@ -519,7 +529,7 @@ public static class Reflect
         var typeArgs = type.GetGenericArguments();
         var formattedArgs = typeArgs.Select(arg => {
             var argRef = CreateTypeReference(arg, currentAssembly);
-            return argRef.ClrType;
+            return argRef.GetClrType();
         });
 
         return $"{baseName}<{string.Join(", ", formattedArgs)}>";
@@ -851,7 +861,7 @@ public static class Reflect
                                 interfaceReturnType,
                                 new MemberBinding(
                                     assembly.GetName().Name ?? "",
-                                    type.FullName ?? type.Name,
+                                    CreateTypeReference(type, assembly),
                                     interfaceMethod.Name))
                             {
                                 SyntheticOverload = new SyntheticOverloadInfo(
@@ -880,7 +890,7 @@ public static class Reflect
     /// </summary>
     private static bool TypeReferencesMatch(TypeReference tr1, TypeReference tr2)
     {
-        if (tr1.ClrType != tr2.ClrType)
+        if (tr1.GetClrType() != tr2.GetClrType())
             return false;
 
         if (tr1.GenericArgs.Count != tr2.GenericArgs.Count)
@@ -970,7 +980,7 @@ public static class Reflect
                             baseReturnType,
                             new MemberBinding(
                                 assembly.GetName().Name ?? "",
-                                type.FullName ?? type.Name,
+                                CreateTypeReference(type, assembly),
                                 baseMethod.Name))
                         {
                             SyntheticOverload = new SyntheticOverloadInfo(
@@ -1053,7 +1063,7 @@ public static class Reflect
                             "public",
                             new MemberBinding(
                                 assembly.GetName().Name ?? "",
-                                type.FullName ?? type.Name,
+                                CreateTypeReference(type, assembly),
                                 propName))
                         {
                             // Don't set ContractType here - let the normal covariance detection handle it
