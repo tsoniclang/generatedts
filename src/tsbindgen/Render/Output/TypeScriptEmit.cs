@@ -128,7 +128,23 @@ public static class TypeScriptEmit
     {
         var typeName = ToTypeScriptType(type.Binding.Type, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
         var genericParams = FormatGenericParameters(type.GenericParameters, currentNamespace);
-        var extends = type.BaseType != null ? $" extends {ToTypeScriptType(type.BaseType, currentNamespace)}" : "";
+
+        // Structs should extend ValueType for proper constraint checking
+        // Unless they already have an explicit base type
+        string extends;
+        if (type.BaseType != null)
+        {
+            extends = $" extends {ToTypeScriptType(type.BaseType, currentNamespace)}";
+        }
+        else if (type.Kind == TypeKind.Struct)
+        {
+            extends = " extends System.ValueType";
+        }
+        else
+        {
+            extends = "";
+        }
+
         var implements = type.Implements.Count > 0
             ? " implements " + string.Join(", ", type.Implements.Select(i => ToTypeScriptType(i, currentNamespace)))
             : "";
