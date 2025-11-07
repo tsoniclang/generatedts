@@ -508,13 +508,47 @@ public static class FacadeEmit
     }
 
     /// <summary>
-    /// Checks if a type is constructible (has runtime representation).
-    /// Returns true for class and struct (runtime-bearing types).
-    /// Returns false for interface and delegate (type-only).
+    /// Checks if a type is constructible (has a value component that can be used with typeof).
+    /// Returns false for:
+    /// - Interfaces (type-only)
+    /// - Delegates (type-only)
+    /// - Enums (branded type alias)
+    /// - Generic structs with static members (emitted as type aliases to $instance interfaces)
+    /// Returns true for:
+    /// - Classes (always have constructor or static interface)
+    /// - Non-generic structs (always get export const even with static members)
+    /// - Structs without static members (emitted as classes)
     /// </summary>
     private static bool IsConstructible(TypeModel type)
     {
-        return type.Kind == TypeKind.Class || type.Kind == TypeKind.Struct;
+        // Classes are always constructible
+        if (type.Kind == TypeKind.Class)
+            return true;
+
+        // Only structs remain - check if they get value export
+        if (type.Kind == TypeKind.Struct)
+        {
+            // Generic structs with static members use instance/static split
+            // and don't get 'export const' (only non-generic types get it - see EmitStructWithSplit line 1074)
+            // So they're type-only from facade perspective
+            if (type.GenericParameters.Count > 0 && HasStaticMembers(type))
+                return false;
+
+            // All other structs are constructible:
+            // - Non-generic structs (get 'export const' even with static split)
+            // - Structs without static members (emitted as classes)
+            return true;
+        }
+
+        // Interfaces, delegates, enums are type-only
+        return false;
+    }
+
+    private static bool HasStaticMembers(TypeModel type)
+    {
+        return type.Members.Methods.Any(m => m.IsStatic)
+            || type.Members.Properties.Any(p => p.IsStatic)
+            || type.Members.Fields.Any(f => f.IsStatic);
     }
 
     /// <summary>
