@@ -36,6 +36,12 @@ public sealed record TypeModel(
     /// Example: "Console$Error_1"
     /// </summary>
     public string TsEmitName => _tsEmitName ??= TsNaming.ForEmit(Binding.Type);
+
+    /// <summary>
+    /// Returns true if this type is a .NET value type (struct or enum).
+    /// Value types should be branded with ValueType and struct interfaces.
+    /// </summary>
+    public bool IsValueType => Kind == TypeKind.Struct || Kind == TypeKind.Enum;
 };
 
 /// <summary>

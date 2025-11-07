@@ -43,6 +43,9 @@ public static class TypeScriptEmit
         builder.AppendLine($"// Generated from {model.SourceAssemblies.Count} assembly(ies)");
         builder.AppendLine();
 
+        // Kind branding types for Tsonic compatibility
+        EmitKindBrandingTypes(builder);
+
         // Imports - collect all unique namespaces from all assemblies
         if (model.Imports.Count > 0)
         {
@@ -86,6 +89,18 @@ public static class TypeScriptEmit
         return builder.ToString();
     }
 
+    /// <summary>
+    /// Emits kind branding type definitions for Tsonic compatibility.
+    /// These types enable structural typing for .NET value types.
+    /// </summary>
+    private static void EmitKindBrandingTypes(StringBuilder builder)
+    {
+        builder.AppendLine("// .NET kind markers for Tsonic compatibility");
+        builder.AppendLine("export interface ValueType {}");
+        builder.AppendLine("export interface struct { readonly __brand: \"struct\"; }");
+        builder.AppendLine();
+    }
+
     private static void EmitType(StringBuilder builder, TypeModel type, string indent, string currentNamespace, NamespaceModel namespaceModel)
     {
         switch (type.Kind)
@@ -114,13 +129,19 @@ public static class TypeScriptEmit
     private static void EmitEnum(StringBuilder builder, TypeModel type, string indent, string currentNamespace)
     {
         var typeName = ToTypeScriptType(type.Binding.Type, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
-        builder.AppendLine($"{indent}export enum {typeName} {{");
+
+        // Emit as branded number type for Tsonic compatibility
+        // Format: type EnumName = number & ValueType & struct & { readonly __enum: "EnumName" }
+        builder.AppendLine($"{indent}export type {typeName} = number & ValueType & struct & {{ readonly __enum: \"{typeName}\" }};");
+
+        // Emit namespace with enum members as const declarations (no initializers in .d.ts)
+        builder.AppendLine($"{indent}export namespace {typeName} {{");
 
         if (type.EnumMembers != null)
         {
             foreach (var member in type.EnumMembers)
             {
-                builder.AppendLine($"{indent}    {member.Name} = {member.Value},");
+                builder.AppendLine($"{indent}    export const {member.Name}: {typeName};");
             }
         }
 
