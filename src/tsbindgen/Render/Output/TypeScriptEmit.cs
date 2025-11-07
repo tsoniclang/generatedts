@@ -159,14 +159,16 @@ public static class TypeScriptEmit
         var typeName = ToTypeScriptType(type.Binding.Type, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
         var genericParams = FormatGenericParameters(type.GenericParameters, currentNamespace);
 
+        // INTERFACE FLATTENING: After InterfaceFlattener pass, all interfaces have empty Implements.
+        // All ancestor members have been inlined, so we skip "extends" clauses entirely.
+        // TypeScript structural typing handles compatibility.
         // Filter out implements that reference undefined types (internal types)
         var validImplements = type.Implements
             .Where(i => IsTypeDefinedInCurrentNamespace(i, currentNamespace))
             .ToList();
 
-        var extends = validImplements.Count > 0
-            ? " extends " + string.Join(", ", validImplements.Select(i => ToTypeScriptType(i, currentNamespace)))
-            : "";
+        // Skip extends clause - InterfaceFlattener has already inlined all ancestor members
+        var extends = "";
 
         builder.AppendLine($"{indent}export interface {typeName}{genericParams}{extends} {{");
 

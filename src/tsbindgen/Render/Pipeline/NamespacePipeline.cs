@@ -43,11 +43,20 @@ public static class NamespacePipeline
             models[clrName] = model;
         }
 
-        // Apply InterfaceReduction after all models are built (needs cross-namespace lookups)
-        var reducedModels = new Dictionary<string, NamespaceModel>();
+        // Apply InterfaceFlattener FIRST - flatten all interface hierarchies
+        // This eliminates "extends" clauses, relying on TypeScript structural typing
+        var flattenedModels = new Dictionary<string, NamespaceModel>();
         foreach (var (clrName, model) in models)
         {
-            var reducedModel = InterfaceReduction.Apply(model, models);
+            var flattenedModel = InterfaceFlattener.Apply(model, models, ctx);
+            flattenedModels[clrName] = flattenedModel;
+        }
+
+        // Apply InterfaceReduction after all models are built (needs cross-namespace lookups)
+        var reducedModels = new Dictionary<string, NamespaceModel>();
+        foreach (var (clrName, model) in flattenedModels)
+        {
+            var reducedModel = InterfaceReduction.Apply(model, flattenedModels);
             reducedModels[clrName] = reducedModel;
         }
 
