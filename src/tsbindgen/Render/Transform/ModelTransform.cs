@@ -45,6 +45,41 @@ public static class ModelTransform
 
         var members = BuildMembers(snapshot.Members);
 
+        // Set implicit base types to match emission behavior (Phase 4)
+        // This ensures Phase 3 analysis sees exactly what Phase 4 emits
+        var effectiveBaseType = snapshot.BaseType;
+        if (effectiveBaseType == null)
+        {
+            effectiveBaseType = snapshot.Kind switch
+            {
+                TypeKind.Struct => new TypeReference(
+                    Namespace: "System",
+                    TypeName: "ValueType",
+                    GenericArgs: new List<TypeReference>(),
+                    ArrayRank: 0,
+                    PointerDepth: 0,
+                    DeclaringType: null,
+                    Assembly: null),
+                TypeKind.Enum => new TypeReference(
+                    Namespace: "System",
+                    TypeName: "Enum",
+                    GenericArgs: new List<TypeReference>(),
+                    ArrayRank: 0,
+                    PointerDepth: 0,
+                    DeclaringType: null,
+                    Assembly: null),
+                TypeKind.Delegate => new TypeReference(
+                    Namespace: "System",
+                    TypeName: "MulticastDelegate",
+                    GenericArgs: new List<TypeReference>(),
+                    ArrayRank: 0,
+                    PointerDepth: 0,
+                    DeclaringType: null,
+                    Assembly: null),
+                _ => null
+            };
+        }
+
         return new TypeModel(
             snapshot.ClrName,
             snapshot.Kind,
@@ -53,13 +88,15 @@ public static class ModelTransform
             snapshot.IsAbstract,
             snapshot.Visibility,
             genericParams,
-            snapshot.BaseType,
+            effectiveBaseType,
             snapshot.Implements.ToList(),
             members,
             snapshot.Binding,
             Array.Empty<Diagnostic>(), // Type-level diagnostics added by analysis passes
             Array.Empty<HelperDeclaration>(), // Helpers added by analysis passes
-            null, // ConflictingInterfaces - populated by ExplicitInterfaceViewDetection pass
+            null, // ConflictingInterfaces - populated by CovarianceConflictPartitioner pass
+            false, // HasBaseClassConflicts - populated by CovarianceConflictPartitioner pass
+            null, // ConflictingMemberNames - populated by CovarianceConflictPartitioner pass
             snapshot.UnderlyingType,
             snapshot.EnumMembers,
             snapshot.DelegateParameters?.Select(p => BuildParameter(p)).ToList(),

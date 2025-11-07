@@ -83,15 +83,16 @@ public static class NamespacePipeline
             staticFixedModels[clrName] = fixedModel;
         }
 
-        // Apply ExplicitInterfaceViewDetection to identify covariance conflicts (TS2416)
-        var viewDetectedModels = new Dictionary<string, NamespaceModel>();
+        // Apply CovarianceConflictPartitioner to identify ALL covariance conflicts (TS2416)
+        // This handles both interfaces AND base classes with unified detection
+        var covariancePartitionedModels = new Dictionary<string, NamespaceModel>();
         foreach (var (clrName, model) in staticFixedModels)
         {
-            var fixedModel = ExplicitInterfaceViewDetection.Apply(model, staticFixedModels, ctx);
-            viewDetectedModels[clrName] = fixedModel;
+            var fixedModel = CovarianceConflictPartitioner.Apply(model, staticFixedModels, ctx);
+            covariancePartitionedModels[clrName] = fixedModel;
         }
 
-        return viewDetectedModels;
+        return covariancePartitionedModels;
     }
 
     /// <summary>

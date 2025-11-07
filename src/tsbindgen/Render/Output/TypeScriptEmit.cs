@@ -220,6 +220,12 @@ public static class TypeScriptEmit
             ? " implements " + string.Join(", ", validImplements.Select(i => ToTypeScriptType(i, currentNamespace)))
             : "";
 
+        // If there are base class conflicts, emit $DomainView interface first
+        if (type.HasBaseClassConflicts && type.ConflictingMemberNames != null && type.ConflictingMemberNames.Count > 0)
+        {
+            EmitDomainViewInterface(builder, type, indent, currentNamespace, namespaceModel);
+        }
+
         var modifiers = type.IsAbstract ? "abstract " : "";
         builder.AppendLine($"{indent}export {modifiers}class {typeName}{genericParams}{extends}{implements} {{");
 
@@ -230,17 +236,28 @@ public static class TypeScriptEmit
             new Dictionary<string, MemberBindingInfo>());
         _bindingsMap[typeName] = typeBindings;
 
-        // Members - emit methods (properties become methods too)
-        EmitMembers(builder, type.Members, typeBindings, indent + "    ", currentNamespace: currentNamespace, typeModel: type);
+        // Get set of conflicting member names to suppress
+        var conflictingMembers = type.HasBaseClassConflicts && type.ConflictingMemberNames != null
+            ? new HashSet<string>(type.ConflictingMemberNames)
+            : new HashSet<string>();
+
+        // Members - emit methods (properties become methods too), skipping conflicting ones
+        EmitMembers(builder, type.Members, typeBindings, indent + "    ", currentNamespace: currentNamespace, typeModel: type, suppressMembers: conflictingMembers);
 
         // Emit getter/setter methods for properties to satisfy interface contracts
         // Pass the namespace model so we can look up interface types
-        EmitPropertyMethods(builder, type.Members, type.Implements, namespaceModel, typeBindings, indent + "    ", currentNamespace, type);
+        EmitPropertyMethods(builder, type.Members, type.Implements, namespaceModel, typeBindings, indent + "    ", currentNamespace, type, suppressMembers: conflictingMembers);
 
         // Emit explicit interface views for conflicting interfaces (TS2416 covariance conflicts)
         if (type.ConflictingInterfaces != null && type.ConflictingInterfaces.Count > 0)
         {
             EmitExplicitInterfaceViews(builder, type.ConflictingInterfaces, indent + "    ", currentNamespace);
+        }
+
+        // Emit base class views for covariance conflicts
+        if (type.HasBaseClassConflicts && type.BaseType != null)
+        {
+            EmitBaseClassViews(builder, type, indent + "    ", currentNamespace);
         }
 
         // Note: Missing interface members are now added in Phase 3 by ExplicitInterfaceImplementation analysis pass
@@ -272,7 +289,7 @@ public static class TypeScriptEmit
         builder.AppendLine($"{indent}}}");
     }
 
-    private static void EmitMembers(StringBuilder builder, MemberCollectionModel members, TypeBindings? typeBindings, string indent, bool staticOnly = false, bool skipStatic = false, string currentNamespace = "", bool isInterface = false, TypeModel? typeModel = null)
+    private static void EmitMembers(StringBuilder builder, MemberCollectionModel members, TypeBindings? typeBindings, string indent, bool staticOnly = false, bool skipStatic = false, string currentNamespace = "", bool isInterface = false, TypeModel? typeModel = null, HashSet<string>? suppressMembers = null)
     {
         // Constructors (if not staticOnly and not skipStatic)
         if (!staticOnly && !skipStatic)
@@ -289,6 +306,10 @@ public static class TypeScriptEmit
         {
             if (staticOnly && !method.IsStatic) continue;
             if (skipStatic && method.IsStatic) continue;
+
+            // Skip suppressed members (for covariance conflict resolution)
+            var methodName = _ctx.GetMethodIdentifier(method);
+            if (suppressMembers != null && suppressMembers.Contains(methodName)) continue;
 
             // Don't emit 'static' modifier in interfaces - it's implied by context
             var modifiers = (method.IsStatic && !isInterface) ? "static " : "";
@@ -337,7 +358,6 @@ public static class TypeScriptEmit
             var parameters = string.Join(", ", method.Parameters.Select(p => $"{EscapeIdentifier(p.Name)}: {ToTypeScriptType(p.Type, currentNamespace)}"));
 
             // Note: Base class method overloads are now added in Phase 3 by BaseClassOverloadFix analysis pass
-            var methodName = _ctx.GetMethodIdentifier(method);
             builder.AppendLine($"{indent}{modifiers}{methodName}{genericParams}({parameters}): {ToTypeScriptType(method.ReturnType, currentNamespace)};");
 
             // Track binding
@@ -360,12 +380,15 @@ public static class TypeScriptEmit
                 if (staticOnly && !prop.IsStatic) continue;
                 if (skipStatic && prop.IsStatic) continue;
 
+                // Use property name directly - no "get"/"set" prefix
+                var methodName = _ctx.GetPropertyIdentifier(prop);
+
+                // Skip suppressed members (for covariance conflict resolution)
+                if (suppressMembers != null && suppressMembers.Contains(methodName)) continue;
+
                 // Don't emit 'static' modifier in interfaces - it's implied by context
                 var modifiers = (prop.IsStatic && !isInterface) ? "static " : "";
                 var propertyType = ToTypeScriptType(prop.Type, currentNamespace);
-
-                // Use property name directly - no "get"/"set" prefix
-                var methodName = _ctx.GetPropertyIdentifier(prop);
 
                 // Emit getter
                 builder.AppendLine($"{indent}{modifiers}{methodName}(): {propertyType};");
@@ -460,7 +483,7 @@ public static class TypeScriptEmit
     /// Generates overloads based on implemented interfaces.
     /// Handles name conflicts with existing methods by adding numeric suffixes.
     /// </summary>
-    private static void EmitPropertyMethods(StringBuilder builder, MemberCollectionModel members, IReadOnlyList<TypeReference> implements, NamespaceModel namespaceModel, TypeBindings typeBindings, string indent, string currentNamespace, TypeModel typeModel)
+    private static void EmitPropertyMethods(StringBuilder builder, MemberCollectionModel members, IReadOnlyList<TypeReference> implements, NamespaceModel namespaceModel, TypeBindings typeBindings, string indent, string currentNamespace, TypeModel typeModel, HashSet<string>? suppressMembers = null)
     {
         // Collect existing method names to detect conflicts
         var existingMethodNames = new HashSet<string>(
@@ -477,6 +500,9 @@ public static class TypeScriptEmit
             // Use property name directly - no "get"/"set" prefix
             // C# doesn't allow property and method with same name, so no conflicts
             var baseMethodName = _ctx.GetPropertyIdentifier(prop);
+
+            // Skip suppressed members (for covariance conflict resolution)
+            if (suppressMembers != null && suppressMembers.Contains(baseMethodName)) continue;
 
             // Resolve name conflicts (shouldn't happen, but defensive)
             var methodName = ResolveConflict(baseMethodName, existingMethodNames);
@@ -1114,6 +1140,66 @@ public static class TypeScriptEmit
     }
 
     /// <summary>
+    /// Emits $DomainView interface containing members suppressed from the class due to conflicts.
+    /// This allows TypeScript code to access domain-specific overloads via As_TypeName view.
+    /// </summary>
+    private static void EmitDomainViewInterface(
+        StringBuilder builder,
+        TypeModel type,
+        string indent,
+        string currentNamespace,
+        NamespaceModel namespaceModel)
+    {
+        if (type.ConflictingMemberNames == null || type.ConflictingMemberNames.Count == 0)
+            return;
+
+        var typeName = ToTypeScriptType(type.Binding.Type, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
+        var genericParams = FormatGenericParameters(type.GenericParameters, currentNamespace);
+        var interfaceName = $"{typeName}$DomainView";
+
+        builder.AppendLine($"{indent}export interface {interfaceName}{genericParams} {{");
+
+        var conflictingSet = new HashSet<string>(type.ConflictingMemberNames);
+
+        // Emit only the conflicting members (properties as methods)
+        foreach (var prop in type.Members.Properties)
+        {
+            if (prop.IsStatic) continue;
+
+            var propertyName = _ctx.GetPropertyIdentifier(prop);
+            if (!conflictingSet.Contains(propertyName)) continue;
+
+            var propertyType = ToTypeScriptType(prop.Type, currentNamespace);
+
+            // Getter
+            builder.AppendLine($"{indent}    {propertyName}(): {propertyType};");
+
+            // Setter (if not readonly)
+            if (!prop.IsReadonly)
+            {
+                var voidType = currentNamespace == "System" ? "Void" : "System.Void";
+                builder.AppendLine($"{indent}    {propertyName}(value: {propertyType}): {voidType};");
+            }
+        }
+
+        // Emit conflicting methods
+        foreach (var method in type.Members.Methods)
+        {
+            if (method.IsStatic) continue;
+
+            var methodName = _ctx.GetMethodIdentifier(method);
+            if (!conflictingSet.Contains(methodName)) continue;
+
+            var methodGenericParams = FormatGenericParameters(method.GenericParameters, currentNamespace);
+            var parameters = string.Join(", ", method.Parameters.Select(p => $"{EscapeIdentifier(p.Name)}: {ToTypeScriptType(p.Type, currentNamespace)}"));
+            builder.AppendLine($"{indent}    {methodName}{methodGenericParams}({parameters}): {ToTypeScriptType(method.ReturnType, currentNamespace)};");
+        }
+
+        builder.AppendLine($"{indent}}}");
+        builder.AppendLine(); // Empty line after interface
+    }
+
+    /// <summary>
     /// Emits explicit interface view properties for interfaces with covariance conflicts.
     /// These allow access to interface-accurate signatures without polluting the class surface.
     /// </summary>
@@ -1132,6 +1218,27 @@ public static class TypeScriptEmit
             // Emit readonly property with full interface type
             var interfaceType = ToTypeScriptType(interfaceRef, currentNamespace);
             builder.AppendLine($"{indent}readonly {viewPropertyName}: {interfaceType};");
+        }
+    }
+
+    /// <summary>
+    /// Emits domain view property for types with base class covariance conflicts.
+    /// The base class view (As_BaseTypeName) is inherited, not re-declared.
+    /// Only the domain-specific view (As_TypeName) is emitted to access suppressed members.
+    /// </summary>
+    private static void EmitBaseClassViews(
+        StringBuilder builder,
+        TypeModel type,
+        string indent,
+        string currentNamespace)
+    {
+        // Only emit domain view property - base view is inherited from base class
+        if (type.HasBaseClassConflicts && type.ConflictingMemberNames != null && type.ConflictingMemberNames.Count > 0)
+        {
+            var typeName = ToTypeScriptType(type.Binding.Type, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
+            var genericParams = FormatGenericParameterNames(type.GenericParameters);
+            var domainViewType = $"{typeName}$DomainView{genericParams}";
+            builder.AppendLine($"{indent}readonly As_{typeName}: {domainViewType};");
         }
     }
 }

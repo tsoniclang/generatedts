@@ -23,6 +23,9 @@ public sealed record TypeModel(
     IReadOnlyList<HelperDeclaration> Helpers,
     // Explicit interface views (for TS2416 covariance conflicts)
     IReadOnlyList<TypeReference>? ConflictingInterfaces = null,
+    // Base class covariance conflicts
+    bool HasBaseClassConflicts = false,
+    IReadOnlyList<string>? ConflictingMemberNames = null,
     // Enum-specific
     string? UnderlyingType = null,
     IReadOnlyList<EnumMember>? EnumMembers = null,
