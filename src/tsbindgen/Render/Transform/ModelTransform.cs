@@ -97,6 +97,7 @@ public static class ModelTransform
             null, // ConflictingInterfaces - populated by CovarianceConflictPartitioner pass
             false, // HasBaseClassConflicts - populated by CovarianceConflictPartitioner pass
             null, // ConflictingMemberNames - populated by CovarianceConflictPartitioner pass
+            null, // ExplicitViews - populated by StructuralConformance pass
             snapshot.UnderlyingType,
             snapshot.EnumMembers,
             snapshot.DelegateParameters?.Select(p => BuildParameter(p)).ToList(),

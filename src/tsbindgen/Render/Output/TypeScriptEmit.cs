@@ -254,6 +254,12 @@ public static class TypeScriptEmit
             EmitExplicitInterfaceViews(builder, type.ConflictingInterfaces, indent + "    ", currentNamespace);
         }
 
+        // Emit explicit views for non-conforming interfaces (TS2420 structural conformance)
+        if (type.ExplicitViews != null && type.ExplicitViews.Count > 0)
+        {
+            EmitStructuralConformanceViews(builder, type.ExplicitViews, indent + "    ", currentNamespace);
+        }
+
         // Emit base class views for covariance conflicts
         if (type.HasBaseClassConflicts && type.BaseType != null)
         {
@@ -1306,6 +1312,28 @@ public static class TypeScriptEmit
 
             // Emit readonly property with full interface type
             var interfaceType = ToTypeScriptType(interfaceRef, currentNamespace);
+            builder.AppendLine($"{indent}readonly {viewPropertyName}: {interfaceType};");
+        }
+    }
+
+    /// <summary>
+    /// Emits explicit views for non-conforming interfaces (TS2420 structural conformance).
+    /// Format: readonly As_InterfaceName: FullyQualifiedInterface;
+    /// Uses the view name from InterfaceView (which may include disambiguation suffix).
+    /// </summary>
+    private static void EmitStructuralConformanceViews(
+        StringBuilder builder,
+        IReadOnlyList<InterfaceView> explicitViews,
+        string indent,
+        string currentNamespace)
+    {
+        foreach (var view in explicitViews)
+        {
+            // Use the pre-computed view name (includes disambiguation if needed)
+            var viewPropertyName = view.ViewName;
+
+            // Emit readonly property with full interface type
+            var interfaceType = ToTypeScriptType(view.Interface, currentNamespace);
             builder.AppendLine($"{indent}readonly {viewPropertyName}: {interfaceType};");
         }
     }

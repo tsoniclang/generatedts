@@ -26,6 +26,8 @@ public sealed record TypeModel(
     // Base class covariance conflicts
     bool HasBaseClassConflicts = false,
     IReadOnlyList<string>? ConflictingMemberNames = null,
+    // Structural conformance views (for TS2420 - interfaces that don't structurally match)
+    IReadOnlyList<InterfaceView>? ExplicitViews = null,
     // Enum-specific
     string? UnderlyingType = null,
     IReadOnlyList<EnumMember>? EnumMembers = null,
@@ -48,6 +50,16 @@ public sealed record TypeModel(
     /// </summary>
     public bool IsValueType => Kind == TypeKind.Struct || Kind == TypeKind.Enum;
 };
+
+/// <summary>
+/// Represents an explicit interface view for structural conformance.
+/// Used when a class doesn't structurally match an interface it implements.
+/// Emitted as: readonly As_<InterfaceName>: <FullyQualifiedInterface>
+/// </summary>
+public sealed record InterfaceView(
+    string ViewName,          // "As_IList_1" or "As_IList_1_ab12cd" (with disambiguation)
+    TypeReference Interface,  // The fully-substituted interface type
+    string? Disambiguator);   // Optional suffix for name conflicts (hash or counter)
 
 /// <summary>
 /// Generic parameter with constraints.

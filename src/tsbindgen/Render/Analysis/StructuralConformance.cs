@@ -1,0 +1,427 @@
+using tsbindgen.Config;
+using tsbindgen.Render;
+using tsbindgen.Snapshot;
+
+namespace tsbindgen.Render.Analysis;
+
+/// <summary>
+/// The gate - decides whether to keep or drop `implements` based on structural equality.
+///
+/// Core rule: Never claim `implements I` unless class C is structurally equal to I after normalization.
+///
+/// For each class C and each interface I in C.Implements:
+/// 1. Deep substitute I's type params with C's instantiation
+/// 2. Get fanned-in interface surface (all inherited members)
+/// 3. Normalize both C and I:
+///    - Indexers as method pairs (already done by A2)
+///    - Overload sets per member name
+///    - Deep type equality after substitution
+/// 4. Compare:
+///    - Equal → keep in C.Implements
+///    - Not equal → move to C.ExplicitViews, remove from C.Implements
+///
+/// This resolves TS2420 errors by only claiming `implements` when structurally true.
+/// </summary>
+public static class StructuralConformance
+{
+    /// <summary>
+    /// Applies structural conformance check to all classes and structs.
+    /// Only processes classes/structs (not interfaces).
+    /// </summary>
+    public static NamespaceModel Apply(
+        NamespaceModel model,
+        IReadOnlyDictionary<string, NamespaceModel> allModels,
+        AnalysisContext ctx)
+    {
+        // Build global interface lookup for cross-namespace resolution
+        var globalInterfaceLookup = BuildGlobalInterfaceLookup(allModels);
+
+        var updatedTypes = model.Types.Select(type =>
+        {
+            // Only process classes and structs
+            if (type.Kind == TypeKind.Interface || type.Kind == TypeKind.Enum || type.Kind == TypeKind.Delegate)
+                return type;
+
+            // Only process types that implement interfaces
+            if (type.Implements.Count == 0)
+                return type;
+
+            return CheckConformance(type, globalInterfaceLookup, ctx);
+        }).ToList();
+
+        return model with { Types = updatedTypes };
+    }
+
+    /// <summary>
+    /// Builds a lookup of all interfaces across all namespaces.
+    /// Key: "Namespace.TypeName" (e.g., "System.Collections.Generic.IList_1")
+    /// </summary>
+    private static Dictionary<string, TypeModel> BuildGlobalInterfaceLookup(
+        IReadOnlyDictionary<string, NamespaceModel> allModels)
+    {
+        var lookup = new Dictionary<string, TypeModel>();
+
+        foreach (var (_, model) in allModels)
+        {
+            foreach (var type in model.Types)
+            {
+                if (type.Kind == TypeKind.Interface)
+                {
+                    var key = $"{type.Binding.Type.Namespace}.{type.ClrName}";
+                    lookup[key] = type;
+                }
+            }
+        }
+
+        return lookup;
+    }
+
+    /// <summary>
+    /// Checks structural conformance for each implemented interface.
+    /// Returns updated TypeModel with ExplicitViews populated and Implements filtered.
+    /// </summary>
+    private static TypeModel CheckConformance(
+        TypeModel type,
+        Dictionary<string, TypeModel> interfaceLookup,
+        AnalysisContext ctx)
+    {
+        var keptImplements = new List<TypeReference>();
+        var explicitViews = new List<InterfaceView>();
+
+        // Build set of interfaces already in ConflictingInterfaces (handled by EmitExplicitInterfaceViews)
+        var conflictingInterfaceKeys = new HashSet<string>();
+        if (type.ConflictingInterfaces != null)
+        {
+            foreach (var conflictingInterface in type.ConflictingInterfaces)
+            {
+                var conflictingKey = $"{conflictingInterface.Namespace}.{conflictingInterface.TypeName}";
+                conflictingInterfaceKeys.Add(conflictingKey);
+            }
+        }
+
+        foreach (var interfaceRef in type.Implements)
+        {
+            var key = $"{interfaceRef.Namespace}.{interfaceRef.TypeName}";
+
+            // Skip interfaces already in ConflictingInterfaces - they're handled by EmitExplicitInterfaceViews
+            if (conflictingInterfaceKeys.Contains(key))
+            {
+                keptImplements.Add(interfaceRef);  // Keep in Implements so it's available to ConflictingInterfaces
+                continue;
+            }
+
+            // Resolve interface type
+            if (!interfaceLookup.TryGetValue(key, out var interfaceType))
+            {
+                // Interface not found (external assembly) - keep as-is
+                keptImplements.Add(interfaceRef);
+                continue;
+            }
+
+            // Build substitution map for generic parameters
+            var substitutions = GenericSubstitution.BuildSubstitutionMap(
+                interfaceRef,
+                interfaceType.GenericParameters);
+
+            // Get fully substituted interface surface
+            var interfaceSurface = GetInterfaceSurface(interfaceType, interfaceRef, interfaceLookup, substitutions);
+
+            // Get class surface
+            var classSurface = GetClassSurface(type);
+
+            // Compare surfaces
+            if (AreSurfacesEqual(classSurface, interfaceSurface))
+            {
+                // Structurally equal - keep implements
+                keptImplements.Add(interfaceRef);
+            }
+            else
+            {
+                // Not structurally equal - create explicit view
+                var viewName = GenerateViewName(interfaceRef);
+                explicitViews.Add(new InterfaceView(viewName, interfaceRef, Disambiguator: null));
+            }
+        }
+
+        // If no changes needed, return original
+        if (explicitViews.Count == 0)
+            return type;
+
+        // Update type with filtered implements and explicit views
+        return type with
+        {
+            Implements = keptImplements,
+            ExplicitViews = explicitViews
+        };
+    }
+
+    /// <summary>
+    /// Gets the fully substituted interface surface (all members, including inherited).
+    /// Uses BFS to fan-in all ancestor interfaces with deep substitution at each edge.
+    /// </summary>
+    private static MemberSurface GetInterfaceSurface(
+        TypeModel interfaceType,
+        TypeReference interfaceRef,
+        Dictionary<string, TypeModel> interfaceLookup,
+        Dictionary<string, TypeReference> substitutions)
+    {
+        var surface = new MemberSurface();
+
+        // Add interface's own members (with substitution)
+        AddMembersToSurface(surface, interfaceType, substitutions);
+
+        // Fan-in inherited interfaces via BFS
+        var visited = new HashSet<string>();
+        var queue = new Queue<(TypeReference Ref, Dictionary<string, TypeReference> Subs)>();
+
+        // Seed with direct parents
+        foreach (var parentRef in interfaceType.Implements)
+        {
+            queue.Enqueue((parentRef, substitutions));
+        }
+
+        while (queue.Count > 0)
+        {
+            var (currentRef, currentSubs) = queue.Dequeue();
+            var key = $"{currentRef.Namespace}.{currentRef.TypeName}";
+
+            if (visited.Contains(key))
+                continue;
+
+            visited.Add(key);
+
+            // Resolve parent interface
+            if (!interfaceLookup.TryGetValue(key, out var parentType))
+                continue; // External assembly
+
+            // Build substitution map for this parent
+            var parentSubs = GenericSubstitution.BuildSubstitutionMap(currentRef, parentType.GenericParameters);
+
+            // Combine with current substitutions (deep substitution)
+            var combinedSubs = CombineSubstitutions(currentSubs, parentSubs);
+
+            // Add parent's members
+            AddMembersToSurface(surface, parentType, combinedSubs);
+
+            // Enqueue parent's parents
+            foreach (var grandparentRef in parentType.Implements)
+            {
+                queue.Enqueue((grandparentRef, combinedSubs));
+            }
+        }
+
+        return surface;
+    }
+
+    /// <summary>
+    /// Gets the class surface (only public instance members).
+    /// </summary>
+    private static MemberSurface GetClassSurface(TypeModel type)
+    {
+        var surface = new MemberSurface();
+
+        // Add members without substitution (class is concrete)
+        AddMembersToSurface(surface, type, new Dictionary<string, TypeReference>());
+
+        return surface;
+    }
+
+    /// <summary>
+    /// Adds type's members to surface with substitution applied.
+    /// Groups by member name for overload comparison.
+    /// </summary>
+    private static void AddMembersToSurface(
+        MemberSurface surface,
+        TypeModel type,
+        Dictionary<string, TypeReference> substitutions)
+    {
+        // Add methods (indexers are already method pairs from A2)
+        foreach (var method in type.Members.Methods)
+        {
+            // Skip static methods (not part of instance surface)
+            if (method.IsStatic)
+                continue;
+
+            var substitutedMethod = substitutions.Count > 0
+                ? GenericSubstitution.SubstituteMethod(method, substitutions)
+                : method;
+
+            var signature = NormalizeMethodSignature(substitutedMethod);
+            surface.AddMethod(method.ClrName, signature);
+        }
+
+        // Add properties (non-indexers only - indexers are method pairs)
+        foreach (var property in type.Members.Properties)
+        {
+            // Skip indexers (already handled as method pairs)
+            if (property.IsIndexer)
+                continue;
+
+            // Skip static properties
+            if (property.IsStatic)
+                continue;
+
+            var substitutedProperty = substitutions.Count > 0
+                ? GenericSubstitution.SubstituteProperty(property, substitutions)
+                : property;
+
+            var signature = NormalizePropertySignature(substitutedProperty);
+            surface.AddProperty(property.ClrName, signature);
+        }
+
+        // Note: Fields and events intentionally skipped - they don't appear in interfaces
+    }
+
+    /// <summary>
+    /// Combines two substitution maps with deep recursion.
+    /// If inner map has T → U and outer map has U → int, result has T → int.
+    /// </summary>
+    private static Dictionary<string, TypeReference> CombineSubstitutions(
+        Dictionary<string, TypeReference> outer,
+        Dictionary<string, TypeReference> inner)
+    {
+        var combined = new Dictionary<string, TypeReference>();
+
+        // Apply outer substitutions to inner mappings
+        foreach (var (paramName, innerType) in inner)
+        {
+            var substitutedType = GenericSubstitution.SubstituteType(innerType, outer);
+            combined[paramName] = substitutedType;
+        }
+
+        // Add outer substitutions not in inner
+        foreach (var (paramName, outerType) in outer)
+        {
+            if (!combined.ContainsKey(paramName))
+            {
+                combined[paramName] = outerType;
+            }
+        }
+
+        return combined;
+    }
+
+    /// <summary>
+    /// Compares two member surfaces for structural equality.
+    /// Returns true if all member names and signatures match exactly.
+    /// </summary>
+    private static bool AreSurfacesEqual(MemberSurface classSurface, MemberSurface interfaceSurface)
+    {
+        // Compare methods
+        if (!AreMemberSetsEqual(classSurface.Methods, interfaceSurface.Methods))
+            return false;
+
+        // Compare properties
+        if (!AreMemberSetsEqual(classSurface.Properties, interfaceSurface.Properties))
+            return false;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Compares two member sets (by name and signature sets).
+    /// </summary>
+    private static bool AreMemberSetsEqual(
+        Dictionary<string, HashSet<string>> classMembers,
+        Dictionary<string, HashSet<string>> interfaceMembers)
+    {
+        // All interface members must exist in class with same signatures
+        foreach (var (name, interfaceSigs) in interfaceMembers)
+        {
+            if (!classMembers.TryGetValue(name, out var classSigs))
+                return false; // Missing member
+
+            // All interface signatures must exist in class
+            foreach (var sig in interfaceSigs)
+            {
+                if (!classSigs.Contains(sig))
+                    return false; // Missing signature
+            }
+        }
+
+        // Note: Class can have EXTRA members (fine for structural conformance)
+        // Only care that ALL interface members exist in class
+
+        return true;
+    }
+
+    /// <summary>
+    /// Normalizes method signature for comparison.
+    /// Format: "(param1Type,param2Type):ReturnType"
+    /// Ignores parameter names (only types matter).
+    /// </summary>
+    private static string NormalizeMethodSignature(MethodModel method)
+    {
+        var paramTypes = string.Join(",", method.Parameters.Select(p =>
+            TypeReferenceToString(p.Type)));
+
+        var returnType = TypeReferenceToString(method.ReturnType);
+
+        return $"({paramTypes}):{returnType}";
+    }
+
+    /// <summary>
+    /// Normalizes property signature for comparison.
+    /// Format: "Type" (properties identified by name + type)
+    /// </summary>
+    private static string NormalizePropertySignature(PropertyModel property)
+    {
+        return TypeReferenceToString(property.Type);
+    }
+
+    /// <summary>
+    /// Converts TypeReference to normalized string for signature comparison.
+    /// Fully qualified with generics.
+    /// </summary>
+    private static string TypeReferenceToString(TypeReference typeRef)
+    {
+        var genericArgs = typeRef.GenericArgs.Count > 0
+            ? $"<{string.Join(",", typeRef.GenericArgs.Select(TypeReferenceToString))}>"
+            : "";
+
+        var array = typeRef.ArrayRank > 0 ? "[]" : "";
+        var pointer = typeRef.PointerDepth > 0 ? new string('*', typeRef.PointerDepth) : "";
+
+        return $"{typeRef.Namespace}.{typeRef.TypeName}{genericArgs}{array}{pointer}";
+    }
+
+    /// <summary>
+    /// Generates view name for interface.
+    /// Format: "As_<InterfaceName>" (e.g., "As_IList_1")
+    /// Disambiguation happens in ExplicitViewSynthesis pass.
+    /// </summary>
+    private static string GenerateViewName(TypeReference interfaceRef)
+    {
+        return $"As_{interfaceRef.TypeName}";
+    }
+
+    /// <summary>
+    /// Represents the normalized member surface of a type.
+    /// Groups members by name, then by signature (to handle overloads).
+    /// </summary>
+    private class MemberSurface
+    {
+        public Dictionary<string, HashSet<string>> Methods { get; } = new();
+        public Dictionary<string, HashSet<string>> Properties { get; } = new();
+
+        public void AddMethod(string name, string signature)
+        {
+            if (!Methods.TryGetValue(name, out var signatures))
+            {
+                signatures = new HashSet<string>();
+                Methods[name] = signatures;
+            }
+            signatures.Add(signature);
+        }
+
+        public void AddProperty(string name, string signature)
+        {
+            if (!Properties.TryGetValue(name, out var signatures))
+            {
+                signatures = new HashSet<string>();
+                Properties[name] = signatures;
+            }
+            signatures.Add(signature);
+        }
+    }
+}

@@ -130,7 +130,17 @@ public static class NamespacePipeline
             indexerAnnotatedModels[clrName] = fullyAnnotatedModel;
         }
 
-        return indexerAnnotatedModels;
+        // Apply StructuralConformance to decide keep/drop implements based on structural equality
+        // The gate - only keep `implements I` if class is structurally equal to I after normalization
+        // ExplicitViews are emitted directly in TypeScriptEmit as readonly properties
+        var structurallyConformantModels = new Dictionary<string, NamespaceModel>();
+        foreach (var (clrName, model) in indexerAnnotatedModels)
+        {
+            var conformantModel = StructuralConformance.Apply(model, indexerAnnotatedModels, ctx);
+            structurallyConformantModels[clrName] = conformantModel;
+        }
+
+        return structurallyConformantModels;
     }
 
     /// <summary>
