@@ -292,6 +292,30 @@ public static class InterfaceSurfaceSynthesizer
             result.Add("System.IUtf8SpanFormattable");
         }
 
+        // ICollection_1<T> → flatten IEnumerable_1<T> (iterator incompatibility)
+        if (typeName == "ICollection`1")
+        {
+            result.Add("System.Collections.Generic.IEnumerable`1");
+        }
+
+        // IReadOnlyCollection_1<T> → flatten IEnumerable_1<T> (iterator incompatibility)
+        if (typeName == "IReadOnlyCollection`1")
+        {
+            result.Add("System.Collections.Generic.IEnumerable`1");
+        }
+
+        // IBinaryNumber_1<TSelf> → flatten INumber_1<TSelf> (AllBitsSet property conflict)
+        if (typeName == "IBinaryNumber`1")
+        {
+            result.Add("System.Numerics.INumber`1");
+        }
+
+        // IFloatingPoint_1<TSelf> → flatten INumber_1<TSelf> (property conflicts)
+        if (typeName == "IFloatingPoint`1")
+        {
+            result.Add("System.Numerics.INumber`1");
+        }
+
         return result;
     }
 

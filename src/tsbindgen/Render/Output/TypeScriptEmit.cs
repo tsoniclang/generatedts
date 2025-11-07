@@ -48,11 +48,13 @@ public static class TypeScriptEmit
         EmitKindBrandingTypes(builder);
 
         // Imports - collect all unique namespaces from all assemblies
+        // Guard B: Only import namespaces that actually exist (were generated)
         if (model.Imports.Count > 0)
         {
             var allNamespaces = model.Imports
                 .SelectMany(kvp => kvp.Value)
                 .Where(ns => ns != model.ClrName) // Skip self-references
+                .Where(ns => _allModels.ContainsKey(ns)) // Guard B: Only import if namespace was generated
                 .Distinct()
                 .OrderBy(ns => ns);
 

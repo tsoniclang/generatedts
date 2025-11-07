@@ -45,7 +45,19 @@ public static class StructuralConformanceSynthesizer
         IReadOnlyDictionary<string, NamespaceModel> allModels,
         AnalysisContext ctx)
     {
-        if (type.Implements.Count == 0)
+        // Check both Implements (conformant interfaces) and ExplicitViews (non-conformant)
+        // ExplicitViews were moved there by the earlier StructuralConformance pass
+        var allInterfaces = new List<TypeReference>(type.Implements);
+
+        if (type.ExplicitViews != null)
+        {
+            foreach (var view in type.ExplicitViews)
+            {
+                allInterfaces.Add(view.Interface);
+            }
+        }
+
+        if (allInterfaces.Count == 0)
         {
             return type; // No interfaces, nothing to synthesize
         }
@@ -54,7 +66,7 @@ public static class StructuralConformanceSynthesizer
         var synthesizedProperties = new List<PropertyModel>();
 
         // For each interface, compute missing members
-        foreach (var ifaceRef in type.Implements)
+        foreach (var ifaceRef in allInterfaces)
         {
             var ifaceType = ResolveType(ifaceRef, allModels);
             if (ifaceType == null) continue;

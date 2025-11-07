@@ -387,12 +387,78 @@ public static class StructuralConformance
 
     /// <summary>
     /// Generates view name for interface.
-    /// Format: "As_<InterfaceName>" (e.g., "As_IList_1")
-    /// Disambiguation happens in ExplicitViewSynthesis pass.
+    /// Format: "As_<InterfaceName>[_Of_<GenericArg1>_<GenericArg2>...]"
+    /// Examples:
+    ///   - As_IList (non-generic)
+    ///   - As_IList_1_Of_XPathNavigator (closed generic with concrete type)
+    ///   - As_IList_1_Of_T (generic with type parameter)
     /// </summary>
     private static string GenerateViewName(TypeReference interfaceRef)
     {
-        return $"As_{interfaceRef.TypeName}";
+        // Extract base name and arity from CLR name (e.g., "IList`1" → "IList", "1")
+        var fullName = interfaceRef.TypeName;
+        var baseName = fullName;
+        var arity = "";
+
+        var backtickIndex = fullName.IndexOf('`');
+        if (backtickIndex > 0)
+        {
+            baseName = fullName.Substring(0, backtickIndex);
+            arity = fullName.Substring(backtickIndex + 1); // "1", "2", etc.
+        }
+
+        // Start with basic name
+        var viewName = $"As_{baseName}";
+
+        // Add generic arguments if present to disambiguate different closed generics
+        if (interfaceRef.GenericArgs.Count > 0)
+        {
+            var argNames = new List<string>();
+            foreach (var arg in interfaceRef.GenericArgs)
+            {
+                var argName = GetTypeArgumentName(arg);
+                if (argName != null)
+                {
+                    argNames.Add(argName);
+                }
+            }
+
+            if (argNames.Count > 0)
+            {
+                var argSuffix = string.Join("_", argNames);
+                // Use actual arity if present (e.g., "As_IList_1_Of_XPathNavigator")
+                if (!string.IsNullOrEmpty(arity))
+                {
+                    viewName = $"As_{baseName}_{arity}_Of_{argSuffix}";
+                }
+                else
+                {
+                    viewName = $"As_{baseName}_Of_{argSuffix}";
+                }
+            }
+        }
+
+        return viewName;
+    }
+
+    /// <summary>
+    /// Gets a name for a type argument suitable for view naming.
+    /// </summary>
+    private static string? GetTypeArgumentName(TypeReference typeRef)
+    {
+        if (typeRef.Kind == TypeReferenceKind.GenericParameter)
+        {
+            return typeRef.TypeName; // e.g., "T", "TKey", "TSelf"
+        }
+
+        // For closed types, use the type name without generic arity
+        var name = typeRef.TypeName;
+        var backtickIndex = name.IndexOf('`');
+        if (backtickIndex > 0)
+        {
+            name = name.Substring(0, backtickIndex);
+        }
+        return name;
     }
 
     /// <summary>
