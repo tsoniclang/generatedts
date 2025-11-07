@@ -5,18 +5,18 @@ using tsbindgen.Snapshot;
 namespace tsbindgen.Render.Analysis;
 
 /// <summary>
-/// Phase 3: Adds base class method overloads when method signatures differ (arity mismatch).
+/// Phase 3: Adds base class method overloads when method signatures differ after substitution.
 ///
 /// In TypeScript, when a derived class method has the same name as a base class method
-/// but different arity (parameter count), both signatures must be present.
+/// but different signature (parameter types or arity), both signatures must be present.
 ///
 /// This pass:
-/// 1. For each method in a class, checks if base class has methods with same name but different arity
+/// 1. For each method in a class, checks if base class has methods with same name
 /// 2. Substitutes generic type parameters from base class (e.g., T → System.Byte)
-/// 3. Adds base class method signatures as synthetic overloads
+/// 3. Adds base class method signatures as synthetic overloads if signatures differ
 /// 4. Skips methods that reference undefined type parameters after substitution
 ///
-/// Example:
+/// Example 1 (arity mismatch):
 /// class EqualityComparer_1&lt;T&gt; {
 ///     Equals(x: T, y: T): boolean;           // 2 parameters
 /// }
@@ -26,6 +26,16 @@ namespace tsbindgen.Render.Analysis;
 ///
 ///     // This pass adds:
 ///     Equals(x: System.Byte, y: System.Byte): boolean;  // From base, T substituted
+/// }
+///
+/// Example 2 (type mismatch):
+/// class Collection_1&lt;T&gt; {
+///     Item(value: T): void;
+/// }
+///
+/// class KeyedCollection_2&lt;TKey, TItem&gt; extends Collection_1&lt;TItem&gt; {
+///     // Derived class might have Item(value: TItem) but base has Item(value: T)
+///     // After substitution T → TItem, signatures match, so no duplicate added
 /// }
 /// </summary>
 public static class BaseClassOverloadFix
@@ -79,10 +89,6 @@ public static class BaseClassOverloadFix
             // Check each base method
             foreach (var baseMethod in baseMethods)
             {
-                // Only add if arity differs (different parameter count)
-                if (baseMethod.Parameters.Count == method.Parameters.Count)
-                    continue;
-
                 // Build substitution map for base class generic parameters
                 var baseType = FindTypeModel(type.BaseType, typeLookup);
                 if (baseType == null)
@@ -97,7 +103,7 @@ public static class BaseClassOverloadFix
                 if (ReferencesUndefinedTypeParams(substitutedMethod, type.GenericParameters, ctx))
                     continue;
 
-                // Check if we've already added this signature
+                // Check if we've already added this signature (includes current method signature)
                 var signature = GetMethodSignature(substitutedMethod, ctx);
                 if (existingSignatures.Contains(signature))
                     continue;

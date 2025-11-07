@@ -1,6 +1,7 @@
 using System.Text;
 using tsbindgen.Config;
 using tsbindgen.Render;
+using tsbindgen.Render.Analysis;
 using tsbindgen.Snapshot;
 
 namespace tsbindgen.Render.Output;
@@ -509,9 +510,29 @@ public static class TypeScriptEmit
             // If base has setter but this doesn't, we need to emit base setter to satisfy TypeScript
             // Note: Check even if not marked as override, as property hiding also causes TS2416
             PropertyModel? baseProperty = null;
+            TypeReference? substitutedBasePropertyType = null;
             if (typeModel.BaseType != null)
             {
                 baseProperty = FindBaseClassProperty(typeModel.BaseType, prop.ClrName, currentNamespace);
+
+                // If we found a base property, substitute generic parameters
+                if (baseProperty != null)
+                {
+                    // Find base type model to get its generic parameters
+                    var baseNamespace = typeModel.BaseType.Namespace ?? currentNamespace;
+                    if (_allModels.TryGetValue(baseNamespace, out var baseNsModel))
+                    {
+                        var baseTypeName = typeModel.BaseType.TypeName;
+                        var baseTypeModel = baseNsModel.Types.FirstOrDefault(t => t.Binding.Type.TypeName == baseTypeName);
+                        if (baseTypeModel != null)
+                        {
+                            // Build substitution map
+                            var substitutions = GenericSubstitution.BuildSubstitutionMap(typeModel.BaseType, baseTypeModel.GenericParameters);
+                            // Substitute the base property type
+                            substitutedBasePropertyType = GenericSubstitution.SubstituteType(baseProperty.Type, substitutions);
+                        }
+                    }
+                }
             }
 
             // Emit getter overloads for each unique interface type
@@ -533,9 +554,9 @@ public static class TypeScriptEmit
                 var voidType = currentNamespace == "System" ? "Void" : "System.Void";
 
                 // If this is readonly but base has setter, emit base property type setter first
-                if (prop.IsReadonly && baseProperty != null && !baseProperty.IsReadonly)
+                if (prop.IsReadonly && baseProperty != null && !baseProperty.IsReadonly && substitutedBasePropertyType != null)
                 {
-                    var basePropertyType = ToTypeScriptType(baseProperty.Type, currentNamespace);
+                    var basePropertyType = ToTypeScriptType(substitutedBasePropertyType, currentNamespace);
                     builder.AppendLine($"{indent}{methodName}(value: {basePropertyType}): {voidType};");
                 }
                 // Otherwise emit setter overloads as usual
