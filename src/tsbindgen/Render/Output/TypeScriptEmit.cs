@@ -1005,14 +1005,29 @@ public static class TypeScriptEmit
     /// Returns true for cross-namespace types (always available via imports).
     /// Returns true for types defined in current namespace.
     /// Returns false for internal/private types that aren't generated.
+    ///
+    /// Guard A: Only include interfaces that are actually emitted (public/visible and not filtered).
+    /// Guard B: Validate namespace exists and type exists in that namespace.
     /// </summary>
     private static bool IsTypeDefinedInCurrentNamespace(TypeReference typeRef, string currentNamespace)
     {
-        // Cross-namespace types are fine (they're imported)
+        // Guard B: Cross-namespace types - verify namespace exists and type is emitted
         if (typeRef.Namespace != null && typeRef.Namespace != currentNamespace)
-            return true;
+        {
+            // Check if the target namespace exists in our model registry
+            if (!_allModels.TryGetValue(typeRef.Namespace, out var targetNamespace))
+            {
+                return false; // Namespace doesn't exist - filter out
+            }
 
-        // Check if the type is defined in our set of generated types
+            // Guard A: Check if the type is actually emitted in that namespace
+            var targetTypeName = typeRef.TypeName;
+            var typeExists = targetNamespace.Types.Any(t => t.ClrName == targetTypeName);
+
+            return typeExists; // Only return true if type is actually emitted
+        }
+
+        // Check if the type is defined in our set of generated types for current namespace
         var typeName = ToTypeScriptType(typeRef, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
         return _definedTypes.Contains(typeName);
     }

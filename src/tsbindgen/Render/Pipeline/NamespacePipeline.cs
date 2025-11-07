@@ -140,7 +140,40 @@ public static class NamespacePipeline
             structurallyConformantModels[clrName] = conformantModel;
         }
 
-        return structurallyConformantModels;
+        // === NEW PASSES FOR 36→12 ERROR REDUCTION ===
+
+        // Pass 1: Interface Surface Synthesizer (fixes TS2430, TS2320)
+        // Flattens conflicting parent interfaces and inlines members
+        var surfaceSynthesizedModels = new Dictionary<string, NamespaceModel>();
+        foreach (var (clrName, model) in structurallyConformantModels)
+        {
+            var synthesizedModel = InterfaceSurfaceSynthesizer.Apply(model, structurallyConformantModels, ctx);
+            surfaceSynthesizedModels[clrName] = synthesizedModel;
+        }
+
+        // Pass 2: Structural Conformance Synthesizer (fixes TS2420)
+        // Adds missing interface members with explicit naming
+        var conformanceSynthesizedModels = new Dictionary<string, NamespaceModel>();
+        foreach (var (clrName, model) in surfaceSynthesizedModels)
+        {
+            var synthesizedModel = StructuralConformanceSynthesizer.Apply(model, surfaceSynthesizedModels, ctx);
+            conformanceSynthesizedModels[clrName] = synthesizedModel;
+        }
+
+        // Pass 3: Indexer Normalizer (fixes TS2416)
+        // Converts multi-param indexer properties to method-only overloads
+        var indexerNormalizedModels = new Dictionary<string, NamespaceModel>();
+        foreach (var (clrName, model) in conformanceSynthesizedModels)
+        {
+            var normalizedModel = IndexerNormalizer.Apply(model, conformanceSynthesizedModels, ctx);
+            indexerNormalizedModels[clrName] = normalizedModel;
+        }
+
+        // Guards A & B are implemented in TypeScriptEmit.IsTypeDefinedInCurrentNamespace()
+        // - Guard A: Emitted-symbol filter for implements (fixes TS2724)
+        // - Guard B: Namespace/Type existence checks (fixes TS2307, TS2694)
+
+        return indexerNormalizedModels;
     }
 
     /// <summary>
