@@ -1,4 +1,5 @@
 using System.Text.Json;
+using tsbindgen.Config;
 using tsbindgen.Snapshot;
 
 namespace tsbindgen.Render.Output;
@@ -13,7 +14,7 @@ public static class TypeScriptTypeListEmit
     /// Extracts TypeScript type information from a NamespaceModel.
     /// Returns JSON string with list of types that will be emitted.
     /// </summary>
-    public static string Emit(NamespaceModel model)
+    public static string Emit(NamespaceModel model, AnalysisContext ctx)
     {
         var entries = new List<TypeScriptTypeEntry>();
 
@@ -30,22 +31,24 @@ public static class TypeScriptTypeListEmit
                 _ => "unknown"
             };
 
-            // Check if nested by looking for $ in TsAlias
-            var isNested = type.TsAlias.Contains('$');
+            var typeIdentifier = ctx.GetTypeIdentifier(type);
+
+            // Check if nested by looking for $ in TsEmitName (not identifier)
+            var isNested = type.TsEmitName.Contains('$');
 
             // Extract declaring type if nested
             string? declaringType = null;
             if (isNested)
             {
-                var dollarIndex = type.TsAlias.IndexOf('$');
+                var dollarIndex = type.TsEmitName.IndexOf('$');
                 if (dollarIndex > 0)
                 {
-                    declaringType = type.TsAlias.Substring(0, dollarIndex);
+                    declaringType = type.TsEmitName.Substring(0, dollarIndex);
                 }
             }
 
             entries.Add(new TypeScriptTypeEntry(
-                type.TsAlias,
+                typeIdentifier,
                 kind,
                 isNested,
                 declaringType));

@@ -1,3 +1,4 @@
+using tsbindgen.Config;
 using tsbindgen.Render;
 using tsbindgen.Snapshot;
 
@@ -18,7 +19,7 @@ namespace tsbindgen.Render.Analysis;
 /// </summary>
 public static class StaticMethodOverloadFix
 {
-    public static NamespaceModel Apply(NamespaceModel model, IReadOnlyDictionary<string, NamespaceModel> allModels)
+    public static NamespaceModel Apply(NamespaceModel model, IReadOnlyDictionary<string, NamespaceModel> allModels, AnalysisContext ctx)
     {
         // Build global type lookup
         var globalTypeLookup = new Dictionary<string, TypeModel>();
@@ -34,14 +35,14 @@ public static class StaticMethodOverloadFix
         // Process each class type (structs and classes)
         var updatedTypes = model.Types.Select(type =>
             type.Kind == TypeKind.Class || type.Kind == TypeKind.Struct
-                ? AddStaticMethodOverloads(type, globalTypeLookup)
+                ? AddStaticMethodOverloads(type, globalTypeLookup, ctx)
                 : type
         ).ToList();
 
         return model with { Types = updatedTypes };
     }
 
-    private static TypeModel AddStaticMethodOverloads(TypeModel type, Dictionary<string, TypeModel> typeLookup)
+    private static TypeModel AddStaticMethodOverloads(TypeModel type, Dictionary<string, TypeModel> typeLookup, AnalysisContext ctx)
     {
         if (type.BaseType == null)
             return type; // No base class, no inherited static methods
@@ -60,12 +61,12 @@ public static class StaticMethodOverloadFix
         foreach (var baseMethod in baseStaticMethods)
         {
             // Check if we have a static method with the same name
-            var matchingMethods = currentStaticMethods.Where(m => m.TsAlias == baseMethod.TsAlias).ToList();
+            var matchingMethods = currentStaticMethods.Where(m => ctx.SameIdentifier(m, baseMethod)).ToList();
 
             if (matchingMethods.Count > 0)
             {
                 // Check if any matching method has the exact same signature
-                bool hasExactMatch = matchingMethods.Any(m => AreSameSignature(m, baseMethod));
+                bool hasExactMatch = matchingMethods.Any(m => AreSameSignature(m, baseMethod, ctx));
 
                 if (!hasExactMatch)
                 {
@@ -75,7 +76,7 @@ public static class StaticMethodOverloadFix
                     {
                         SyntheticOverload = new SyntheticOverloadInfo(
                             type.Binding.Type.GetClrType(),
-                            baseMethod.TsAlias,
+                            ctx.GetMethodIdentifier(baseMethod),
                             SyntheticOverloadReason.BaseClassCovariance
                         )
                     });
@@ -135,10 +136,10 @@ public static class StaticMethodOverloadFix
         }
     }
 
-    private static bool AreSameSignature(MethodModel m1, MethodModel m2)
+    private static bool AreSameSignature(MethodModel m1, MethodModel m2, AnalysisContext ctx)
     {
         // Same name
-        if (m1.TsAlias != m2.TsAlias)
+        if (!ctx.SameIdentifier(m1, m2))
             return false;
 
         // Same static-ness

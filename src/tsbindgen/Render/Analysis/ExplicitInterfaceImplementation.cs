@@ -1,3 +1,4 @@
+using tsbindgen.Config;
 using tsbindgen.Render;
 using tsbindgen.Snapshot;
 
@@ -21,7 +22,7 @@ namespace tsbindgen.Render.Analysis;
 /// </summary>
 public static class ExplicitInterfaceImplementation
 {
-    public static NamespaceModel Apply(NamespaceModel model, IReadOnlyDictionary<string, NamespaceModel> allModels)
+    public static NamespaceModel Apply(NamespaceModel model, IReadOnlyDictionary<string, NamespaceModel> allModels, AnalysisContext ctx)
     {
         // Build global type lookup
         var globalTypeLookup = new Dictionary<string, TypeModel>();
@@ -37,14 +38,14 @@ public static class ExplicitInterfaceImplementation
         // Process each class/struct type
         var updatedTypes = model.Types.Select(type =>
             type.Kind == TypeKind.Class || type.Kind == TypeKind.Struct
-                ? AddMissingInterfaceMembers(type, globalTypeLookup)
+                ? AddMissingInterfaceMembers(type, globalTypeLookup, ctx)
                 : type
         ).ToList();
 
         return model with { Types = updatedTypes };
     }
 
-    private static TypeModel AddMissingInterfaceMembers(TypeModel type, Dictionary<string, TypeModel> typeLookup)
+    private static TypeModel AddMissingInterfaceMembers(TypeModel type, Dictionary<string, TypeModel> typeLookup, AnalysisContext ctx)
     {
         if (type.Implements.Count == 0)
             return type; // No interfaces
@@ -52,13 +53,13 @@ public static class ExplicitInterfaceImplementation
         // Collect existing member names
         var existingMembers = new HashSet<string>(StringComparer.Ordinal);
         foreach (var method in type.Members.Methods)
-            existingMembers.Add(method.TsAlias);
+            existingMembers.Add(ctx.GetMethodIdentifier(method));
         foreach (var prop in type.Members.Properties)
-            existingMembers.Add(prop.TsAlias);
+            existingMembers.Add(ctx.GetPropertyIdentifier(prop));
         foreach (var field in type.Members.Fields)
-            existingMembers.Add(field.TsAlias);
+            existingMembers.Add(ctx.GetFieldIdentifier(field));
         foreach (var evt in type.Members.Events)
-            existingMembers.Add(evt.TsAlias);
+            existingMembers.Add(ctx.GetEventIdentifier(evt));
 
         var newMethods = new List<MethodModel>();
         var newProperties = new List<PropertyModel>();
@@ -76,14 +77,14 @@ public static class ExplicitInterfaceImplementation
             // Check for missing properties
             foreach (var interfaceProp in interfaceType.Members.Properties)
             {
-                if (existingMembers.Contains(interfaceProp.TsAlias))
+                if (existingMembers.Contains(ctx.GetPropertyIdentifier(interfaceProp)))
                     continue;
 
                 // Substitute generic parameters
                 var substitutedProp = GenericSubstitution.SubstituteProperty(interfaceProp, substitutions);
 
                 // Check if property still references undefined type parameters
-                if (ReferencesUndefinedTypeParams(substitutedProp, type.GenericParameters))
+                if (ReferencesUndefinedTypeParams(substitutedProp, type.GenericParameters, ctx))
                     continue;
 
                 // Add as synthetic property
@@ -92,20 +93,20 @@ public static class ExplicitInterfaceImplementation
                     SyntheticMember = true
                 });
 
-                existingMembers.Add(interfaceProp.TsAlias);
+                existingMembers.Add(ctx.GetPropertyIdentifier(interfaceProp));
             }
 
             // Check for missing methods
             foreach (var interfaceMethod in interfaceType.Members.Methods)
             {
-                if (existingMembers.Contains(interfaceMethod.TsAlias))
+                if (existingMembers.Contains(ctx.GetMethodIdentifier(interfaceMethod)))
                     continue;
 
                 // Substitute generic parameters
                 var substitutedMethod = GenericSubstitution.SubstituteMethod(interfaceMethod, substitutions);
 
                 // Check if method still references undefined type parameters
-                if (ReferencesUndefinedTypeParams(substitutedMethod, type.GenericParameters))
+                if (ReferencesUndefinedTypeParams(substitutedMethod, type.GenericParameters, ctx))
                     continue;
 
                 // Add as synthetic method
@@ -113,18 +114,18 @@ public static class ExplicitInterfaceImplementation
                 {
                     SyntheticOverload = new SyntheticOverloadInfo(
                         type.Binding.Type.GetClrType(),
-                        interfaceMethod.TsAlias,
+                        ctx.GetMethodIdentifier(interfaceMethod),
                         SyntheticOverloadReason.InterfaceSignatureMismatch
                     )
                 });
 
-                existingMembers.Add(interfaceMethod.TsAlias);
+                existingMembers.Add(ctx.GetMethodIdentifier(interfaceMethod));
             }
 
             // Check for missing events
             foreach (var interfaceEvent in interfaceType.Members.Events)
             {
-                if (existingMembers.Contains(interfaceEvent.TsAlias))
+                if (existingMembers.Contains(ctx.GetEventIdentifier(interfaceEvent)))
                     continue;
 
                 // Substitute generic parameters
@@ -134,7 +135,7 @@ public static class ExplicitInterfaceImplementation
                 };
 
                 // Check if event still references undefined type parameters
-                if (ReferencesUndefinedTypeParams(substitutedEvent.Type, type.GenericParameters))
+                if (ReferencesUndefinedTypeParams(substitutedEvent.Type, type.GenericParameters, ctx))
                     continue;
 
                 // Add as synthetic event
@@ -143,7 +144,7 @@ public static class ExplicitInterfaceImplementation
                     SyntheticMember = true
                 });
 
-                existingMembers.Add(interfaceEvent.TsAlias);
+                existingMembers.Add(ctx.GetEventIdentifier(interfaceEvent));
             }
         }
 
@@ -172,13 +173,13 @@ public static class ExplicitInterfaceImplementation
         return type;
     }
 
-    private static bool ReferencesUndefinedTypeParams(MethodModel method, IReadOnlyList<GenericParameterModel> availableTypeParams)
+    private static bool ReferencesUndefinedTypeParams(MethodModel method, IReadOnlyList<GenericParameterModel> availableTypeParams, AnalysisContext ctx)
     {
-        var availableNames = new HashSet<string>(availableTypeParams.Select(p => p.TsAlias));
+        var availableNames = new HashSet<string>(availableTypeParams.Select(p => ctx.GetGenericParameterIdentifier(p)));
 
         // Add method-level type parameters
         foreach (var gp in method.GenericParameters)
-            availableNames.Add(gp.TsAlias);
+            availableNames.Add(ctx.GetGenericParameterIdentifier(gp));
 
         // Check return type
         if (ReferencesUndefinedTypeParams(method.ReturnType, availableNames))
@@ -194,15 +195,15 @@ public static class ExplicitInterfaceImplementation
         return false;
     }
 
-    private static bool ReferencesUndefinedTypeParams(PropertyModel property, IReadOnlyList<GenericParameterModel> availableTypeParams)
+    private static bool ReferencesUndefinedTypeParams(PropertyModel property, IReadOnlyList<GenericParameterModel> availableTypeParams, AnalysisContext ctx)
     {
-        var availableNames = new HashSet<string>(availableTypeParams.Select(p => p.TsAlias));
+        var availableNames = new HashSet<string>(availableTypeParams.Select(p => ctx.GetGenericParameterIdentifier(p)));
         return ReferencesUndefinedTypeParams(property.Type, availableNames);
     }
 
-    private static bool ReferencesUndefinedTypeParams(TypeReference type, IReadOnlyList<GenericParameterModel> availableTypeParams)
+    private static bool ReferencesUndefinedTypeParams(TypeReference type, IReadOnlyList<GenericParameterModel> availableTypeParams, AnalysisContext ctx)
     {
-        var availableNames = new HashSet<string>(availableTypeParams.Select(p => p.TsAlias));
+        var availableNames = new HashSet<string>(availableTypeParams.Select(p => ctx.GetGenericParameterIdentifier(p)));
         return ReferencesUndefinedTypeParams(type, availableNames);
     }
 

@@ -1,3 +1,4 @@
+using tsbindgen.Config;
 using tsbindgen.Render;
 using tsbindgen.Snapshot;
 
@@ -21,7 +22,7 @@ namespace tsbindgen.Render.Analysis;
 /// </summary>
 public static class DiamondOverloadFix
 {
-    public static NamespaceModel Apply(NamespaceModel model, IReadOnlyDictionary<string, NamespaceModel> allModels)
+    public static NamespaceModel Apply(NamespaceModel model, IReadOnlyDictionary<string, NamespaceModel> allModels, AnalysisContext ctx)
     {
         // Build global type lookup
         var globalTypeLookup = new Dictionary<string, TypeModel>();
@@ -37,14 +38,14 @@ public static class DiamondOverloadFix
         // Process each interface type
         var updatedTypes = model.Types.Select(type =>
             type.Kind == TypeKind.Interface
-                ? AddDiamondOverloads(type, globalTypeLookup)
+                ? AddDiamondOverloads(type, globalTypeLookup, ctx)
                 : type
         ).ToList();
 
         return model with { Types = updatedTypes };
     }
 
-    private static TypeModel AddDiamondOverloads(TypeModel type, Dictionary<string, TypeModel> typeLookup)
+    private static TypeModel AddDiamondOverloads(TypeModel type, Dictionary<string, TypeModel> typeLookup, AnalysisContext ctx)
     {
         if (type.Implements.Count < 2)
             return type; // No conflicts possible with less than 2 parent interfaces
@@ -80,29 +81,30 @@ public static class DiamondOverloadFix
                 {
                     foreach (var method2 in methods2)
                     {
-                        if (method1.TsAlias == method2.TsAlias &&
-                            !AreSameSignature(method1, method2))
+                        if (ctx.SameIdentifier(method1, method2) &&
+                            !AreSameSignature(method1, method2, ctx))
                         {
                             // Substitute generic parameters before adding
                             var substitutedMethod1 = GenericSubstitution.SubstituteMethod(method1, substitutions1);
                             var substitutedMethod2 = GenericSubstitution.SubstituteMethod(method2, substitutions2);
 
                             // Check if substituted methods still reference undefined type parameters
-                            if (ReferencesUndefinedTypeParams(substitutedMethod1, type.GenericParameters))
+                            if (ReferencesUndefinedTypeParams(substitutedMethod1, type.GenericParameters, ctx))
                                 continue;
 
-                            if (ReferencesUndefinedTypeParams(substitutedMethod2, type.GenericParameters))
+                            if (ReferencesUndefinedTypeParams(substitutedMethod2, type.GenericParameters, ctx))
                                 continue;
 
                             // Found a conflict - need to add both overloads
-                            if (!conflictingMethods.ContainsKey(method1.TsAlias))
-                                conflictingMethods[method1.TsAlias] = new List<MethodModel>();
+                            var methodIdentifier = ctx.GetMethodIdentifier(method1);
+                            if (!conflictingMethods.ContainsKey(methodIdentifier))
+                                conflictingMethods[methodIdentifier] = new List<MethodModel>();
 
-                            if (!conflictingMethods[method1.TsAlias].Any(m => AreSameSignature(m, substitutedMethod1)))
-                                conflictingMethods[method1.TsAlias].Add(substitutedMethod1);
+                            if (!conflictingMethods[methodIdentifier].Any(m => AreSameSignature(m, substitutedMethod1, ctx)))
+                                conflictingMethods[methodIdentifier].Add(substitutedMethod1);
 
-                            if (!conflictingMethods[method1.TsAlias].Any(m => AreSameSignature(m, substitutedMethod2)))
-                                conflictingMethods[method1.TsAlias].Add(substitutedMethod2);
+                            if (!conflictingMethods[methodIdentifier].Any(m => AreSameSignature(m, substitutedMethod2, ctx)))
+                                conflictingMethods[methodIdentifier].Add(substitutedMethod2);
                         }
                     }
                 }
@@ -118,7 +120,7 @@ public static class DiamondOverloadFix
         foreach (var (methodName, overloads) in conflictingMethods)
         {
             // Skip if already defined on this interface
-            if (newMethods.Any(m => m.TsAlias == methodName))
+            if (newMethods.Any(m => ctx.GetMethodIdentifier(m) == methodName))
                 continue;
 
             // Add all overload signatures
@@ -180,10 +182,10 @@ public static class DiamondOverloadFix
         }
     }
 
-    private static bool AreSameSignature(MethodModel m1, MethodModel m2)
+    private static bool AreSameSignature(MethodModel m1, MethodModel m2, AnalysisContext ctx)
     {
         // Same name
-        if (m1.TsAlias != m2.TsAlias)
+        if (!ctx.SameIdentifier(m1, m2))
             return false;
 
         // Same parameter count
@@ -211,13 +213,13 @@ public static class DiamondOverloadFix
         return type;
     }
 
-    private static bool ReferencesUndefinedTypeParams(MethodModel method, IReadOnlyList<GenericParameterModel> availableTypeParams)
+    private static bool ReferencesUndefinedTypeParams(MethodModel method, IReadOnlyList<GenericParameterModel> availableTypeParams, AnalysisContext ctx)
     {
-        var availableNames = new HashSet<string>(availableTypeParams.Select(p => p.TsAlias));
+        var availableNames = new HashSet<string>(availableTypeParams.Select(p => ctx.GetGenericParameterIdentifier(p)));
 
         // Add method-level type parameters
         foreach (var gp in method.GenericParameters)
-            availableNames.Add(gp.TsAlias);
+            availableNames.Add(ctx.GetGenericParameterIdentifier(gp));
 
         // Check return type
         if (ReferencesUndefinedTypeParamsInType(method.ReturnType, availableNames))

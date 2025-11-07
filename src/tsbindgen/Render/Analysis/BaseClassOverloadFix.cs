@@ -1,3 +1,4 @@
+using tsbindgen.Config;
 using tsbindgen.Render;
 using tsbindgen.Snapshot;
 
@@ -29,7 +30,7 @@ namespace tsbindgen.Render.Analysis;
 /// </summary>
 public static class BaseClassOverloadFix
 {
-    public static NamespaceModel Apply(NamespaceModel model, IReadOnlyDictionary<string, NamespaceModel> allModels)
+    public static NamespaceModel Apply(NamespaceModel model, IReadOnlyDictionary<string, NamespaceModel> allModels, AnalysisContext ctx)
     {
         // Build global type lookup
         var globalTypeLookup = new Dictionary<string, TypeModel>();
@@ -45,14 +46,14 @@ public static class BaseClassOverloadFix
         // Process each class/struct type
         var updatedTypes = model.Types.Select(type =>
             type.Kind == TypeKind.Class || type.Kind == TypeKind.Struct
-                ? AddBaseClassOverloads(type, globalTypeLookup)
+                ? AddBaseClassOverloads(type, globalTypeLookup, ctx)
                 : type
         ).ToList();
 
         return model with { Types = updatedTypes };
     }
 
-    private static TypeModel AddBaseClassOverloads(TypeModel type, Dictionary<string, TypeModel> typeLookup)
+    private static TypeModel AddBaseClassOverloads(TypeModel type, Dictionary<string, TypeModel> typeLookup, AnalysisContext ctx)
     {
         if (type.BaseType == null)
             return type; // No base class
@@ -73,7 +74,7 @@ public static class BaseClassOverloadFix
             var existingSignatures = new HashSet<string>();
 
             // Add current method's signature
-            existingSignatures.Add(GetMethodSignature(method));
+            existingSignatures.Add(GetMethodSignature(method, ctx));
 
             // Check each base method
             foreach (var baseMethod in baseMethods)
@@ -93,11 +94,11 @@ public static class BaseClassOverloadFix
                 var substitutedMethod = GenericSubstitution.SubstituteMethod(baseMethod, substitutions);
 
                 // Check if method still references undefined type parameters
-                if (ReferencesUndefinedTypeParams(substitutedMethod, type.GenericParameters))
+                if (ReferencesUndefinedTypeParams(substitutedMethod, type.GenericParameters, ctx))
                     continue;
 
                 // Check if we've already added this signature
-                var signature = GetMethodSignature(substitutedMethod);
+                var signature = GetMethodSignature(substitutedMethod, ctx);
                 if (existingSignatures.Contains(signature))
                     continue;
 
@@ -106,7 +107,7 @@ public static class BaseClassOverloadFix
                 {
                     SyntheticOverload = new SyntheticOverloadInfo(
                         type.Binding.Type.GetClrType(),
-                        baseMethod.TsAlias,
+                        ctx.GetMethodIdentifier(baseMethod),
                         SyntheticOverloadReason.BaseClassArityMismatch
                     )
                 });
@@ -164,13 +165,13 @@ public static class BaseClassOverloadFix
         return type;
     }
 
-    private static bool ReferencesUndefinedTypeParams(MethodModel method, IReadOnlyList<GenericParameterModel> availableTypeParams)
+    private static bool ReferencesUndefinedTypeParams(MethodModel method, IReadOnlyList<GenericParameterModel> availableTypeParams, AnalysisContext ctx)
     {
-        var availableNames = new HashSet<string>(availableTypeParams.Select(p => p.TsAlias));
+        var availableNames = new HashSet<string>(availableTypeParams.Select(p => ctx.GetGenericParameterIdentifier(p)));
 
         // Add method-level type parameters
         foreach (var gp in method.GenericParameters)
-            availableNames.Add(gp.TsAlias);
+            availableNames.Add(ctx.GetGenericParameterIdentifier(gp));
 
         // Check return type
         if (ReferencesUndefinedTypeParams(method.ReturnType, availableNames))
@@ -206,11 +207,11 @@ public static class BaseClassOverloadFix
         return false;
     }
 
-    private static string GetMethodSignature(MethodModel method)
+    private static string GetMethodSignature(MethodModel method, AnalysisContext ctx)
     {
         // Create signature from method name and parameter types
         var paramTypes = string.Join(",", method.Parameters.Select(p => GetTypeSignature(p.Type)));
-        return $"{method.TsAlias}({paramTypes})";
+        return $"{ctx.GetMethodIdentifier(method)}({paramTypes})";
     }
 
     private static string GetTypeSignature(TypeReference type)

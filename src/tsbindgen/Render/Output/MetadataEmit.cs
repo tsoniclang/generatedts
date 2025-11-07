@@ -1,4 +1,5 @@
 using System.Text.Json;
+using tsbindgen.Config;
 using tsbindgen.Render;
 
 namespace tsbindgen.Render.Output;
@@ -9,7 +10,7 @@ namespace tsbindgen.Render.Output;
 /// </summary>
 public static class MetadataEmit
 {
-    public static string Emit(NamespaceModel model)
+    public static string Emit(NamespaceModel model, AnalysisContext ctx)
     {
         var metadata = new
         {
@@ -17,7 +18,7 @@ public static class MetadataEmit
             types = model.Types.Select(t => new
             {
                 // TypeScript exported name (may be renamed for nested types: List_1_Enumerator)
-                tsName = t.TsAlias,
+                tsName = ctx.GetTypeIdentifier(t),
                 // Full CLR type name (e.g., System.Collections.Generic.List`1+Enumerator)
                 clrType = t.Binding.Type,
                 // Assembly containing this type

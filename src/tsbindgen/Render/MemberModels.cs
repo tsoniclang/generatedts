@@ -10,11 +10,11 @@ public sealed record ConstructorModel(
     IReadOnlyList<ParameterModel> Parameters);
 
 /// <summary>
-/// Method model with CLR and TS names (Phase 3).
+/// Method model (Phase 3).
+/// TypeScript name computed on-demand from ClrName + config via AnalysisContext.
 /// </summary>
 public sealed record MethodModel(
     string ClrName,
-    string TsAlias,
     bool IsStatic,
     bool IsVirtual,
     bool IsOverride,
@@ -32,11 +32,11 @@ public sealed record MethodModel(
 }
 
 /// <summary>
-/// Property model with CLR and TS names (Phase 3).
+/// Property model (Phase 3).
+/// TypeScript name computed on-demand from ClrName + config via AnalysisContext.
 /// </summary>
 public sealed record PropertyModel(
     string ClrName,
-    string TsAlias,
     TypeReference Type,
     bool IsReadonly,
     bool IsStatic,
@@ -50,11 +50,11 @@ public sealed record PropertyModel(
 }
 
 /// <summary>
-/// Field model with CLR and TS names (Phase 3).
+/// Field model (Phase 3).
+/// TypeScript name computed on-demand from ClrName + config via AnalysisContext.
 /// </summary>
 public sealed record FieldModel(
     string ClrName,
-    string TsAlias,
     TypeReference Type,
     bool IsReadonly,
     bool IsStatic,
@@ -62,11 +62,11 @@ public sealed record FieldModel(
     MemberBinding Binding);
 
 /// <summary>
-/// Event model with CLR and TS names (Phase 3).
+/// Event model (Phase 3).
+/// TypeScript name computed on-demand from ClrName + config via AnalysisContext.
 /// </summary>
 public sealed record EventModel(
     string ClrName,
-    string TsAlias,
     TypeReference Type,
     bool IsStatic,
     string Visibility,

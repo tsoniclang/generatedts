@@ -5,10 +5,10 @@ namespace tsbindgen.Render;
 
 /// <summary>
 /// Type model after normalization and analysis.
+/// TypeScript identifier computed on-demand via AnalysisContext.GetTypeIdentifier().
 /// </summary>
 public sealed record TypeModel(
     string ClrName,
-    string TsAlias,
     TypeKind Kind,
     bool IsStatic,
     bool IsSealed,
@@ -40,10 +40,10 @@ public sealed record TypeModel(
 
 /// <summary>
 /// Generic parameter with constraints.
+/// Name used as-is in TypeScript (T, U, TKey, etc. - no transformation).
 /// </summary>
 public sealed record GenericParameterModel(
     string Name,
-    string TsAlias,
     IReadOnlyList<TypeReference> Constraints,
     Variance Variance);
 

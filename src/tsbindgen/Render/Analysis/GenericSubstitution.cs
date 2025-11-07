@@ -1,3 +1,4 @@
+using tsbindgen.Config;
 using tsbindgen.Render;
 using tsbindgen.Snapshot;
 
@@ -19,6 +20,7 @@ public static class GenericSubstitution
     /// <summary>
     /// Builds a substitution map from a generic interface reference.
     /// Maps generic parameter names to their concrete types.
+    /// Note: Generic parameter names are used as-is (no transformation).
     /// </summary>
     public static Dictionary<string, TypeReference> BuildSubstitutionMap(
         TypeReference interfaceRef,
@@ -32,7 +34,8 @@ public static class GenericSubstitution
         {
             for (int i = 0; i < interfaceGenericParams.Count; i++)
             {
-                var paramName = interfaceGenericParams[i].TsAlias;
+                // Generic parameters are not transformed - use Name directly
+                var paramName = interfaceGenericParams[i].Name;
                 var concreteType = interfaceRef.GenericArgs[i];
                 substitutions[paramName] = concreteType;
             }

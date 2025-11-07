@@ -17,7 +17,7 @@ namespace tsbindgen.Render.Output;
 /// </summary>
 public static class FacadeEmit
 {
-    public static string Generate(NamespaceModel model)
+    public static string Generate(NamespaceModel model, AnalysisContext ctx)
     {
         var sb = new StringBuilder();
 
@@ -40,7 +40,7 @@ public static class FacadeEmit
             if (type.ClrName.Contains('`'))
             {
                 // Generic type
-                var baseName = StripArity(type.TsAlias);
+                var baseName = StripArity(ctx.GetTypeIdentifier(type));
                 if (!typesByBaseName.ContainsKey(baseName))
                 {
                     typesByBaseName[baseName] = new List<TypeModel>();
@@ -50,7 +50,7 @@ public static class FacadeEmit
             else
             {
                 // Non-generic type
-                nonGenericTypesByName[type.TsAlias] = type;
+                nonGenericTypesByName[ctx.GetTypeIdentifier(type)] = type;
             }
         }
 
@@ -69,7 +69,7 @@ public static class FacadeEmit
             {
                 foreach (var gp in type.GenericParameters)
                 {
-                    typeParameterNames.Add(gp.TsAlias);
+                    typeParameterNames.Add(ctx.GetGenericParameterIdentifier(gp));
                 }
             }
         }
@@ -164,20 +164,20 @@ public static class FacadeEmit
                 // Add all generic versions
                 allTypes.AddRange(types);
 
-                GenerateMultiArityFacade(sb, baseName, allTypes, model.ClrName);
+                GenerateMultiArityFacade(sb, baseName, allTypes, model.ClrName, ctx);
             }
             else
             {
                 // Single generic arity with no non-generic collision - simple re-export
                 var type = types[0];
-                GenerateSingleArityFacade(sb, baseName, type, model.ClrName);
+                GenerateSingleArityFacade(sb, baseName, type, model.ClrName, ctx);
             }
         }
 
         return sb.ToString();
     }
 
-    private static void GenerateSingleArityFacade(StringBuilder sb, string cleanName, TypeModel type, string currentNamespace)
+    private static void GenerateSingleArityFacade(StringBuilder sb, string cleanName, TypeModel type, string currentNamespace, AnalysisContext ctx)
     {
         var internalName = type.TsEmitName;
 
@@ -191,7 +191,7 @@ public static class FacadeEmit
             sb.Append('<');
             sb.Append(string.Join(", ", type.GenericParameters.Select(gp =>
             {
-                var param = gp.TsAlias;
+                var param = ctx.GetGenericParameterIdentifier(gp);
                 if (gp.Constraints.Count > 0)
                 {
                     // Format constraints: only add namespace prefix for cross-namespace types
@@ -209,7 +209,7 @@ public static class FacadeEmit
         if (type.GenericParameters.Count > 0)
         {
             sb.Append('<');
-            sb.Append(string.Join(", ", type.GenericParameters.Select(gp => gp.TsAlias)));
+            sb.Append(string.Join(", ", type.GenericParameters.Select(gp => ctx.GetGenericParameterIdentifier(gp))));
             sb.Append('>');
         }
 
@@ -224,7 +224,7 @@ public static class FacadeEmit
         sb.AppendLine();
     }
 
-    private static void GenerateMultiArityFacade(StringBuilder sb, string baseName, List<TypeModel> types, string currentNamespace)
+    private static void GenerateMultiArityFacade(StringBuilder sb, string baseName, List<TypeModel> types, string currentNamespace, AnalysisContext ctx)
     {
         // Sort by arity
         var sorted = types.OrderBy(t => t.GenericParameters.Count).ToList();
@@ -344,7 +344,7 @@ public static class FacadeEmit
                     sb.Append('<');
                     sb.Append(string.Join(", ", type.GenericParameters.Select(gp =>
                     {
-                        var param = gp.TsAlias;
+                        var param = ctx.GetGenericParameterIdentifier(gp);
                         if (gp.Constraints.Count > 0)
                         {
                             // Mirror constraints from internal type
@@ -364,7 +364,7 @@ public static class FacadeEmit
                 if (arity > 0)
                 {
                     sb.Append('<');
-                    sb.Append(string.Join(", ", type.GenericParameters.Select(gp => gp.TsAlias)));
+                    sb.Append(string.Join(", ", type.GenericParameters.Select(gp => ctx.GetGenericParameterIdentifier(gp))));
                     sb.Append('>');
                 }
 

@@ -6,8 +6,7 @@ namespace tsbindgen.Render.Transform;
 
 /// <summary>
 /// Phase 3: Converts NamespaceBundle (from Phase 2) to NamespaceModel.
-/// Applies name transformations (creates TsAlias via NameTransformation.Apply).
-/// This is the CLR→TypeScript bridge.
+/// No longer creates TsAlias strings - names computed on-demand via AnalysisContext.
 /// </summary>
 public static class ModelTransform
 {
@@ -18,7 +17,7 @@ public static class ModelTransform
         var tsAlias = NameTransformation.Apply(bundle.ClrName, config.NamespaceNames);
 
         var types = bundle.Types
-            .Select(t => BuildType(t, config, bundle.ClrName))
+            .Select(t => BuildType(t))
             .ToList();
 
         var imports = bundle.Imports
@@ -35,30 +34,19 @@ public static class ModelTransform
             bundle.SourceAssemblies.ToList());
     }
 
-    private static TypeModel BuildType(TypeSnapshot snapshot, GeneratorConfig config, string currentNamespace)
+    private static TypeModel BuildType(TypeSnapshot snapshot)
     {
-        // Build TsAlias using structured naming + CLI transformations
-        var baseName = TsNaming.ForAnalysis(snapshot.Binding.Type);
-        var tsAlias = snapshot.Kind switch
-        {
-            TypeKind.Interface => NameTransformation.Apply(baseName, config.InterfaceNames),
-            TypeKind.Class => NameTransformation.Apply(baseName, config.ClassNames),
-            _ => baseName
-        };
-
         var genericParams = snapshot.GenericParameters
             .Select(gp => new GenericParameterModel(
                 gp.Name,
-                gp.Name, // Generic parameters don't get transformed
                 gp.Constraints.ToList(),
                 gp.Variance))
             .ToList();
 
-        var members = BuildMembers(snapshot.Members, config, currentNamespace);
+        var members = BuildMembers(snapshot.Members);
 
         return new TypeModel(
             snapshot.ClrName,
-            tsAlias,
             snapshot.Kind,
             snapshot.IsStatic,
             snapshot.IsSealed,
@@ -77,10 +65,7 @@ public static class ModelTransform
             snapshot.DelegateReturnType);
     }
 
-    private static MemberCollectionModel BuildMembers(
-        MemberCollection members,
-        GeneratorConfig config,
-        string currentNamespace)
+    private static MemberCollectionModel BuildMembers(MemberCollection members)
     {
         var constructors = members.Constructors
             .Select(c => new ConstructorModel(
@@ -89,31 +74,28 @@ public static class ModelTransform
             .ToList();
 
         var methods = members.Methods
-            .Select(m => BuildMethod(m, config))
+            .Select(m => BuildMethod(m))
             .ToList();
 
         var properties = members.Properties
-            .Select(p => BuildProperty(p, config))
+            .Select(p => BuildProperty(p))
             .ToList();
 
         var fields = members.Fields
-            .Select(f => BuildField(f, config))
+            .Select(f => BuildField(f))
             .ToList();
 
         var events = members.Events
-            .Select(e => BuildEvent(e, config))
+            .Select(e => BuildEvent(e))
             .ToList();
 
         return new MemberCollectionModel(constructors, methods, properties, fields, events);
     }
 
-    private static MethodModel BuildMethod(MethodSnapshot snapshot, GeneratorConfig config)
+    private static MethodModel BuildMethod(MethodSnapshot snapshot)
     {
-        var tsAlias = NameTransformation.Apply(snapshot.ClrName, config.MethodNames);
-
         var genericParams = snapshot.GenericParameters
             .Select(gp => new GenericParameterModel(
-                gp.Name,
                 gp.Name,
                 gp.Constraints.ToList(),
                 gp.Variance))
@@ -121,7 +103,6 @@ public static class ModelTransform
 
         return new MethodModel(
             snapshot.ClrName,
-            tsAlias,
             snapshot.IsStatic,
             snapshot.IsVirtual,
             snapshot.IsOverride,
@@ -133,13 +114,10 @@ public static class ModelTransform
             snapshot.Binding);
     }
 
-    private static PropertyModel BuildProperty(PropertySnapshot snapshot, GeneratorConfig config)
+    private static PropertyModel BuildProperty(PropertySnapshot snapshot)
     {
-        var tsAlias = NameTransformation.Apply(snapshot.ClrName, config.PropertyNames);
-
         return new PropertyModel(
             snapshot.ClrName,
-            tsAlias,
             snapshot.Type,
             snapshot.IsReadOnly,
             snapshot.IsStatic,
@@ -150,13 +128,10 @@ public static class ModelTransform
             snapshot.ContractType);
     }
 
-    private static FieldModel BuildField(FieldSnapshot snapshot, GeneratorConfig config)
+    private static FieldModel BuildField(FieldSnapshot snapshot)
     {
-        var tsAlias = NameTransformation.Apply(snapshot.ClrName, config.PropertyNames);
-
         return new FieldModel(
             snapshot.ClrName,
-            tsAlias,
             snapshot.Type,
             snapshot.IsReadOnly,
             snapshot.IsStatic,
@@ -164,13 +139,10 @@ public static class ModelTransform
             snapshot.Binding);
     }
 
-    private static EventModel BuildEvent(EventSnapshot snapshot, GeneratorConfig config)
+    private static EventModel BuildEvent(EventSnapshot snapshot)
     {
-        var tsAlias = NameTransformation.Apply(snapshot.ClrName, config.PropertyNames);
-
         return new EventModel(
             snapshot.ClrName,
-            tsAlias,
             snapshot.Type,
             snapshot.IsStatic,
             snapshot.Visibility,

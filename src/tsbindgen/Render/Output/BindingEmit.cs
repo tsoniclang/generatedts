@@ -1,4 +1,5 @@
 using System.Text.Json;
+using tsbindgen.Config;
 using tsbindgen.Render;
 
 namespace tsbindgen.Render.Output;
@@ -9,10 +10,10 @@ namespace tsbindgen.Render.Output;
 /// </summary>
 public static class BindingEmit
 {
-    public static string? Emit(NamespaceModel model)
+    public static string? Emit(NamespaceModel model, AnalysisContext ctx)
     {
         var hasBindings = model.ClrName != model.TsAlias ||
-                         model.Types.Any(t => t.ClrName != t.TsAlias || HasMemberBindings(t));
+                         model.Types.Any(t => t.ClrName != ctx.GetTypeIdentifier(t) || HasMemberBindings(t, ctx));
 
         if (!hasBindings)
             return null;
@@ -25,11 +26,11 @@ public static class BindingEmit
                 alias = model.TsAlias
             },
             types = model.Types
-                .Where(t => t.ClrName != t.TsAlias || HasMemberBindings(t))
+                .Where(t => t.ClrName != ctx.GetTypeIdentifier(t) || HasMemberBindings(t, ctx))
                 .Select(t => new
                 {
                     name = t.ClrName,
-                    alias = t.TsAlias
+                    alias = ctx.GetTypeIdentifier(t)
                 })
         };
 
@@ -40,11 +41,11 @@ public static class BindingEmit
         });
     }
 
-    private static bool HasMemberBindings(TypeModel type)
+    private static bool HasMemberBindings(TypeModel type, AnalysisContext ctx)
     {
-        return type.Members.Methods.Any(m => m.ClrName != m.TsAlias) ||
-               type.Members.Properties.Any(p => p.ClrName != p.TsAlias) ||
-               type.Members.Fields.Any(f => f.ClrName != f.TsAlias) ||
-               type.Members.Events.Any(e => e.ClrName != e.TsAlias);
+        return type.Members.Methods.Any(m => m.ClrName != ctx.GetMethodIdentifier(m)) ||
+               type.Members.Properties.Any(p => p.ClrName != ctx.GetPropertyIdentifier(p)) ||
+               type.Members.Fields.Any(f => f.ClrName != ctx.GetFieldIdentifier(f)) ||
+               type.Members.Events.Any(e => e.ClrName != ctx.GetEventIdentifier(e));
     }
 }

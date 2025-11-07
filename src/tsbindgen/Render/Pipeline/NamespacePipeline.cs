@@ -23,11 +23,14 @@ public static class NamespacePipeline
         IReadOnlyDictionary<string, NamespaceBundle> bundles,
         GeneratorConfig config)
     {
+        // Create analysis context for on-demand name computation
+        var ctx = new AnalysisContext(config);
+
         var models = new Dictionary<string, NamespaceModel>();
 
         foreach (var (clrName, bundle) in bundles)
         {
-            // Normalize
+            // Normalize (no longer creates TsAlias strings - names computed on-demand)
             var model = ModelTransform.Build(bundle, config);
 
             // Apply analysis passes (except InterfaceReduction which needs all models)
@@ -52,7 +55,7 @@ public static class NamespacePipeline
         var interfaceFixedModels = new Dictionary<string, NamespaceModel>();
         foreach (var (clrName, model) in reducedModels)
         {
-            var fixedModel = ExplicitInterfaceImplementation.Apply(model, reducedModels);
+            var fixedModel = ExplicitInterfaceImplementation.Apply(model, reducedModels, ctx);
             interfaceFixedModels[clrName] = fixedModel;
         }
 
@@ -60,7 +63,7 @@ public static class NamespacePipeline
         var diamondFixedModels = new Dictionary<string, NamespaceModel>();
         foreach (var (clrName, model) in interfaceFixedModels)
         {
-            var fixedModel = DiamondOverloadFix.Apply(model, interfaceFixedModels);
+            var fixedModel = DiamondOverloadFix.Apply(model, interfaceFixedModels, ctx);
             diamondFixedModels[clrName] = fixedModel;
         }
 
@@ -68,7 +71,7 @@ public static class NamespacePipeline
         var baseClassFixedModels = new Dictionary<string, NamespaceModel>();
         foreach (var (clrName, model) in diamondFixedModels)
         {
-            var fixedModel = BaseClassOverloadFix.Apply(model, diamondFixedModels);
+            var fixedModel = BaseClassOverloadFix.Apply(model, diamondFixedModels, ctx);
             baseClassFixedModels[clrName] = fixedModel;
         }
 
@@ -76,7 +79,7 @@ public static class NamespacePipeline
         var staticFixedModels = new Dictionary<string, NamespaceModel>();
         foreach (var (clrName, model) in baseClassFixedModels)
         {
-            var fixedModel = StaticMethodOverloadFix.Apply(model, baseClassFixedModels);
+            var fixedModel = StaticMethodOverloadFix.Apply(model, baseClassFixedModels, ctx);
             staticFixedModels[clrName] = fixedModel;
         }
 
@@ -86,12 +89,12 @@ public static class NamespacePipeline
     /// <summary>
     /// Phase 4: Renders a single namespace to all artifacts (strings).
     /// </summary>
-    public static NamespaceArtifacts RenderNamespace(NamespaceModel model, IReadOnlyDictionary<string, NamespaceModel> allModels)
+    public static NamespaceArtifacts RenderNamespace(NamespaceModel model, IReadOnlyDictionary<string, NamespaceModel> allModels, AnalysisContext ctx)
     {
-        var dtsContent = TypeScriptEmit.Emit(model, allModels);
-        var facadeDtsContent = FacadeEmit.Generate(model);
-        var metadataContent = MetadataEmit.Emit(model);
-        var bindingsContent = BindingEmit.Emit(model);
+        var dtsContent = TypeScriptEmit.Emit(model, allModels, ctx);
+        var facadeDtsContent = FacadeEmit.Generate(model, ctx);
+        var metadataContent = MetadataEmit.Emit(model, ctx);
+        var bindingsContent = BindingEmit.Emit(model, ctx);
         var jsStubContent = ModuleStubEmit.Emit(model);
 
         // Serialize the post-analysis model for debugging
@@ -102,7 +105,7 @@ public static class NamespacePipeline
         });
 
         // Generate simplified type list for debugging/comparison
-        var typeListContent = TypeScriptTypeListEmit.Emit(model);
+        var typeListContent = TypeScriptTypeListEmit.Emit(model, ctx);
 
         return new NamespaceArtifacts(
             model.ClrName,
@@ -132,6 +135,9 @@ public static class NamespacePipeline
         // Build models
         var models = BuildModels(bundles, config);
 
+        // Create analysis context for Phase 4 emission
+        var ctx = new AnalysisContext(config);
+
         // Create output directory
         var namespacesDir = Path.Combine(outputDir, "namespaces");
         Directory.CreateDirectory(namespacesDir);
@@ -142,7 +148,7 @@ public static class NamespacePipeline
 
         foreach (var model in models.Values)
         {
-            var artifacts = RenderNamespace(model, models);
+            var artifacts = RenderNamespace(model, models, ctx);
 
             // Create namespace directory structure
             var nsDir = Path.Combine(namespacesDir, model.TsAlias);

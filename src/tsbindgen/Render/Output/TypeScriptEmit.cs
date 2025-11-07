@@ -1,4 +1,5 @@
 using System.Text;
+using tsbindgen.Config;
 using tsbindgen.Render;
 using tsbindgen.Snapshot;
 
@@ -18,7 +19,10 @@ public static class TypeScriptEmit
     // Track all type names defined in current namespace (for filtering undefined implements/extends)
     private static HashSet<string> _definedTypes = new();
 
-    public static string Emit(NamespaceModel model, IReadOnlyDictionary<string, NamespaceModel> allModels)
+    // Analysis context for name computation
+    private static AnalysisContext _ctx = null!;
+
+    public static string Emit(NamespaceModel model, IReadOnlyDictionary<string, NamespaceModel> allModels, AnalysisContext ctx)
     {
         // Reset bindings for this namespace
         _bindingsMap = new Dictionary<string, TypeBindings>();
@@ -28,6 +32,9 @@ public static class TypeScriptEmit
 
         // Store all models for cross-namespace interface lookups
         _allModels = allModels;
+
+        // Store context for name computation
+        _ctx = ctx;
 
         var builder = new StringBuilder();
 
@@ -255,16 +262,16 @@ public static class TypeScriptEmit
                 referencedTypeParams.UnionWith(CollectTypeParameters(method.ReturnType));
 
                 // Check which class-level type parameters are referenced
-                var classTypeParamNames = new HashSet<string>(typeModel.GenericParameters.Select(p => p.TsAlias));
+                var classTypeParamNames = new HashSet<string>(typeModel.GenericParameters.Select(p => _ctx.GetGenericParameterIdentifier(p)));
                 var referencedClassTypeParams = referencedTypeParams.Where(tp => classTypeParamNames.Contains(tp)).ToList();
 
                 // Add referenced class type parameters to method's generic parameters (at the beginning)
                 foreach (var classTypeParam in typeModel.GenericParameters)
                 {
-                    if (referencedClassTypeParams.Contains(classTypeParam.TsAlias))
+                    if (referencedClassTypeParams.Contains(_ctx.GetGenericParameterIdentifier(classTypeParam)))
                     {
                         // Only add if not already in method's generic parameters
-                        if (!methodGenericParams.Any(mp => mp.TsAlias == classTypeParam.TsAlias))
+                        if (!methodGenericParams.Any(mp => _ctx.GetGenericParameterIdentifier(mp) == _ctx.GetGenericParameterIdentifier(classTypeParam)))
                         {
                             methodGenericParams.Insert(0, classTypeParam);
                         }
@@ -276,12 +283,13 @@ public static class TypeScriptEmit
             var parameters = string.Join(", ", method.Parameters.Select(p => $"{EscapeIdentifier(p.Name)}: {ToTypeScriptType(p.Type, currentNamespace)}"));
 
             // Note: Base class method overloads are now added in Phase 3 by BaseClassOverloadFix analysis pass
-            builder.AppendLine($"{indent}{modifiers}{method.TsAlias}{genericParams}({parameters}): {ToTypeScriptType(method.ReturnType, currentNamespace)};");
+            var methodName = _ctx.GetMethodIdentifier(method);
+            builder.AppendLine($"{indent}{modifiers}{methodName}{genericParams}({parameters}): {ToTypeScriptType(method.ReturnType, currentNamespace)};");
 
             // Track binding
             if (typeBindings != null)
             {
-                typeBindings.Members[method.TsAlias] = new MemberBindingInfo(
+                typeBindings.Members[methodName] = new MemberBindingInfo(
                     Kind: "method",
                     ClrName: method.ClrName,
                     ClrMemberType: "method");
@@ -302,7 +310,7 @@ public static class TypeScriptEmit
                 var propertyType = ToTypeScriptType(prop.Type, currentNamespace);
 
                 // Use property name directly - no "get"/"set" prefix
-                var methodName = prop.TsAlias;
+                var methodName = _ctx.GetPropertyIdentifier(prop);
 
                 // Emit getter
                 builder.AppendLine($"{indent}{modifiers}{methodName}(): {propertyType};");
@@ -324,18 +332,18 @@ public static class TypeScriptEmit
 
             var modifiers = field.IsStatic ? "static " : "";
             var fieldType = ToTypeScriptType(field.Type, currentNamespace);
-            var methodName = field.TsAlias;
+            var methodName = _ctx.GetFieldIdentifier(field);
 
             // For static fields that reference class type parameters, add them as method-level generics
             var methodGenericParams = new List<GenericParameterModel>();
             if (field.IsStatic && typeModel != null && typeModel.GenericParameters.Count > 0)
             {
                 var referencedTypeParams = CollectTypeParameters(field.Type);
-                var classTypeParamNames = new HashSet<string>(typeModel.GenericParameters.Select(p => p.TsAlias));
+                var classTypeParamNames = new HashSet<string>(typeModel.GenericParameters.Select(p => _ctx.GetGenericParameterIdentifier(p)));
 
                 foreach (var classTypeParam in typeModel.GenericParameters)
                 {
-                    if (referencedTypeParams.Contains(classTypeParam.TsAlias))
+                    if (referencedTypeParams.Contains(_ctx.GetGenericParameterIdentifier(classTypeParam)))
                     {
                         methodGenericParams.Add(classTypeParam);
                     }
@@ -373,7 +381,7 @@ public static class TypeScriptEmit
 
             var modifiers = evt.IsStatic ? "static " : "";
 
-            builder.AppendLine($"{indent}{modifiers}readonly {evt.TsAlias}: {ToTypeScriptType(evt.Type, currentNamespace)};");
+            builder.AppendLine($"{indent}{modifiers}readonly {_ctx.GetEventIdentifier(evt)}: {ToTypeScriptType(evt.Type, currentNamespace)};");
         }
     }
 
@@ -387,7 +395,7 @@ public static class TypeScriptEmit
     {
         // Collect existing method names to detect conflicts
         var existingMethodNames = new HashSet<string>(
-            members.Methods.Select(m => m.TsAlias),
+            members.Methods.Select(m => _ctx.GetMethodIdentifier(m)),
             StringComparer.Ordinal);
 
         foreach (var prop in members.Properties)
@@ -399,7 +407,7 @@ public static class TypeScriptEmit
 
             // Use property name directly - no "get"/"set" prefix
             // C# doesn't allow property and method with same name, so no conflicts
-            var baseMethodName = prop.TsAlias;
+            var baseMethodName = _ctx.GetPropertyIdentifier(prop);
 
             // Resolve name conflicts (shouldn't happen, but defensive)
             var methodName = ResolveConflict(baseMethodName, existingMethodNames);
@@ -415,7 +423,7 @@ public static class TypeScriptEmit
                 {
                     // Find matching property in interface
                     var interfaceProp = interfaceType.Members.Properties
-                        .FirstOrDefault(p => p.TsAlias == prop.TsAlias);
+                        .FirstOrDefault(p => _ctx.SameIdentifier(p, prop));
 
                     if (interfaceProp != null)
                     {
@@ -423,7 +431,7 @@ public static class TypeScriptEmit
                         // Example: IEnumerator<T>.Current returns T, but implementing class uses IEnumerator<KeyValuePair<K,V>>
                         // We can't emit "current(): T" because T is not in scope
                         var referencedTypeParams = CollectTypeParameters(interfaceProp.Type);
-                        var classTypeParams = new HashSet<string>(typeModel.GenericParameters.Select(p => p.TsAlias));
+                        var classTypeParams = new HashSet<string>(typeModel.GenericParameters.Select(p => _ctx.GetGenericParameterIdentifier(p)));
 
                         // Skip this overload if it references type parameters not defined on this class
                         var hasOutOfScopeTypeParams = referencedTypeParams.Any(tp => !classTypeParams.Contains(tp));
@@ -509,16 +517,16 @@ public static class TypeScriptEmit
         var existingMembers = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var method in type.Members.Methods)
-            existingMembers.Add(method.TsAlias);
+            existingMembers.Add(_ctx.GetMethodIdentifier(method));
 
         foreach (var prop in type.Members.Properties)
-            existingMembers.Add(prop.TsAlias);
+            existingMembers.Add(_ctx.GetPropertyIdentifier(prop));
 
         foreach (var field in type.Members.Fields)
-            existingMembers.Add(field.TsAlias);
+            existingMembers.Add(_ctx.GetFieldIdentifier(field));
 
         foreach (var evt in type.Members.Events)
-            existingMembers.Add(evt.TsAlias);
+            existingMembers.Add(_ctx.GetEventIdentifier(evt));
 
         // Check each implemented interface
         foreach (var interfaceRef in type.Implements)
@@ -529,13 +537,13 @@ public static class TypeScriptEmit
             // Check for missing properties
             foreach (var interfaceProp in interfaceType.Members.Properties)
             {
-                var memberName = interfaceProp.TsAlias;
+                var memberName = _ctx.GetPropertyIdentifier(interfaceProp);
 
                 if (!existingMembers.Contains(memberName))
                 {
                     // Check if property type references type parameters not defined on the class
                     var referencedTypeParams = CollectTypeParameters(interfaceProp.Type);
-                    var classTypeParams = new HashSet<string>(type.GenericParameters.Select(p => p.TsAlias));
+                    var classTypeParams = new HashSet<string>(type.GenericParameters.Select(p => _ctx.GetGenericParameterIdentifier(p)));
 
                     // Skip if property uses type parameters not available on the class
                     if (referencedTypeParams.Any(tp => !classTypeParams.Contains(tp)))
@@ -569,7 +577,7 @@ public static class TypeScriptEmit
             // Check for missing methods (less common, but possible)
             foreach (var interfaceMethod in interfaceType.Members.Methods)
             {
-                var memberName = interfaceMethod.TsAlias;
+                var memberName = _ctx.GetMethodIdentifier(interfaceMethod);
 
                 // Skip if already exists (checking just by name, not full signature)
                 if (!existingMembers.Contains(memberName))
@@ -580,7 +588,7 @@ public static class TypeScriptEmit
                         referencedTypeParams.UnionWith(CollectTypeParameters(param.Type));
                     referencedTypeParams.UnionWith(CollectTypeParameters(interfaceMethod.ReturnType));
 
-                    var classTypeParams = new HashSet<string>(type.GenericParameters.Select(p => p.TsAlias));
+                    var classTypeParams = new HashSet<string>(type.GenericParameters.Select(p => _ctx.GetGenericParameterIdentifier(p)));
 
                     // Skip if method uses type parameters not available on the class
                     if (referencedTypeParams.Any(tp => !classTypeParams.Contains(tp)))
@@ -606,13 +614,13 @@ public static class TypeScriptEmit
             // Check for missing events
             foreach (var interfaceEvent in interfaceType.Members.Events)
             {
-                var memberName = interfaceEvent.TsAlias;
+                var memberName = _ctx.GetEventIdentifier(interfaceEvent);
 
                 if (!existingMembers.Contains(memberName))
                 {
                     // Check if event type references type parameters not defined on the class
                     var referencedTypeParams = CollectTypeParameters(interfaceEvent.Type);
-                    var classTypeParams = new HashSet<string>(type.GenericParameters.Select(p => p.TsAlias));
+                    var classTypeParams = new HashSet<string>(type.GenericParameters.Select(p => _ctx.GetGenericParameterIdentifier(p)));
 
                     // Skip if event uses type parameters not available on the class
                     if (referencedTypeParams.Any(tp => !classTypeParams.Contains(tp)))
@@ -695,7 +703,7 @@ public static class TypeScriptEmit
             var constraints = p.Constraints.Count > 0
                 ? " extends " + string.Join(" & ", p.Constraints.Select(c => ToTypeScriptType(c, currentNamespace)))
                 : "";
-            return $"{p.TsAlias}{constraints}";
+            return $"{_ctx.GetGenericParameterIdentifier(p)}{constraints}";
         });
 
         return $"<{string.Join(", ", formatted)}>";
