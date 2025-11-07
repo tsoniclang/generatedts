@@ -102,6 +102,13 @@ public static class Reflect
             ? new MemberCollection([], [], [], [], [])
             : ReflectMembers(type);
 
+        // Copy interface members with generic parameter substitution
+        // This adds methods like CompareTo(TSelf) from IComparable<TSelf>
+        if (kind != TypeKind.Enum && kind != TypeKind.Delegate)
+        {
+            members = CopyInterfaceMembersWithSubstitution(type, assembly, members);
+        }
+
         // Base type and interfaces
         var baseType = type.BaseType != null && type.BaseType != typeof(object) && type.BaseType != typeof(ValueType)
             ? CreateTypeReference(type.BaseType, assembly)
@@ -508,6 +515,165 @@ public static class Reflect
 
         // Simple type (no generics)
         return new TypeReference(TypeReferenceKind.NamedType, ns, typeName, Array.Empty<TypeReference>(), 0, 0, declaringTypeRef, null, assembly);
+    }
+
+    /// <summary>
+    /// Applies generic parameter substitution to a TypeReference.
+    /// Recursively substitutes generic parameters based on the substitution map.
+    /// Used when copying interface members onto implementing types.
+    /// </summary>
+    private static TypeReference ApplySubstitution(
+        TypeReference typeRef,
+        IReadOnlyDictionary<GenericParameterInfo, TypeReference> substitutionMap)
+    {
+        // If this is a generic parameter and we have a substitution, replace it
+        if (typeRef.Kind == TypeReferenceKind.GenericParameter && typeRef.GenericParameter != null)
+        {
+            if (substitutionMap.TryGetValue(typeRef.GenericParameter, out var replacement))
+            {
+                // Return the replacement (may need to preserve array/pointer depth)
+                if (typeRef.ArrayRank > 0 || typeRef.PointerDepth > 0)
+                {
+                    return new TypeReference(
+                        replacement.Kind,
+                        replacement.Namespace,
+                        replacement.TypeName,
+                        replacement.GenericArgs,
+                        typeRef.ArrayRank, // Keep array rank from original
+                        typeRef.PointerDepth, // Keep pointer depth from original
+                        replacement.DeclaringType,
+                        replacement.GenericParameter,
+                        replacement.Assembly);
+                }
+                return replacement;
+            }
+            // No substitution found - keep as-is
+            return typeRef;
+        }
+
+        // For named types, recursively substitute generic arguments
+        if (typeRef.GenericArgs.Count > 0)
+        {
+            var substitutedArgs = typeRef.GenericArgs
+                .Select(arg => ApplySubstitution(arg, substitutionMap))
+                .ToList();
+
+            return new TypeReference(
+                typeRef.Kind,
+                typeRef.Namespace,
+                typeRef.TypeName,
+                substitutedArgs,
+                typeRef.ArrayRank,
+                typeRef.PointerDepth,
+                typeRef.DeclaringType,
+                typeRef.GenericParameter,
+                typeRef.Assembly);
+        }
+
+        // No substitution needed
+        return typeRef;
+    }
+
+    /// <summary>
+    /// Copies interface members onto the implementing type with generic parameter substitution.
+    /// For each closed generic interface (e.g., IComparable&lt;TSelf&gt;), copies all members
+    /// and substitutes the interface's generic parameters with the actual type arguments.
+    /// </summary>
+    private static MemberCollection CopyInterfaceMembersWithSubstitution(
+        Type type,
+        Assembly assembly,
+        MemberCollection ownMembers)
+    {
+        var additionalMethods = new List<MethodSnapshot>();
+
+        // Get all interfaces implemented by this type
+        foreach (var interfaceType in type.GetInterfaces())
+        {
+            // Skip non-public interfaces
+            if (!interfaceType.IsPublic && !interfaceType.IsNestedPublic)
+                continue;
+
+            // Only process closed generic interfaces (e.g., IComparable<TSelf>)
+            if (!interfaceType.IsGenericType || interfaceType.IsGenericTypeDefinition)
+                continue;
+
+            // Get the open generic definition (e.g., IComparable`1)
+            var interfaceDef = interfaceType.GetGenericTypeDefinition();
+
+            // Build substitution map: interface generic params → actual type args
+            var interfaceGenericParams = interfaceDef.GetGenericArguments();
+            var actualTypeArgs = interfaceType.GetGenericArguments();
+
+            var substitutionMap = new Dictionary<GenericParameterInfo, TypeReference>();
+            for (int i = 0; i < interfaceGenericParams.Length && i < actualTypeArgs.Length; i++)
+            {
+                var gpInfo = new GenericParameterInfo(
+                    DeclaringTypeFullName: interfaceDef.FullName ?? interfaceDef.Name,
+                    ClrName: interfaceGenericParams[i].Name,
+                    Position: i);
+
+                var actualTypeRef = CreateTypeReference(actualTypeArgs[i], assembly);
+                substitutionMap[gpInfo] = actualTypeRef;
+            }
+
+            // Skip if no substitutions needed
+            if (substitutionMap.Count == 0)
+                continue;
+
+            // Copy interface methods with substitution
+            foreach (var method in interfaceDef.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+            {
+                // Skip property/event accessor methods
+                if (method.IsSpecialName)
+                    continue;
+
+                // Create substituted method snapshot
+                var methodSnapshot = ReflectMethod(method);
+
+                // Substitute all TypeReferences in the method signature
+                var substitutedParams = methodSnapshot.Parameters.Select(p => new ParameterSnapshot(
+                    p.Name,
+                    ApplySubstitution(p.Type, substitutionMap),
+                    p.Kind,
+                    p.IsOptional,
+                    p.DefaultValue,
+                    p.IsParams)).ToList();
+
+                var substitutedReturnType = ApplySubstitution(methodSnapshot.ReturnType, substitutionMap);
+
+                // Create new method snapshot with substituted types and synthetic overload marker
+                var substitutedMethod = new MethodSnapshot(
+                    methodSnapshot.ClrName,
+                    methodSnapshot.IsStatic,
+                    methodSnapshot.IsVirtual,
+                    methodSnapshot.IsOverride,
+                    methodSnapshot.IsAbstract,
+                    methodSnapshot.Visibility,
+                    methodSnapshot.GenericParameters, // TODO: May need substitution in constraints
+                    substitutedParams,
+                    substitutedReturnType,
+                    methodSnapshot.Binding)
+                {
+                    SyntheticOverload = new SyntheticOverloadInfo(
+                        InterfaceFullName: interfaceType.Name,
+                        InterfaceMethodName: method.Name,
+                        Reason: SyntheticOverloadReason.InterfaceSignatureMismatch)
+                };
+
+                additionalMethods.Add(substitutedMethod);
+            }
+        }
+
+        // Merge with own members
+        if (additionalMethods.Count == 0)
+            return ownMembers;
+
+        return new MemberCollection(
+            ownMembers.Constructors,
+            ownMembers.Methods.Concat(additionalMethods).ToList(),
+            ownMembers.Properties,
+            ownMembers.Fields,
+            ownMembers.Events);
     }
 
     /// <summary>
