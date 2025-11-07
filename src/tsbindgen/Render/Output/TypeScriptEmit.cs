@@ -176,6 +176,13 @@ public static class TypeScriptEmit
 
     private static void EmitClass(StringBuilder builder, TypeModel type, string indent, string currentNamespace, NamespaceModel namespaceModel)
     {
+        // For structs with static members, use instance/static split to avoid TS2417
+        if (type.Kind == TypeKind.Struct && HasStaticMembers(type))
+        {
+            EmitStructWithSplit(builder, type, indent, currentNamespace, namespaceModel);
+            return;
+        }
+
         var typeName = ToTypeScriptType(type.Binding.Type, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
         var genericParams = FormatGenericParameters(type.GenericParameters, currentNamespace);
 
@@ -270,7 +277,8 @@ public static class TypeScriptEmit
             if (staticOnly && !method.IsStatic) continue;
             if (skipStatic && method.IsStatic) continue;
 
-            var modifiers = method.IsStatic ? "static " : "";
+            // Don't emit 'static' modifier in interfaces - it's implied by context
+            var modifiers = (method.IsStatic && !isInterface) ? "static " : "";
 
             // For static methods, check if they reference class-level type parameters
             // If so, add those type parameters to the method level
@@ -330,7 +338,8 @@ public static class TypeScriptEmit
                 if (staticOnly && !prop.IsStatic) continue;
                 if (skipStatic && prop.IsStatic) continue;
 
-                var modifiers = prop.IsStatic ? "static " : "";
+                // Don't emit 'static' modifier in interfaces - it's implied by context
+                var modifiers = (prop.IsStatic && !isInterface) ? "static " : "";
                 var propertyType = ToTypeScriptType(prop.Type, currentNamespace);
 
                 // Use property name directly - no "get"/"set" prefix
@@ -354,7 +363,8 @@ public static class TypeScriptEmit
             if (staticOnly && !field.IsStatic) continue;
             if (skipStatic && field.IsStatic) continue;
 
-            var modifiers = field.IsStatic ? "static " : "";
+            // Don't emit 'static' modifier in interfaces - it's implied by context
+            var modifiers = (field.IsStatic && !isInterface) ? "static " : "";
             var fieldType = ToTypeScriptType(field.Type, currentNamespace);
             var methodName = _ctx.GetFieldIdentifier(field);
 
@@ -403,7 +413,8 @@ public static class TypeScriptEmit
             if (staticOnly && !evt.IsStatic) continue;
             if (skipStatic && evt.IsStatic) continue;
 
-            var modifiers = evt.IsStatic ? "static " : "";
+            // Don't emit 'static' modifier in interfaces - it's implied by context
+            var modifiers = (evt.IsStatic && !isInterface) ? "static " : "";
 
             builder.AppendLine($"{indent}{modifiers}readonly {_ctx.GetEventIdentifier(evt)}: {ToTypeScriptType(evt.Type, currentNamespace)};");
         }
@@ -733,6 +744,19 @@ public static class TypeScriptEmit
         return $"<{string.Join(", ", formatted)}>";
     }
 
+    /// <summary>
+    /// Formats generic parameter names only (no constraints), for use in type references.
+    /// Example: "<T, U, TKey>" instead of "<T extends Foo, U extends Bar>"
+    /// </summary>
+    private static string FormatGenericParameterNames(IReadOnlyList<GenericParameterModel> parameters)
+    {
+        if (parameters.Count == 0)
+            return "";
+
+        var names = parameters.Select(p => _ctx.GetGenericParameterIdentifier(p));
+        return $"<{string.Join(", ", names)}>";
+    }
+
 
     /// <summary>
     /// Checks if a TypeReference represents a generic type parameter (T, TKey, etc.)
@@ -815,6 +839,67 @@ public static class TypeScriptEmit
         // Check if the type is defined in our set of generated types
         var typeName = ToTypeScriptType(typeRef, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
         return _definedTypes.Contains(typeName);
+    }
+
+    /// <summary>
+    /// Checks if a type has any static members (methods, properties, fields).
+    /// </summary>
+    private static bool HasStaticMembers(TypeModel type)
+    {
+        return type.Members.Methods.Any(m => m.IsStatic)
+            || type.Members.Properties.Any(p => p.IsStatic)
+            || type.Members.Fields.Any(f => f.IsStatic);
+    }
+
+    /// <summary>
+    /// Emits a struct with instance/static split to avoid TS2417 static-side inheritance conflicts.
+    /// Format: Type$instance interface, Type$static interface, then type alias and const declaration.
+    /// </summary>
+    private static void EmitStructWithSplit(StringBuilder builder, TypeModel type, string indent, string currentNamespace, NamespaceModel namespaceModel)
+    {
+        var typeName = ToTypeScriptType(type.Binding.Type, currentNamespace, includeNamespacePrefix: false, includeGenericArgs: false);
+        var genericParams = FormatGenericParameters(type.GenericParameters, currentNamespace);
+
+        // Use qualified name only if not in System namespace
+        var valueTypeName = currentNamespace == "System" ? "ValueType" : "System.ValueType";
+
+        // Filter out implements that reference undefined types
+        var validImplements = type.Implements
+            .Where(i => IsTypeDefinedInCurrentNamespace(i, currentNamespace))
+            .ToList();
+
+        var implements = validImplements.Count > 0
+            ? ", " + string.Join(", ", validImplements.Select(i => ToTypeScriptType(i, currentNamespace)))
+            : "";
+
+        // Emit instance interface (extends ValueType & struct, implements interfaces)
+        builder.AppendLine($"{indent}export interface {typeName}$instance{genericParams} extends {valueTypeName}, struct{implements} {{");
+
+        // Instance members only
+        EmitMembers(builder, type.Members, typeBindings: null, indent + "    ", skipStatic: true, currentNamespace: currentNamespace, isInterface: true, typeModel: type);
+
+        builder.AppendLine($"{indent}}}");
+        builder.AppendLine();
+
+        // Emit static interface (no extends/implements)
+        builder.AppendLine($"{indent}export interface {typeName}$static{genericParams} {{");
+
+        // Static members only
+        EmitMembers(builder, type.Members, typeBindings: null, indent + "    ", staticOnly: true, currentNamespace: currentNamespace, isInterface: true, typeModel: type);
+
+        builder.AppendLine($"{indent}}}");
+        builder.AppendLine();
+
+        // Public type alias (use names-only for references)
+        var genericNames = FormatGenericParameterNames(type.GenericParameters);
+        builder.AppendLine($"{indent}export type {typeName}{genericParams} = {typeName}$instance{genericNames};");
+
+        // Only emit const declaration for non-generic types
+        // Generic types can't have ambient const declarations with type parameters
+        if (type.GenericParameters.Count == 0)
+        {
+            builder.AppendLine($"{indent}export const {typeName}: {typeName}$static;");
+        }
     }
 
     /// <summary>
