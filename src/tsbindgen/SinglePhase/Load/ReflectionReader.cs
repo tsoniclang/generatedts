@@ -144,15 +144,47 @@ public sealed class ReflectionReader
 
     private TypeMembers ReadMembers(Type type)
     {
-        // Simplified member reading - full implementation would handle all details
         var methods = new List<MethodSymbol>();
         var properties = new List<PropertySymbol>();
         var fields = new List<FieldSymbol>();
         var events = new List<EventSymbol>();
         var constructors = new List<ConstructorSymbol>();
 
-        // TODO: Implement full member reading
-        // For now, return empty to allow compilation
+        const BindingFlags publicInstance = BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+        const BindingFlags publicStatic = BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly;
+
+        // Read methods
+        foreach (var method in type.GetMethods(publicInstance | publicStatic))
+        {
+            // Skip property/event accessors and special methods
+            if (method.IsSpecialName) continue;
+
+            methods.Add(ReadMethod(method, type));
+        }
+
+        // Read properties
+        foreach (var property in type.GetProperties(publicInstance | publicStatic))
+        {
+            properties.Add(ReadProperty(property, type));
+        }
+
+        // Read fields
+        foreach (var field in type.GetFields(publicInstance | publicStatic))
+        {
+            fields.Add(ReadField(field, type));
+        }
+
+        // Read events
+        foreach (var evt in type.GetEvents(publicInstance | publicStatic))
+        {
+            events.Add(ReadEvent(evt, type));
+        }
+
+        // Read constructors
+        foreach (var ctor in type.GetConstructors(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static))
+        {
+            constructors.Add(ReadConstructor(ctor, type));
+        }
 
         return new TypeMembers
         {
@@ -162,5 +194,219 @@ public sealed class ReflectionReader
             Events = events,
             Constructors = constructors
         };
+    }
+
+    private MethodSymbol ReadMethod(MethodInfo method, Type declaringType)
+    {
+        var stableId = new MemberStableId
+        {
+            AssemblyName = _ctx.Intern(declaringType.Assembly.GetName().Name ?? "Unknown"),
+            DeclaringClrFullName = _ctx.Intern(declaringType.FullName ?? declaringType.Name),
+            MemberName = _ctx.Intern(method.Name),
+            CanonicalSignature = CreateMethodSignature(method),
+            MetadataToken = method.MetadataToken
+        };
+
+        var parameters = method.GetParameters().Select(ReadParameter).ToList();
+        var genericParams = method.IsGenericMethod
+            ? method.GetGenericArguments().Select(_typeFactory.CreateGenericParameterSymbol).ToList()
+            : new List<GenericParameterSymbol>();
+
+        return new MethodSymbol
+        {
+            StableId = stableId,
+            ClrName = _ctx.Intern(method.Name),
+            ReturnType = _typeFactory.Create(method.ReturnType),
+            Parameters = parameters,
+            GenericParameters = genericParams,
+            IsStatic = method.IsStatic,
+            IsAbstract = method.IsAbstract,
+            IsVirtual = method.IsVirtual,
+            IsOverride = method.GetBaseDefinition() != method,
+            IsSealed = method.IsFinal,
+            Visibility = GetVisibility(method),
+            Provenance = MemberProvenance.Original
+        };
+    }
+
+    private PropertySymbol ReadProperty(PropertyInfo property, Type declaringType)
+    {
+        var stableId = new MemberStableId
+        {
+            AssemblyName = _ctx.Intern(declaringType.Assembly.GetName().Name ?? "Unknown"),
+            DeclaringClrFullName = _ctx.Intern(declaringType.FullName ?? declaringType.Name),
+            MemberName = _ctx.Intern(property.Name),
+            CanonicalSignature = CreatePropertySignature(property),
+            MetadataToken = property.MetadataToken
+        };
+
+        var indexParams = property.GetIndexParameters().Select(ReadParameter).ToList();
+        var getter = property.GetGetMethod();
+        var setter = property.GetSetMethod();
+
+        return new PropertySymbol
+        {
+            StableId = stableId,
+            ClrName = _ctx.Intern(property.Name),
+            PropertyType = _typeFactory.Create(property.PropertyType),
+            IndexParameters = indexParams,
+            HasGetter = getter != null,
+            HasSetter = setter != null,
+            IsStatic = (getter ?? setter)?.IsStatic ?? false,
+            IsVirtual = (getter ?? setter)?.IsVirtual ?? false,
+            IsOverride = getter != null && getter.GetBaseDefinition() != getter,
+            IsAbstract = (getter ?? setter)?.IsAbstract ?? false,
+            Visibility = GetPropertyVisibility(property),
+            Provenance = MemberProvenance.Original
+        };
+    }
+
+    private FieldSymbol ReadField(FieldInfo field, Type declaringType)
+    {
+        var stableId = new MemberStableId
+        {
+            AssemblyName = _ctx.Intern(declaringType.Assembly.GetName().Name ?? "Unknown"),
+            DeclaringClrFullName = _ctx.Intern(declaringType.FullName ?? declaringType.Name),
+            MemberName = _ctx.Intern(field.Name),
+            CanonicalSignature = field.FieldType.FullName ?? field.FieldType.Name,
+            MetadataToken = field.MetadataToken
+        };
+
+        return new FieldSymbol
+        {
+            StableId = stableId,
+            ClrName = _ctx.Intern(field.Name),
+            FieldType = _typeFactory.Create(field.FieldType),
+            IsStatic = field.IsStatic,
+            IsReadOnly = field.IsInitOnly,
+            IsConst = field.IsLiteral,
+            ConstValue = field.IsLiteral ? field.GetRawConstantValue() : null,
+            Visibility = GetFieldVisibility(field),
+            Provenance = MemberProvenance.Original
+        };
+    }
+
+    private EventSymbol ReadEvent(EventInfo evt, Type declaringType)
+    {
+        var stableId = new MemberStableId
+        {
+            AssemblyName = _ctx.Intern(declaringType.Assembly.GetName().Name ?? "Unknown"),
+            DeclaringClrFullName = _ctx.Intern(declaringType.FullName ?? declaringType.Name),
+            MemberName = _ctx.Intern(evt.Name!),
+            CanonicalSignature = evt.EventHandlerType?.FullName ?? "Unknown",
+            MetadataToken = evt.MetadataToken
+        };
+
+        var addMethod = evt.GetAddMethod();
+
+        return new EventSymbol
+        {
+            StableId = stableId,
+            ClrName = _ctx.Intern(evt.Name!),
+            EventHandlerType = _typeFactory.Create(evt.EventHandlerType!),
+            IsStatic = addMethod?.IsStatic ?? false,
+            IsVirtual = addMethod?.IsVirtual ?? false,
+            IsOverride = addMethod != null && addMethod.GetBaseDefinition() != addMethod,
+            Visibility = GetEventVisibility(evt),
+            Provenance = MemberProvenance.Original
+        };
+    }
+
+    private ConstructorSymbol ReadConstructor(ConstructorInfo ctor, Type declaringType)
+    {
+        var stableId = new MemberStableId
+        {
+            AssemblyName = _ctx.Intern(declaringType.Assembly.GetName().Name ?? "Unknown"),
+            DeclaringClrFullName = _ctx.Intern(declaringType.FullName ?? declaringType.Name),
+            MemberName = ".ctor",
+            CanonicalSignature = CreateConstructorSignature(ctor),
+            MetadataToken = ctor.MetadataToken
+        };
+
+        return new ConstructorSymbol
+        {
+            StableId = stableId,
+            Parameters = ctor.GetParameters().Select(ReadParameter).ToList(),
+            IsStatic = ctor.IsStatic,
+            Visibility = GetConstructorVisibility(ctor)
+        };
+    }
+
+    private ParameterSymbol ReadParameter(ParameterInfo param)
+    {
+        return new ParameterSymbol
+        {
+            Name = _ctx.Intern(param.Name ?? $"arg{param.Position}"),
+            Type = _typeFactory.Create(param.ParameterType),
+            IsRef = param.ParameterType.IsByRef && !param.IsOut,
+            IsOut = param.IsOut,
+            IsParams = param.GetCustomAttributes(typeof(ParamArrayAttribute), false).Any(),
+            HasDefaultValue = param.HasDefaultValue,
+            DefaultValue = param.HasDefaultValue ? param.DefaultValue : null
+        };
+    }
+
+    private string CreateMethodSignature(MethodInfo method)
+    {
+        var paramTypes = method.GetParameters().Select(p => p.ParameterType.FullName ?? p.ParameterType.Name).ToList();
+        var returnType = method.ReturnType.FullName ?? method.ReturnType.Name;
+        return _ctx.CanonicalizeMethod(method.Name, paramTypes, returnType);
+    }
+
+    private string CreatePropertySignature(PropertyInfo property)
+    {
+        var indexTypes = property.GetIndexParameters().Select(p => p.ParameterType.FullName ?? p.ParameterType.Name).ToList();
+        var propType = property.PropertyType.FullName ?? property.PropertyType.Name;
+        return _ctx.CanonicalizeProperty(property.Name, indexTypes, propType);
+    }
+
+    private string CreateConstructorSignature(ConstructorInfo ctor)
+    {
+        var paramTypes = ctor.GetParameters().Select(p => p.ParameterType.FullName ?? p.ParameterType.Name).ToList();
+        return _ctx.CanonicalizeMethod(".ctor", paramTypes, "void");
+    }
+
+    private Visibility GetVisibility(MethodInfo method)
+    {
+        if (method.IsPublic) return Visibility.Public;
+        if (method.IsFamily) return Visibility.Protected;
+        if (method.IsFamilyOrAssembly) return Visibility.ProtectedInternal;
+        if (method.IsFamilyAndAssembly) return Visibility.PrivateProtected;
+        if (method.IsAssembly) return Visibility.Internal;
+        return Visibility.Private;
+    }
+
+    private Visibility GetPropertyVisibility(PropertyInfo property)
+    {
+        var getter = property.GetGetMethod(true);
+        var setter = property.GetSetMethod(true);
+        var method = getter ?? setter;
+        return method != null ? GetVisibility(method) : Visibility.Private;
+    }
+
+    private Visibility GetFieldVisibility(FieldInfo field)
+    {
+        if (field.IsPublic) return Visibility.Public;
+        if (field.IsFamily) return Visibility.Protected;
+        if (field.IsFamilyOrAssembly) return Visibility.ProtectedInternal;
+        if (field.IsFamilyAndAssembly) return Visibility.PrivateProtected;
+        if (field.IsAssembly) return Visibility.Internal;
+        return Visibility.Private;
+    }
+
+    private Visibility GetEventVisibility(EventInfo evt)
+    {
+        var addMethod = evt.GetAddMethod(true);
+        return addMethod != null ? GetVisibility(addMethod) : Visibility.Private;
+    }
+
+    private Visibility GetConstructorVisibility(ConstructorInfo ctor)
+    {
+        if (ctor.IsPublic) return Visibility.Public;
+        if (ctor.IsFamily) return Visibility.Protected;
+        if (ctor.IsFamilyOrAssembly) return Visibility.ProtectedInternal;
+        if (ctor.IsFamilyAndAssembly) return Visibility.PrivateProtected;
+        if (ctor.IsAssembly) return Visibility.Internal;
+        return Visibility.Private;
     }
 }
