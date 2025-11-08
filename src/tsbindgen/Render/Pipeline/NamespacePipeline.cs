@@ -33,8 +33,7 @@ public static class NamespacePipeline
             // Normalize (no longer creates TsAlias strings - names computed on-demand)
             var model = ModelTransform.Build(bundle, config);
 
-            // Apply analysis passes (except InterfaceReduction which needs all models)
-            model = DiamondAnalysis.Apply(model);
+            // Apply analysis passes (per-namespace, before cross-namespace passes)
             model = CovarianceAdjustments.Apply(model);
             model = OverloadAdjustments.Apply(model);
             model = ExplicitInterfaceReview.Apply(model);
@@ -45,6 +44,7 @@ public static class NamespacePipeline
 
         // Apply InterfaceFlattener FIRST - flatten all interface hierarchies
         // This eliminates "extends" clauses, relying on TypeScript structural typing
+        // Replaces: InterfaceReduction, InterfaceHierarchyNormalizer, InterfaceOverloadFanIn, InterfaceSurfaceSynthesizer
         var flattenedModels = new Dictionary<string, NamespaceModel>();
         foreach (var (clrName, model) in models)
         {
@@ -52,19 +52,11 @@ public static class NamespacePipeline
             flattenedModels[clrName] = flattenedModel;
         }
 
-        // Apply InterfaceReduction after all models are built (needs cross-namespace lookups)
-        var reducedModels = new Dictionary<string, NamespaceModel>();
+        // Apply ExplicitInterfaceImplementation to add missing interface members to classes
+        var interfaceFixedModels = new Dictionary<string, NamespaceModel>();
         foreach (var (clrName, model) in flattenedModels)
         {
-            var reducedModel = InterfaceReduction.Apply(model, flattenedModels);
-            reducedModels[clrName] = reducedModel;
-        }
-
-        // Apply ExplicitInterfaceImplementation to add missing interface members
-        var interfaceFixedModels = new Dictionary<string, NamespaceModel>();
-        foreach (var (clrName, model) in reducedModels)
-        {
-            var fixedModel = ExplicitInterfaceImplementation.Apply(model, reducedModels, ctx);
+            var fixedModel = ExplicitInterfaceImplementation.Apply(model, flattenedModels, ctx);
             interfaceFixedModels[clrName] = fixedModel;
         }
 
@@ -101,33 +93,15 @@ public static class NamespacePipeline
             covariancePartitionedModels[clrName] = fixedModel;
         }
 
-        // Apply InterfaceOverloadFanIn to resolve TS2430 Category B errors
-        // Adds parent method signatures as overloads in child interfaces
-        var interfaceOverloadModels = new Dictionary<string, NamespaceModel>();
-        foreach (var (clrName, model) in covariancePartitionedModels)
-        {
-            var fixedModel = InterfaceOverloadFanIn.Apply(model, covariancePartitionedModels, ctx);
-            interfaceOverloadModels[clrName] = fixedModel;
-        }
-
-        // Apply InterfaceHierarchyNormalizer to resolve TS2430 Category A errors
-        // Breaks generic→non-generic inheritance (IEnumerator_1 → IEnumerator, etc.)
-        var hierarchyNormalizedModels = new Dictionary<string, NamespaceModel>();
-        foreach (var (clrName, model) in interfaceOverloadModels)
-        {
-            var fixedModel = InterfaceHierarchyNormalizer.Apply(model, interfaceOverloadModels, ctx);
-            hierarchyNormalizedModels[clrName] = fixedModel;
-        }
-
         // Apply IndexerShapeCatalog in TWO phases to break circular dependencies (A2)
         // Phase A: Annotate interface indexers across all namespaces
         // Phase B: Propagate to classes via interface inference
 
         // Phase A: Process all interfaces first
         var phaseAModels = new Dictionary<string, NamespaceModel>();
-        foreach (var (clrName, model) in hierarchyNormalizedModels)
+        foreach (var (clrName, model) in covariancePartitionedModels)
         {
-            var interfaceOnlyModel = IndexerShapeCatalog.ApplyPhaseA(model, hierarchyNormalizedModels, ctx);
+            var interfaceOnlyModel = IndexerShapeCatalog.ApplyPhaseA(model, covariancePartitionedModels, ctx);
             phaseAModels[clrName] = interfaceOnlyModel;
         }
 
@@ -149,27 +123,16 @@ public static class NamespacePipeline
             structurallyConformantModels[clrName] = conformantModel;
         }
 
-        // === NEW PASSES FOR 36→12 ERROR REDUCTION ===
-
-        // Pass 1: Interface Surface Synthesizer (fixes TS2430, TS2320)
-        // Flattens conflicting parent interfaces and inlines members
-        var surfaceSynthesizedModels = new Dictionary<string, NamespaceModel>();
+        // Apply StructuralConformanceSynthesizer (fixes TS2420)
+        // Adds missing interface members to classes with explicit naming
+        var conformanceSynthesizedModels = new Dictionary<string, NamespaceModel>();
         foreach (var (clrName, model) in structurallyConformantModels)
         {
-            var synthesizedModel = InterfaceSurfaceSynthesizer.Apply(model, structurallyConformantModels, ctx);
-            surfaceSynthesizedModels[clrName] = synthesizedModel;
-        }
-
-        // Pass 2: Structural Conformance Synthesizer (fixes TS2420)
-        // Adds missing interface members with explicit naming
-        var conformanceSynthesizedModels = new Dictionary<string, NamespaceModel>();
-        foreach (var (clrName, model) in surfaceSynthesizedModels)
-        {
-            var synthesizedModel = StructuralConformanceSynthesizer.Apply(model, surfaceSynthesizedModels, ctx);
+            var synthesizedModel = StructuralConformanceSynthesizer.Apply(model, structurallyConformantModels, ctx);
             conformanceSynthesizedModels[clrName] = synthesizedModel;
         }
 
-        // Pass 3: Indexer Normalizer (fixes TS2416)
+        // Apply IndexerNormalizer (fixes TS2416)
         // Converts multi-param indexer properties to method-only overloads
         var indexerNormalizedModels = new Dictionary<string, NamespaceModel>();
         foreach (var (clrName, model) in conformanceSynthesizedModels)
