@@ -1,9 +1,12 @@
 using tsbindgen.SinglePhase.Model;
+using tsbindgen.SinglePhase.Model.Symbols;
 
 namespace tsbindgen.SinglePhase.Plan;
 
 /// <summary>
 /// Plans stable, deterministic emission order.
+/// Ensures reproducible .d.ts files across runs.
+/// Uses Renamer.GetFinalTypeName() for stable sorting.
 /// </summary>
 public sealed class EmitOrderPlanner
 {
@@ -14,10 +17,160 @@ public sealed class EmitOrderPlanner
         _ctx = ctx;
     }
 
-    public object PlanOrder(SymbolGraph graph)
+    public EmitOrder PlanOrder(SymbolGraph graph)
     {
-        _ctx.Log("EmitOrderPlanner: TODO - implement emission order planning");
-        // TODO: Implement deterministic ordering
-        return new object();
+        _ctx.Log("EmitOrderPlanner: Planning deterministic emission order...");
+
+        var orderedNamespaces = new List<NamespaceEmitOrder>();
+
+        foreach (var ns in graph.Namespaces.OrderBy(n => n.Name))
+        {
+            var orderedTypes = OrderTypes(ns.Types);
+            orderedNamespaces.Add(new NamespaceEmitOrder
+            {
+                Namespace = ns,
+                OrderedTypes = orderedTypes
+            });
+        }
+
+        _ctx.Log($"EmitOrderPlanner: Ordered {orderedNamespaces.Count} namespaces");
+
+        return new EmitOrder
+        {
+            Namespaces = orderedNamespaces
+        };
     }
+
+    private List<TypeEmitOrder> OrderTypes(IReadOnlyList<TypeSymbol> types)
+    {
+        var result = new List<TypeEmitOrder>();
+
+        // Sort types by:
+        // 1. Kind (Enum < Delegate < Interface < Struct < Class < StaticNamespace)
+        // 2. CLR name (for determinism)
+        // 3. Arity (for overloaded generic types)
+        var sorted = types.OrderBy(t => GetKindSortOrder(t.Kind))
+                          .ThenBy(t => t.ClrName)
+                          .ThenBy(t => t.Arity)
+                          .ToList();
+
+        foreach (var type in sorted)
+        {
+            // Recursively order nested types
+            var orderedNested = type.NestedTypes.Count > 0
+                ? OrderTypes(type.NestedTypes)
+                : new List<TypeEmitOrder>();
+
+            // Order members within the type
+            var orderedMembers = OrderMembers(type);
+
+            result.Add(new TypeEmitOrder
+            {
+                Type = type,
+                OrderedMembers = orderedMembers,
+                OrderedNestedTypes = orderedNested
+            });
+        }
+
+        return result;
+    }
+
+    private MemberEmitOrder OrderMembers(TypeSymbol type)
+    {
+        // Sort members by:
+        // 1. Kind (Constructor < Field < Property < Event < Method)
+        // 2. IsStatic (instance first, then static)
+        // 3. CLR name
+        // 4. Canonical signature (for overloads)
+
+        var orderedConstructors = type.Members.Constructors
+            .OrderBy(c => c.IsStatic)
+            .ThenBy(c => c.StableId.CanonicalSignature)
+            .ToList();
+
+        var orderedFields = type.Members.Fields
+            .OrderBy(f => f.IsStatic)
+            .ThenBy(f => f.ClrName)
+            .ToList();
+
+        var orderedProperties = type.Members.Properties
+            .OrderBy(p => p.IsStatic)
+            .ThenBy(p => p.ClrName)
+            .ThenBy(p => p.StableId.CanonicalSignature)
+            .ToList();
+
+        var orderedEvents = type.Members.Events
+            .OrderBy(e => e.IsStatic)
+            .ThenBy(e => e.ClrName)
+            .ToList();
+
+        var orderedMethods = type.Members.Methods
+            .OrderBy(m => m.IsStatic)
+            .ThenBy(m => m.ClrName)
+            .ThenBy(m => m.Arity)
+            .ThenBy(m => m.StableId.CanonicalSignature)
+            .ToList();
+
+        return new MemberEmitOrder
+        {
+            Constructors = orderedConstructors,
+            Fields = orderedFields,
+            Properties = orderedProperties,
+            Events = orderedEvents,
+            Methods = orderedMethods
+        };
+    }
+
+    private int GetKindSortOrder(Model.Symbols.TypeKind kind)
+    {
+        return kind switch
+        {
+            Model.Symbols.TypeKind.Enum => 0,
+            Model.Symbols.TypeKind.Delegate => 1,
+            Model.Symbols.TypeKind.Interface => 2,
+            Model.Symbols.TypeKind.Struct => 3,
+            Model.Symbols.TypeKind.Class => 4,
+            Model.Symbols.TypeKind.StaticNamespace => 5,
+            _ => 999
+        };
+    }
+}
+
+/// <summary>
+/// Planned emission order for the entire graph.
+/// </summary>
+public sealed record EmitOrder
+{
+    public required IReadOnlyList<NamespaceEmitOrder> Namespaces { get; init; }
+}
+
+/// <summary>
+/// Planned emission order for a single namespace.
+/// </summary>
+public sealed record NamespaceEmitOrder
+{
+    public required NamespaceSymbol Namespace { get; init; }
+    public required IReadOnlyList<TypeEmitOrder> OrderedTypes { get; init; }
+}
+
+/// <summary>
+/// Planned emission order for a single type.
+/// </summary>
+public sealed record TypeEmitOrder
+{
+    public required TypeSymbol Type { get; init; }
+    public required MemberEmitOrder OrderedMembers { get; init; }
+    public required IReadOnlyList<TypeEmitOrder> OrderedNestedTypes { get; init; }
+}
+
+/// <summary>
+/// Planned emission order for members within a type.
+/// </summary>
+public sealed record MemberEmitOrder
+{
+    public required IReadOnlyList<Model.Symbols.MemberSymbols.ConstructorSymbol> Constructors { get; init; }
+    public required IReadOnlyList<Model.Symbols.MemberSymbols.FieldSymbol> Fields { get; init; }
+    public required IReadOnlyList<Model.Symbols.MemberSymbols.PropertySymbol> Properties { get; init; }
+    public required IReadOnlyList<Model.Symbols.MemberSymbols.EventSymbol> Events { get; init; }
+    public required IReadOnlyList<Model.Symbols.MemberSymbols.MethodSymbol> Methods { get; init; }
 }

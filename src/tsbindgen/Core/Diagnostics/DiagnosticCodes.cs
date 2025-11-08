@@ -17,9 +17,11 @@ public static class DiagnosticCodes
 
     // Interface/inheritance issues
     public const string DiamondInheritanceDetected = "TBG200";
+    public const string DiamondInheritanceConflict = "TBG200"; // Alias for compatibility
     public const string CircularInheritance = "TBG201";
     public const string InterfaceNotFound = "TBG202";
     public const string StructuralConformanceFailure = "TBG203";
+    public const string StaticSideInheritanceIssue = "TBG204";
 
     // TypeScript compatibility
     public const string PropertyCovarianceUnsupported = "TBG300";
@@ -29,6 +31,10 @@ public static class DiagnosticCodes
     // Policy violations
     public const string PolicyViolation = "TBG400";
     public const string UnsatisfiableConstraint = "TBG401";
+    public const string UnsupportedConstraintMerge = "TBG402";
+    public const string IncompatibleConstraints = "TBG403";
+    public const string UnrepresentableConstraint = "TBG404";
+    public const string ValidationFailed = "TBG405";
 
     // Renaming issues
     public const string RenameConflict = "TBG500";

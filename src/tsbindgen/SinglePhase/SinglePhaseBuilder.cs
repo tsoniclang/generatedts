@@ -59,7 +59,7 @@ public static class SinglePhaseBuilder
 
             // Phase 5: Emit
             ctx.Log("\n--- Phase 5: Emit ---");
-            EmitPhase(ctx, graph, plan, outputDirectory);
+            EmitPhase(ctx, plan, outputDirectory);
             ctx.Log($"Emitted all files to {outputDirectory}");
 
             // Gather results
@@ -112,6 +112,9 @@ public static class SinglePhaseBuilder
         // Read all types and members via reflection
         var reader = new ReflectionReader(ctx);
         var graph = reader.ReadAssemblies(loadContext, assemblyPaths);
+
+        // Substitute closed generic interface members
+        InterfaceMemberSubstitution.SubstituteClosedInterfaces(ctx, graph);
 
         return graph;
     }
@@ -171,8 +174,7 @@ public static class SinglePhaseBuilder
         var importGraph = ImportGraph.Build(ctx, graph);
 
         // Plan imports and aliases
-        var importPlanner = new ImportPlanner(ctx);
-        var imports = importPlanner.PlanImports(graph, importGraph);
+        var imports = ImportPlanner.PlanImports(ctx, graph, importGraph);
 
         // Determine stable emission order
         var orderPlanner = new EmitOrderPlanner(ctx);
@@ -194,7 +196,6 @@ public static class SinglePhaseBuilder
     /// </summary>
     private static void EmitPhase(
         BuildContext ctx,
-        SymbolGraph graph,
         EmissionPlan plan,
         string outputDirectory)
     {
@@ -227,13 +228,13 @@ public sealed record BuildResult
 }
 
 /// <summary>
-/// Internal plan object for emission phase.
+/// Plan object for emission phase.
 /// </summary>
-internal sealed record EmissionPlan
+public sealed record EmissionPlan
 {
     public required SymbolGraph Graph { get; init; }
-    public required object Imports { get; init; } // Will be properly typed later
-    public required object EmissionOrder { get; init; } // Will be properly typed later
+    public required ImportPlan Imports { get; init; }
+    public required EmitOrder EmissionOrder { get; init; }
 
     public int NamespaceCount => Graph.Namespaces.Count;
 }

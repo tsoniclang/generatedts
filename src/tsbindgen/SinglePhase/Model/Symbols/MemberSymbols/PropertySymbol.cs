@@ -19,6 +19,11 @@ public sealed class PropertySymbol
     public required string ClrName { get; init; }
 
     /// <summary>
+    /// TypeScript emit name (set by Renamer after shaping).
+    /// </summary>
+    public string TsEmitName { get; set; } = "";
+
+    /// <summary>
     /// Property type.
     /// </summary>
     public required TypeReference PropertyType { get; init; }

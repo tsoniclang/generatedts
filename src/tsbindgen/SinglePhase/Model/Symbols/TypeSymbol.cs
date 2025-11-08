@@ -26,6 +26,17 @@ public sealed class TypeSymbol
     public required string ClrName { get; init; }
 
     /// <summary>
+    /// TypeScript emit name (set by Renamer after shaping).
+    /// Example: "List_1" for List`1, "Console$Error" for nested types.
+    /// </summary>
+    public string TsEmitName { get; set; } = "";
+
+    /// <summary>
+    /// Accessibility level.
+    /// </summary>
+    public Accessibility Accessibility { get; init; } = Accessibility.Public;
+
+    /// <summary>
     /// Namespace (e.g., "System.Collections.Generic").
     /// </summary>
     public required string Namespace { get; init; }
@@ -178,4 +189,17 @@ public sealed class TypeMembers
         Events = Array.Empty<EventSymbol>(),
         Constructors = Array.Empty<ConstructorSymbol>()
     };
+}
+
+/// <summary>
+/// Accessibility level.
+/// </summary>
+public enum Accessibility
+{
+    Public,
+    Protected,
+    Internal,
+    ProtectedInternal,
+    Private,
+    PrivateProtected
 }

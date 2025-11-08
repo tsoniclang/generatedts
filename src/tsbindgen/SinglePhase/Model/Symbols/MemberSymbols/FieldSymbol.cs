@@ -19,6 +19,11 @@ public sealed class FieldSymbol
     public required string ClrName { get; init; }
 
     /// <summary>
+    /// TypeScript emit name (set by Renamer after shaping).
+    /// </summary>
+    public string TsEmitName { get; set; } = "";
+
+    /// <summary>
     /// Field type.
     /// </summary>
     public required TypeReference FieldType { get; init; }

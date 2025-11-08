@@ -52,6 +52,12 @@ public static class PolicyDefaults
             HiddenNew = ConflictStrategy.DisambiguatingSuffix,
             ExplicitMap = new Dictionary<string, string>(),
             AllowStaticMemberRename = false
+        },
+
+        Modules = new ModulesPolicy
+        {
+            UseNamespaceDirectories = true,
+            AlwaysAliasImports = false
         }
     };
 }

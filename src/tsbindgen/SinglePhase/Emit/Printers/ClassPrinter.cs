@@ -1,0 +1,425 @@
+using System.Text;
+using tsbindgen.SinglePhase.Model;
+using tsbindgen.SinglePhase.Model.Symbols;
+using tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
+
+namespace tsbindgen.SinglePhase.Emit.Printers;
+
+/// <summary>
+/// Prints TypeScript class declarations from TypeSymbol.
+/// Handles classes, structs, static classes, enums, and delegates.
+/// </summary>
+public static class ClassPrinter
+{
+    /// <summary>
+    /// Print a complete class declaration.
+    /// </summary>
+    public static string Print(TypeSymbol type, BuildContext ctx)
+    {
+        return type.Kind switch
+        {
+            TypeKind.Class => PrintClass(type, ctx),
+            TypeKind.Struct => PrintStruct(type, ctx),
+            TypeKind.StaticNamespace => PrintStaticClass(type, ctx),
+            TypeKind.Enum => PrintEnum(type, ctx),
+            TypeKind.Delegate => PrintDelegate(type, ctx),
+            TypeKind.Interface => PrintInterface(type, ctx),
+            _ => $"// Unknown type kind: {type.Kind}"
+        };
+    }
+
+    private static string PrintClass(TypeSymbol type, BuildContext ctx)
+    {
+        var sb = new StringBuilder();
+
+        // Get final TypeScript name from Renamer
+        var nsScope = new Core.Renaming.NamespaceScope
+        {
+            Namespace = type.Namespace,
+            IsInternal = true, // We're in internal scope
+            ScopeKey = $"ns:{type.Namespace}:internal"
+        };
+        var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+
+        // Class modifiers and declaration
+        if (type.IsAbstract)
+            sb.Append("abstract ");
+
+        sb.Append("class ");
+        sb.Append(finalName);
+
+        // Generic parameters: class Foo<T, U>
+        if (type.GenericParameters.Count > 0)
+        {
+            sb.Append('<');
+            sb.Append(string.Join(", ", type.GenericParameters.Select(gp => PrintGenericParameter(gp, ctx))));
+            sb.Append('>');
+        }
+
+        // Base class: extends BaseClass
+        if (type.BaseType != null)
+        {
+            var baseTypeName = TypeRefPrinter.Print(type.BaseType, ctx);
+            // Skip System.Object and System.ValueType
+            if (baseTypeName != "Object" && baseTypeName != "ValueType")
+            {
+                sb.Append(" extends ");
+                sb.Append(baseTypeName);
+            }
+        }
+
+        // Interfaces: implements IFoo, IBar
+        if (type.Interfaces.Count > 0)
+        {
+            sb.Append(" implements ");
+            sb.Append(string.Join(", ", type.Interfaces.Select(i => TypeRefPrinter.Print(i, ctx))));
+        }
+
+        sb.AppendLine(" {");
+
+        // Emit members
+        EmitMembers(sb, type, ctx);
+
+        sb.AppendLine("}");
+
+        return sb.ToString();
+    }
+
+    private static string PrintStruct(TypeSymbol type, BuildContext ctx)
+    {
+        // Structs emit as classes in TypeScript (with metadata noting value semantics)
+        var sb = new StringBuilder();
+
+        var nsScope = new Core.Renaming.NamespaceScope
+        {
+            Namespace = type.Namespace,
+            IsInternal = true,
+            ScopeKey = $"ns:{type.Namespace}:internal"
+        };
+        var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+
+        sb.Append("class ");
+        sb.Append(finalName);
+
+        // Generic parameters
+        if (type.GenericParameters.Count > 0)
+        {
+            sb.Append('<');
+            sb.Append(string.Join(", ", type.GenericParameters.Select(gp => PrintGenericParameter(gp, ctx))));
+            sb.Append('>');
+        }
+
+        // Interfaces
+        if (type.Interfaces.Count > 0)
+        {
+            sb.Append(" implements ");
+            sb.Append(string.Join(", ", type.Interfaces.Select(i => TypeRefPrinter.Print(i, ctx))));
+        }
+
+        sb.AppendLine(" {");
+
+        // Emit members
+        EmitMembers(sb, type, ctx);
+
+        sb.AppendLine("}");
+
+        return sb.ToString();
+    }
+
+    private static string PrintStaticClass(TypeSymbol type, BuildContext ctx)
+    {
+        // Static classes emit as namespaces in TypeScript
+        var sb = new StringBuilder();
+
+        var nsScope = new Core.Renaming.NamespaceScope
+        {
+            Namespace = type.Namespace,
+            IsInternal = true,
+            ScopeKey = $"ns:{type.Namespace}:internal"
+        };
+        var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+
+        sb.Append("namespace ");
+        sb.Append(finalName);
+        sb.AppendLine(" {");
+
+        // Emit static members only
+        EmitStaticMembers(sb, type, ctx);
+
+        sb.AppendLine("}");
+
+        return sb.ToString();
+    }
+
+    private static string PrintEnum(TypeSymbol type, BuildContext ctx)
+    {
+        var sb = new StringBuilder();
+
+        var nsScope = new Core.Renaming.NamespaceScope
+        {
+            Namespace = type.Namespace,
+            IsInternal = true,
+            ScopeKey = $"ns:{type.Namespace}:internal"
+        };
+        var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+
+        sb.Append("enum ");
+        sb.Append(finalName);
+        sb.AppendLine(" {");
+
+        // Emit enum fields
+        var fields = type.Members.Fields.Where(f => f.IsConst).ToList();
+        for (int i = 0; i < fields.Count; i++)
+        {
+            var field = fields[i];
+            sb.Append("    ");
+            sb.Append(field.ClrName);
+
+            if (field.ConstValue != null)
+            {
+                sb.Append(" = ");
+                sb.Append(field.ConstValue);
+            }
+
+            if (i < fields.Count - 1)
+                sb.Append(',');
+
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("}");
+
+        return sb.ToString();
+    }
+
+    private static string PrintDelegate(TypeSymbol type, BuildContext ctx)
+    {
+        // Delegates emit as type aliases to function signatures
+        var sb = new StringBuilder();
+
+        var nsScope = new Core.Renaming.NamespaceScope
+        {
+            Namespace = type.Namespace,
+            IsInternal = true,
+            ScopeKey = $"ns:{type.Namespace}:internal"
+        };
+        var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+
+        sb.Append("type ");
+        sb.Append(finalName);
+
+        // Generic parameters
+        if (type.GenericParameters.Count > 0)
+        {
+            sb.Append('<');
+            sb.Append(string.Join(", ", type.GenericParameters.Select(gp => PrintGenericParameter(gp, ctx))));
+            sb.Append('>');
+        }
+
+        sb.Append(" = ");
+
+        // Find Invoke method
+        var invokeMethod = type.Members.Methods.FirstOrDefault(m => m.ClrName == "Invoke");
+        if (invokeMethod != null)
+        {
+            // Emit function signature: (a: int, b: string) => void
+            sb.Append('(');
+            sb.Append(string.Join(", ", invokeMethod.Parameters.Select(p => $"{p.Name}: {TypeRefPrinter.Print(p.Type, ctx)}")));
+            sb.Append(") => ");
+            sb.Append(TypeRefPrinter.Print(invokeMethod.ReturnType, ctx));
+        }
+        else
+        {
+            sb.Append("Function"); // Fallback
+        }
+
+        sb.AppendLine(";");
+
+        return sb.ToString();
+    }
+
+    private static string PrintInterface(TypeSymbol type, BuildContext ctx)
+    {
+        var sb = new StringBuilder();
+
+        var nsScope = new Core.Renaming.NamespaceScope
+        {
+            Namespace = type.Namespace,
+            IsInternal = true,
+            ScopeKey = $"ns:{type.Namespace}:internal"
+        };
+        var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+
+        sb.Append("interface ");
+        sb.Append(finalName);
+
+        // Generic parameters
+        if (type.GenericParameters.Count > 0)
+        {
+            sb.Append('<');
+            sb.Append(string.Join(", ", type.GenericParameters.Select(gp => PrintGenericParameter(gp, ctx))));
+            sb.Append('>');
+        }
+
+        // Base interfaces: extends IFoo, IBar
+        if (type.Interfaces.Count > 0)
+        {
+            sb.Append(" extends ");
+            sb.Append(string.Join(", ", type.Interfaces.Select(i => TypeRefPrinter.Print(i, ctx))));
+        }
+
+        sb.AppendLine(" {");
+
+        // Emit members (interfaces only have instance members)
+        EmitInterfaceMembers(sb, type, ctx);
+
+        sb.AppendLine("}");
+
+        return sb.ToString();
+    }
+
+    private static void EmitMembers(StringBuilder sb, TypeSymbol type, BuildContext ctx)
+    {
+        var members = type.Members;
+
+        // Constructors
+        foreach (var ctor in members.Constructors.Where(c => !c.IsStatic))
+        {
+            sb.Append("    constructor(");
+            sb.Append(string.Join(", ", ctor.Parameters.Select(p => $"{p.Name}: {TypeRefPrinter.Print(p.Type, ctx)}")));
+            sb.AppendLine(");");
+        }
+
+        // Fields
+        foreach (var field in members.Fields.Where(f => !f.IsStatic))
+        {
+            sb.Append("    ");
+            if (field.IsReadOnly)
+                sb.Append("readonly ");
+            sb.Append(field.ClrName);
+            sb.Append(": ");
+            sb.Append(TypeRefPrinter.Print(field.FieldType, ctx));
+            sb.AppendLine(";");
+        }
+
+        // Properties
+        foreach (var prop in members.Properties.Where(p => !p.IsStatic))
+        {
+            sb.Append("    ");
+            if (!prop.HasSetter)
+                sb.Append("readonly ");
+            sb.Append(prop.ClrName);
+            sb.Append(": ");
+            sb.Append(TypeRefPrinter.Print(prop.PropertyType, ctx));
+            sb.AppendLine(";");
+        }
+
+        // Methods
+        foreach (var method in members.Methods.Where(m => !m.IsStatic))
+        {
+            sb.Append("    ");
+            sb.Append(MethodPrinter.Print(method, ctx));
+            sb.AppendLine(";");
+        }
+
+        // Static members
+        EmitStaticMembers(sb, type, ctx);
+    }
+
+    private static void EmitStaticMembers(StringBuilder sb, TypeSymbol type, BuildContext ctx)
+    {
+        var members = type.Members;
+
+        // Static fields
+        foreach (var field in members.Fields.Where(f => f.IsStatic && !f.IsConst))
+        {
+            sb.Append("    static ");
+            if (field.IsReadOnly)
+                sb.Append("readonly ");
+            sb.Append(field.ClrName);
+            sb.Append(": ");
+            sb.Append(TypeRefPrinter.Print(field.FieldType, ctx));
+            sb.AppendLine(";");
+        }
+
+        // Const fields (as static readonly)
+        foreach (var field in members.Fields.Where(f => f.IsConst))
+        {
+            sb.Append("    static readonly ");
+            sb.Append(field.ClrName);
+            sb.Append(": ");
+            sb.Append(TypeRefPrinter.Print(field.FieldType, ctx));
+            sb.AppendLine(";");
+        }
+
+        // Static properties
+        foreach (var prop in members.Properties.Where(p => p.IsStatic))
+        {
+            sb.Append("    static ");
+            if (!prop.HasSetter)
+                sb.Append("readonly ");
+            sb.Append(prop.ClrName);
+            sb.Append(": ");
+            sb.Append(TypeRefPrinter.Print(prop.PropertyType, ctx));
+            sb.AppendLine(";");
+        }
+
+        // Static methods
+        foreach (var method in members.Methods.Where(m => m.IsStatic))
+        {
+            sb.Append("    ");
+            sb.Append(MethodPrinter.Print(method, ctx));
+            sb.AppendLine(";");
+        }
+    }
+
+    private static void EmitInterfaceMembers(StringBuilder sb, TypeSymbol type, BuildContext ctx)
+    {
+        var members = type.Members;
+
+        // Properties
+        foreach (var prop in members.Properties)
+        {
+            sb.Append("    ");
+            if (!prop.HasSetter)
+                sb.Append("readonly ");
+            sb.Append(prop.ClrName);
+            sb.Append(": ");
+            sb.Append(TypeRefPrinter.Print(prop.PropertyType, ctx));
+            sb.AppendLine(";");
+        }
+
+        // Methods
+        foreach (var method in members.Methods)
+        {
+            sb.Append("    ");
+            sb.Append(MethodPrinter.Print(method, ctx));
+            sb.AppendLine(";");
+        }
+    }
+
+    private static string PrintGenericParameter(GenericParameterSymbol gp, BuildContext ctx)
+    {
+        var sb = new StringBuilder();
+        sb.Append(gp.Name);
+
+        // Constraints from IReadOnlyList<TypeReference>
+        if (gp.Constraints.Count > 0)
+        {
+            sb.Append(" extends ");
+
+            if (gp.Constraints.Count == 1)
+            {
+                sb.Append(TypeRefPrinter.Print(gp.Constraints[0], ctx));
+            }
+            else
+            {
+                // Multiple constraints: T extends IFoo & IBar
+                var constraints = gp.Constraints.Select(c => TypeRefPrinter.Print(c, ctx));
+                sb.Append(string.Join(" & ", constraints));
+            }
+        }
+
+        return sb.ToString();
+    }
+}

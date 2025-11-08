@@ -13,6 +13,7 @@ public sealed record GenerationPolicy
     public required EmissionPolicy Emission { get; init; }
     public required DiagnosticPolicy Diagnostics { get; init; }
     public required RenamingPolicy Renaming { get; init; }
+    public required ModulesPolicy Modules { get; init; }
 }
 
 public sealed record InterfacePolicy
@@ -227,4 +228,19 @@ public enum ConflictStrategy
     /// Fail build on conflict.
     /// </summary>
     Error
+}
+
+public sealed record ModulesPolicy
+{
+    /// <summary>
+    /// If true, emit namespace outputs to subdirectories (System/Collections/Generic/).
+    /// If false, use flat structure (System.Collections.Generic/).
+    /// </summary>
+    public required bool UseNamespaceDirectories { get; init; }
+
+    /// <summary>
+    /// If true, always generate import aliases to avoid name collisions.
+    /// If false, use bare imports when safe.
+    /// </summary>
+    public required bool AlwaysAliasImports { get; init; }
 }

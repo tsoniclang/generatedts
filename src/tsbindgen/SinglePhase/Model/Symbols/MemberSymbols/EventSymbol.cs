@@ -19,6 +19,11 @@ public sealed class EventSymbol
     public required string ClrName { get; init; }
 
     /// <summary>
+    /// TypeScript emit name (set by Renamer after shaping).
+    /// </summary>
+    public string TsEmitName { get; set; } = "";
+
+    /// <summary>
     /// Event handler type (delegate type).
     /// </summary>
     public required TypeReference EventHandlerType { get; init; }

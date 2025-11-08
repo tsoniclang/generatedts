@@ -19,6 +19,11 @@ public sealed class MethodSymbol
     public required string ClrName { get; init; }
 
     /// <summary>
+    /// TypeScript emit name (set by Renamer after shaping).
+    /// </summary>
+    public string TsEmitName { get; set; } = "";
+
+    /// <summary>
     /// Return type.
     /// </summary>
     public required TypeReference ReturnType { get; init; }
