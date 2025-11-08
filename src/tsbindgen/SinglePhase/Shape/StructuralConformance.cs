@@ -4,6 +4,7 @@ using tsbindgen.SinglePhase.Model;
 using tsbindgen.SinglePhase.Model.Symbols;
 using tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
 using tsbindgen.SinglePhase.Model.Types;
+using tsbindgen.SinglePhase.Normalize;
 
 namespace tsbindgen.SinglePhase.Shape;
 
@@ -85,18 +86,13 @@ public static class StructuralConformance
         // Check if all interface requirements are met
         foreach (var requiredMethod in iface.Members.Methods)
         {
-            var sig = ctx.CanonicalizeMethod(
-                requiredMethod.ClrName,
-                requiredMethod.Parameters.Select(p => GetTypeFullName(p.Type)).ToList(),
-                GetTypeFullName(requiredMethod.ReturnType));
+            // Use normalized signature for universal matching
+            var requiredSig = SignatureNormalization.NormalizeMethod(requiredMethod);
 
             var exists = representableMethods.Any(m =>
             {
-                var mSig = ctx.CanonicalizeMethod(
-                    m.ClrName,
-                    m.Parameters.Select(p => GetTypeFullName(p.Type)).ToList(),
-                    GetTypeFullName(m.ReturnType));
-                return mSig == sig;
+                var mSig = SignatureNormalization.NormalizeMethod(m);
+                return mSig == requiredSig;
             });
 
             if (!exists)
@@ -108,21 +104,13 @@ public static class StructuralConformance
 
         foreach (var requiredProperty in iface.Members.Properties)
         {
-            var indexParams = requiredProperty.IndexParameters.Select(p => GetTypeFullName(p.Type)).ToList();
-
-            var sig = ctx.CanonicalizeProperty(
-                requiredProperty.ClrName,
-                indexParams,
-                GetTypeFullName(requiredProperty.PropertyType));
+            // Use normalized signature for universal matching
+            var requiredSig = SignatureNormalization.NormalizeProperty(requiredProperty);
 
             var exists = representableProperties.Any(p =>
             {
-                var pIndexParams = p.IndexParameters.Select(param => GetTypeFullName(param.Type)).ToList();
-                var pSig = ctx.CanonicalizeProperty(
-                    p.ClrName,
-                    pIndexParams,
-                    GetTypeFullName(p.PropertyType));
-                return pSig == sig;
+                var pSig = SignatureNormalization.NormalizeProperty(p);
+                return pSig == requiredSig;
             });
 
             if (!exists)

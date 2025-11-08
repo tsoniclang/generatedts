@@ -5,6 +5,7 @@ using tsbindgen.SinglePhase.Model;
 using tsbindgen.SinglePhase.Model.Symbols;
 using tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
 using tsbindgen.SinglePhase.Model.Types;
+using tsbindgen.SinglePhase.Normalize;
 
 namespace tsbindgen.SinglePhase.Shape;
 
@@ -107,13 +108,24 @@ public static class ViewPlanner
     {
         var viewMembers = new List<ViewMember>();
 
-        // Find all ViewOnly members that are sourced from this interface
+        // Build interface signature sets using normalized signatures for precise matching
+        var interfaceMethodSignatures = iface.Members.Methods
+            .Select(m => SignatureNormalization.NormalizeMethod(m))
+            .ToHashSet();
+
+        var interfacePropertySignatures = iface.Members.Properties
+            .Select(p => SignatureNormalization.NormalizeProperty(p))
+            .ToHashSet();
+
+        // Find all ViewOnly members that match this interface's surface
         var viewOnlyMethods = type.Members.Methods
             .Where(m => m.EmitScope == EmitScope.ViewOnly && IsFromInterface(m, iface))
+            .Where(m => interfaceMethodSignatures.Contains(SignatureNormalization.NormalizeMethod(m)))
             .ToList();
 
         var viewOnlyProperties = type.Members.Properties
             .Where(p => p.EmitScope == EmitScope.ViewOnly && IsFromInterface(p, iface))
+            .Where(p => interfacePropertySignatures.Contains(SignatureNormalization.NormalizeProperty(p)))
             .ToList();
 
         foreach (var method in viewOnlyMethods)

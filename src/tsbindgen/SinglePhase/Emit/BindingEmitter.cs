@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using tsbindgen.SinglePhase.Model.Symbols;
 using tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
+using tsbindgen.SinglePhase.Normalize;
 using tsbindgen.SinglePhase.Plan;
 
 namespace tsbindgen.SinglePhase.Emit;
@@ -108,12 +109,16 @@ public static class BindingEmitter
         };
         var tsEmitName = ctx.Renamer.GetFinalMemberName(method.StableId, typeScope, method.IsStatic);
 
+        // Generate normalized signature for universal matching
+        var normalizedSignature = SignatureNormalization.NormalizeMethod(method);
+
         return new MethodBinding
         {
             ClrName = method.ClrName,
             TsEmitName = tsEmitName,
             MetadataToken = method.StableId.MetadataToken ?? 0,
             CanonicalSignature = method.StableId.CanonicalSignature,
+            NormalizedSignature = normalizedSignature,
             EmitScope = method.EmitScope.ToString(),
             Arity = method.Arity,
             ParameterCount = method.Parameters.Count
@@ -131,12 +136,16 @@ public static class BindingEmitter
         };
         var tsEmitName = ctx.Renamer.GetFinalMemberName(property.StableId, typeScope, property.IsStatic);
 
+        // Generate normalized signature for universal matching
+        var normalizedSignature = SignatureNormalization.NormalizeProperty(property);
+
         return new PropertyBinding
         {
             ClrName = property.ClrName,
             TsEmitName = tsEmitName,
             MetadataToken = property.StableId.MetadataToken ?? 0,
             CanonicalSignature = property.StableId.CanonicalSignature,
+            NormalizedSignature = normalizedSignature,
             EmitScope = property.EmitScope.ToString(),
             IsIndexer = property.IsIndexer,
             HasGetter = property.HasGetter,
@@ -155,11 +164,15 @@ public static class BindingEmitter
         };
         var tsEmitName = ctx.Renamer.GetFinalMemberName(field.StableId, typeScope, field.IsStatic);
 
+        // Generate normalized signature for universal matching
+        var normalizedSignature = SignatureNormalization.NormalizeField(field);
+
         return new FieldBinding
         {
             ClrName = field.ClrName,
             TsEmitName = tsEmitName,
             MetadataToken = field.StableId.MetadataToken ?? 0,
+            NormalizedSignature = normalizedSignature,
             IsStatic = field.IsStatic,
             IsReadOnly = field.IsReadOnly
         };
@@ -176,11 +189,15 @@ public static class BindingEmitter
         };
         var tsEmitName = ctx.Renamer.GetFinalMemberName(evt.StableId, typeScope, evt.IsStatic);
 
+        // Generate normalized signature for universal matching
+        var normalizedSignature = SignatureNormalization.NormalizeEvent(evt);
+
         return new EventBinding
         {
             ClrName = evt.ClrName,
             TsEmitName = tsEmitName,
             MetadataToken = evt.StableId.MetadataToken ?? 0,
+            NormalizedSignature = normalizedSignature,
             IsStatic = evt.IsStatic
         };
     }
@@ -188,10 +205,14 @@ public static class BindingEmitter
     private static ConstructorBinding GenerateConstructorBinding(ConstructorSymbol ctor, TypeSymbol declaringType, BuildContext ctx)
     {
         // Constructors always have name "constructor" in TypeScript, but record it from Renamer for consistency
+        // Generate normalized signature for universal matching
+        var normalizedSignature = SignatureNormalization.NormalizeConstructor(ctor);
+
         return new ConstructorBinding
         {
             MetadataToken = ctor.StableId.MetadataToken ?? 0,
             CanonicalSignature = ctor.StableId.CanonicalSignature,
+            NormalizedSignature = normalizedSignature,
             IsStatic = ctor.IsStatic,
             ParameterCount = ctor.Parameters.Count
         };
@@ -232,6 +253,7 @@ public sealed record MethodBinding
     public required string TsEmitName { get; init; }
     public required int MetadataToken { get; init; }
     public required string CanonicalSignature { get; init; }
+    public required string NormalizedSignature { get; init; }
     public required string EmitScope { get; init; }
     public required int Arity { get; init; }
     public required int ParameterCount { get; init; }
@@ -246,6 +268,7 @@ public sealed record PropertyBinding
     public required string TsEmitName { get; init; }
     public required int MetadataToken { get; init; }
     public required string CanonicalSignature { get; init; }
+    public required string NormalizedSignature { get; init; }
     public required string EmitScope { get; init; }
     public required bool IsIndexer { get; init; }
     public required bool HasGetter { get; init; }
@@ -260,6 +283,7 @@ public sealed record FieldBinding
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
     public required int MetadataToken { get; init; }
+    public required string NormalizedSignature { get; init; }
     public required bool IsStatic { get; init; }
     public required bool IsReadOnly { get; init; }
 }
@@ -272,6 +296,7 @@ public sealed record EventBinding
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
     public required int MetadataToken { get; init; }
+    public required string NormalizedSignature { get; init; }
     public required bool IsStatic { get; init; }
 }
 
@@ -282,6 +307,7 @@ public sealed record ConstructorBinding
 {
     public required int MetadataToken { get; init; }
     public required string CanonicalSignature { get; init; }
+    public required string NormalizedSignature { get; init; }
     public required bool IsStatic { get; init; }
     public required int ParameterCount { get; init; }
 }

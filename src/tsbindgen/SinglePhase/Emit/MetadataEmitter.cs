@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using tsbindgen.SinglePhase.Model;
 using tsbindgen.SinglePhase.Model.Symbols;
 using tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
+using tsbindgen.SinglePhase.Normalize;
 using tsbindgen.SinglePhase.Plan;
 
 namespace tsbindgen.SinglePhase.Emit;
@@ -108,10 +109,14 @@ public static class MetadataEmitter
         };
         var tsEmitName = ctx.Renamer.GetFinalMemberName(method.StableId, typeScope, method.IsStatic);
 
+        // Generate normalized signature for universal matching
+        var normalizedSignature = SignatureNormalization.NormalizeMethod(method);
+
         return new MethodMetadata
         {
             ClrName = method.ClrName,
             TsEmitName = tsEmitName,
+            NormalizedSignature = normalizedSignature,
             Provenance = method.Provenance.ToString(),
             EmitScope = method.EmitScope.ToString(),
             IsStatic = method.IsStatic,
@@ -136,10 +141,14 @@ public static class MetadataEmitter
         };
         var tsEmitName = ctx.Renamer.GetFinalMemberName(property.StableId, typeScope, property.IsStatic);
 
+        // Generate normalized signature for universal matching
+        var normalizedSignature = SignatureNormalization.NormalizeProperty(property);
+
         return new PropertyMetadata
         {
             ClrName = property.ClrName,
             TsEmitName = tsEmitName,
+            NormalizedSignature = normalizedSignature,
             Provenance = property.Provenance.ToString(),
             EmitScope = property.EmitScope.ToString(),
             IsStatic = property.IsStatic,
@@ -164,10 +173,14 @@ public static class MetadataEmitter
         };
         var tsEmitName = ctx.Renamer.GetFinalMemberName(field.StableId, typeScope, field.IsStatic);
 
+        // Generate normalized signature for universal matching
+        var normalizedSignature = SignatureNormalization.NormalizeField(field);
+
         return new FieldMetadata
         {
             ClrName = field.ClrName,
             TsEmitName = tsEmitName,
+            NormalizedSignature = normalizedSignature,
             IsStatic = field.IsStatic,
             IsReadOnly = field.IsReadOnly,
             IsLiteral = field.IsConst
@@ -185,10 +198,14 @@ public static class MetadataEmitter
         };
         var tsEmitName = ctx.Renamer.GetFinalMemberName(evt.StableId, typeScope, evt.IsStatic);
 
+        // Generate normalized signature for universal matching
+        var normalizedSignature = SignatureNormalization.NormalizeEvent(evt);
+
         return new EventMetadata
         {
             ClrName = evt.ClrName,
             TsEmitName = tsEmitName,
+            NormalizedSignature = normalizedSignature,
             IsStatic = evt.IsStatic
         };
     }
@@ -196,8 +213,12 @@ public static class MetadataEmitter
     private static ConstructorMetadata GenerateConstructorMetadata(ConstructorSymbol ctor, TypeSymbol declaringType, BuildContext ctx)
     {
         // Constructors always have name "constructor" in TypeScript, but still get it from Renamer for consistency
+        // Generate normalized signature for universal matching
+        var normalizedSignature = SignatureNormalization.NormalizeConstructor(ctor);
+
         return new ConstructorMetadata
         {
+            NormalizedSignature = normalizedSignature,
             IsStatic = ctor.IsStatic,
             ParameterCount = ctor.Parameters.Count
         };
@@ -252,6 +273,7 @@ public sealed record MethodMetadata
 {
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
+    public required string NormalizedSignature { get; init; }
     public required string Provenance { get; init; }
     public required string EmitScope { get; init; }
     public required bool IsStatic { get; init; }
@@ -271,6 +293,7 @@ public sealed record PropertyMetadata
 {
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
+    public required string NormalizedSignature { get; init; }
     public required string Provenance { get; init; }
     public required string EmitScope { get; init; }
     public required bool IsStatic { get; init; }
@@ -290,6 +313,7 @@ public sealed record FieldMetadata
 {
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
+    public required string NormalizedSignature { get; init; }
     public required bool IsStatic { get; init; }
     public required bool IsReadOnly { get; init; }
     public required bool IsLiteral { get; init; }
@@ -302,6 +326,7 @@ public sealed record EventMetadata
 {
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
+    public required string NormalizedSignature { get; init; }
     public required bool IsStatic { get; init; }
 }
 
@@ -310,6 +335,7 @@ public sealed record EventMetadata
 /// </summary>
 public sealed record ConstructorMetadata
 {
+    public required string NormalizedSignature { get; init; }
     public required bool IsStatic { get; init; }
     public required int ParameterCount { get; init; }
 }
