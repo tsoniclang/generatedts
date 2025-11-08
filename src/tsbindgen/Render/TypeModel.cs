@@ -54,12 +54,13 @@ public sealed record TypeModel(
 /// <summary>
 /// Represents an explicit interface view for structural conformance.
 /// Used when a class doesn't structurally match an interface it implements.
-/// Emitted as: readonly As_<InterfaceName>: <FullyQualifiedInterface>
+/// Emitted as: interface __<TypeName>$views { readonly As_<InterfaceName>: <FullyQualifiedInterface> }
 /// </summary>
 public sealed record InterfaceView(
-    string ViewName,          // "As_IList_1" or "As_IList_1_ab12cd" (with disambiguation)
-    TypeReference Interface,  // The fully-substituted interface type
-    string? Disambiguator);   // Optional suffix for name conflicts (hash or counter)
+    string ViewName,                         // "As_IList_1" or "As_IList_1_ab12cd" (with disambiguation)
+    TypeReference Interface,                 // The fully-substituted interface type
+    IReadOnlyList<MethodModel> ViewOnlyMethods, // Methods visible only through this interface view
+    string? Disambiguator);                  // Optional suffix for name conflicts (hash or counter)
 
 /// <summary>
 /// Generic parameter with constraints.
