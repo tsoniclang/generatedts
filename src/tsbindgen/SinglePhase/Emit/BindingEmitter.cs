@@ -28,7 +28,7 @@ public static class BindingEmitter
             ctx.Log($"  Emitting bindings for: {ns.Name}");
 
             // Generate bindings
-            var bindings = GenerateBindings(nsOrder);
+            var bindings = GenerateBindings(ctx, nsOrder);
 
             // Write to file: output/Namespace.Name/bindings.json
             var namespacePath = Path.Combine(outputDirectory, ns.Name);
@@ -50,13 +50,13 @@ public static class BindingEmitter
         ctx.Log($"BindingEmitter: Generated {emittedCount} binding files");
     }
 
-    private static NamespaceBindings GenerateBindings(NamespaceEmitOrder nsOrder)
+    private static NamespaceBindings GenerateBindings(BuildContext ctx, NamespaceEmitOrder nsOrder)
     {
         var typeBindings = new List<TypeBinding>();
 
         foreach (var typeOrder in nsOrder.OrderedTypes)
         {
-            typeBindings.Add(GenerateTypeBinding(typeOrder.Type));
+            typeBindings.Add(GenerateTypeBinding(typeOrder.Type, ctx));
         }
 
         return new NamespaceBindings
@@ -66,34 +66,52 @@ public static class BindingEmitter
         };
     }
 
-    private static TypeBinding GenerateTypeBinding(TypeSymbol type)
+    private static TypeBinding GenerateTypeBinding(TypeSymbol type, BuildContext ctx)
     {
+        // Get final TypeScript name from Renamer
+        var nsScope = new Core.Renaming.NamespaceScope
+        {
+            Namespace = type.Namespace,
+            IsInternal = true,
+            ScopeKey = $"ns:{type.Namespace}:internal"
+        };
+        var tsEmitName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+
         return new TypeBinding
         {
             ClrName = type.ClrFullName,
-            TsEmitName = type.TsEmitName,
+            TsEmitName = tsEmitName,
             AssemblyName = type.StableId.AssemblyName,
             MetadataToken = 0, // Types don't have metadata tokens
             Methods = type.Members.Methods
                 .Where(m => m.EmitScope != EmitScope.ViewOnly)
-                .Select(GenerateMethodBinding)
+                .Select(m => GenerateMethodBinding(m, type, ctx))
                 .ToList(),
             Properties = type.Members.Properties
                 .Where(p => p.EmitScope != EmitScope.ViewOnly)
-                .Select(GeneratePropertyBinding)
+                .Select(p => GeneratePropertyBinding(p, type, ctx))
                 .ToList(),
-            Fields = type.Members.Fields.Select(GenerateFieldBinding).ToList(),
-            Events = type.Members.Events.Select(GenerateEventBinding).ToList(),
-            Constructors = type.Members.Constructors.Select(GenerateConstructorBinding).ToList()
+            Fields = type.Members.Fields.Select(f => GenerateFieldBinding(f, type, ctx)).ToList(),
+            Events = type.Members.Events.Select(e => GenerateEventBinding(e, type, ctx)).ToList(),
+            Constructors = type.Members.Constructors.Select(c => GenerateConstructorBinding(c, type, ctx)).ToList()
         };
     }
 
-    private static MethodBinding GenerateMethodBinding(MethodSymbol method)
+    private static MethodBinding GenerateMethodBinding(MethodSymbol method, TypeSymbol declaringType, BuildContext ctx)
     {
+        // Get final TS name from Renamer
+        var typeScope = new Core.Renaming.TypeScope
+        {
+            TypeFullName = declaringType.ClrFullName,
+            IsStatic = method.IsStatic,
+            ScopeKey = $"type:{declaringType.ClrFullName}#{(method.IsStatic ? "static" : "instance")}"
+        };
+        var tsEmitName = ctx.Renamer.GetFinalMemberName(method.StableId, typeScope, method.IsStatic);
+
         return new MethodBinding
         {
             ClrName = method.ClrName,
-            TsEmitName = method.TsEmitName,
+            TsEmitName = tsEmitName,
             MetadataToken = method.StableId.MetadataToken ?? 0,
             CanonicalSignature = method.StableId.CanonicalSignature,
             EmitScope = method.EmitScope.ToString(),
@@ -102,12 +120,21 @@ public static class BindingEmitter
         };
     }
 
-    private static PropertyBinding GeneratePropertyBinding(PropertySymbol property)
+    private static PropertyBinding GeneratePropertyBinding(PropertySymbol property, TypeSymbol declaringType, BuildContext ctx)
     {
+        // Get final TS name from Renamer
+        var typeScope = new Core.Renaming.TypeScope
+        {
+            TypeFullName = declaringType.ClrFullName,
+            IsStatic = property.IsStatic,
+            ScopeKey = $"type:{declaringType.ClrFullName}#{(property.IsStatic ? "static" : "instance")}"
+        };
+        var tsEmitName = ctx.Renamer.GetFinalMemberName(property.StableId, typeScope, property.IsStatic);
+
         return new PropertyBinding
         {
             ClrName = property.ClrName,
-            TsEmitName = property.TsEmitName,
+            TsEmitName = tsEmitName,
             MetadataToken = property.StableId.MetadataToken ?? 0,
             CanonicalSignature = property.StableId.CanonicalSignature,
             EmitScope = property.EmitScope.ToString(),
@@ -117,31 +144,50 @@ public static class BindingEmitter
         };
     }
 
-    private static FieldBinding GenerateFieldBinding(FieldSymbol field)
+    private static FieldBinding GenerateFieldBinding(FieldSymbol field, TypeSymbol declaringType, BuildContext ctx)
     {
+        // Get final TS name from Renamer
+        var typeScope = new Core.Renaming.TypeScope
+        {
+            TypeFullName = declaringType.ClrFullName,
+            IsStatic = field.IsStatic,
+            ScopeKey = $"type:{declaringType.ClrFullName}#{(field.IsStatic ? "static" : "instance")}"
+        };
+        var tsEmitName = ctx.Renamer.GetFinalMemberName(field.StableId, typeScope, field.IsStatic);
+
         return new FieldBinding
         {
             ClrName = field.ClrName,
-            TsEmitName = field.TsEmitName,
+            TsEmitName = tsEmitName,
             MetadataToken = field.StableId.MetadataToken ?? 0,
             IsStatic = field.IsStatic,
             IsReadOnly = field.IsReadOnly
         };
     }
 
-    private static EventBinding GenerateEventBinding(EventSymbol evt)
+    private static EventBinding GenerateEventBinding(EventSymbol evt, TypeSymbol declaringType, BuildContext ctx)
     {
+        // Get final TS name from Renamer
+        var typeScope = new Core.Renaming.TypeScope
+        {
+            TypeFullName = declaringType.ClrFullName,
+            IsStatic = evt.IsStatic,
+            ScopeKey = $"type:{declaringType.ClrFullName}#{(evt.IsStatic ? "static" : "instance")}"
+        };
+        var tsEmitName = ctx.Renamer.GetFinalMemberName(evt.StableId, typeScope, evt.IsStatic);
+
         return new EventBinding
         {
             ClrName = evt.ClrName,
-            TsEmitName = evt.TsEmitName,
+            TsEmitName = tsEmitName,
             MetadataToken = evt.StableId.MetadataToken ?? 0,
             IsStatic = evt.IsStatic
         };
     }
 
-    private static ConstructorBinding GenerateConstructorBinding(ConstructorSymbol ctor)
+    private static ConstructorBinding GenerateConstructorBinding(ConstructorSymbol ctor, TypeSymbol declaringType, BuildContext ctx)
     {
+        // Constructors always have name "constructor" in TypeScript, but record it from Renamer for consistency
         return new ConstructorBinding
         {
             MetadataToken = ctor.StableId.MetadataToken ?? 0,
