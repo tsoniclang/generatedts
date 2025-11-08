@@ -39,7 +39,7 @@ public static class MethodPrinter
         sb.Append(finalName);
 
         // Generic parameters: <T, U>
-        if (method.GenericParameters.Count > 0)
+        if (method.GenericParameters.Length > 0)
         {
             sb.Append('<');
             sb.Append(string.Join(", ", method.GenericParameters.Select(gp => PrintGenericParameter(gp, ctx))));
@@ -64,12 +64,12 @@ public static class MethodPrinter
         sb.Append(gp.Name);
 
         // Print constraints from the IReadOnlyList<TypeReference>
-        if (gp.Constraints.Count > 0)
+        if (gp.Constraints.Length > 0)
         {
             sb.Append(" extends ");
 
             // If multiple constraints, use intersection type
-            if (gp.Constraints.Count == 1)
+            if (gp.Constraints.Length == 1)
             {
                 sb.Append(TypeRefPrinter.Print(gp.Constraints[0], ctx));
             }
@@ -127,7 +127,7 @@ public static class MethodPrinter
     public static string PrintWithParamsExpansion(MethodSymbol method, BuildContext ctx)
     {
         // Check if last parameter is params
-        var hasParams = method.Parameters.Count > 0 && method.Parameters[^1].IsParams;
+        var hasParams = method.Parameters.Length > 0 && method.Parameters[^1].IsParams;
 
         if (!hasParams)
             return Print(method, ctx);
@@ -156,7 +156,7 @@ public static class MethodPrinter
         sb.Append(finalName);
 
         // Generic parameters
-        if (method.GenericParameters.Count > 0)
+        if (method.GenericParameters.Length > 0)
         {
             sb.Append('<');
             sb.Append(string.Join(", ", method.GenericParameters.Select(gp => PrintGenericParameter(gp, ctx))));
@@ -167,9 +167,9 @@ public static class MethodPrinter
         sb.Append('(');
 
         // Regular parameters
-        if (method.Parameters.Count > 1)
+        if (method.Parameters.Length > 1)
         {
-            var regularParams = method.Parameters.Take(method.Parameters.Count - 1);
+            var regularParams = method.Parameters.Take(method.Parameters.Length - 1);
             sb.Append(string.Join(", ", regularParams.Select(p => PrintParameter(p, ctx))));
             sb.Append(", ");
         }
@@ -233,7 +233,7 @@ public static class MethodPrinter
         else
         {
             // Setter takes property type as parameter
-            if (method.Parameters.Count > 0)
+            if (method.Parameters.Length > 0)
                 sb.Append(TypeRefPrinter.Print(method.Parameters[0].Type, ctx));
             else
                 sb.Append("any"); // Fallback

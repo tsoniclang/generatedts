@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using tsbindgen.Core.Canon;
 using tsbindgen.Core.Renaming;
@@ -69,8 +70,8 @@ public static class ExplicitImplSynthesizer
         // Add synthesized members to the type
         var updatedMembers = new TypeMembers
         {
-            Methods = type.Members.Methods.Concat(synthesizedMethods).ToList(),
-            Properties = type.Members.Properties.Concat(synthesizedProperties).ToList(),
+            Methods = type.Members.Methods.Concat(synthesizedMethods).ToImmutableArray(),
+            Properties = type.Members.Properties.Concat(synthesizedProperties).ToImmutableArray(),
             Fields = type.Members.Fields,
             Events = type.Members.Events,
             Constructors = type.Members.Constructors

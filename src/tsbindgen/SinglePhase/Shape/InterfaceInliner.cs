@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using tsbindgen.Core.Canon;
 using tsbindgen.SinglePhase.Model;
@@ -84,10 +85,10 @@ public static class InterfaceInliner
         // Update the interface with inlined members (keep original constructors/fields)
         var newMembers = new TypeMembers
         {
-            Methods = uniqueMethods,
-            Properties = uniqueProperties,
+            Methods = uniqueMethods.ToImmutableArray(),
+            Properties = uniqueProperties.ToImmutableArray(),
             Fields = iface.Members.Fields, // Interfaces rarely have fields
-            Events = uniqueEvents,
+            Events = uniqueEvents.ToImmutableArray(),
             Constructors = iface.Members.Constructors // Interfaces don't have constructors
         };
 
@@ -97,7 +98,7 @@ public static class InterfaceInliner
 
         // Clear the Interfaces list (no more extends in TypeScript)
         var interfacesProperty = typeof(TypeSymbol).GetProperty(nameof(TypeSymbol.Interfaces));
-        interfacesProperty!.SetValue(iface, Array.Empty<TypeReference>());
+        interfacesProperty!.SetValue(iface, ImmutableArray<TypeReference>.Empty);
 
         ctx.Log($"InterfaceInliner: Inlined {iface.ClrFullName} - {uniqueMethods.Count} methods, {uniqueProperties.Count} properties");
     }

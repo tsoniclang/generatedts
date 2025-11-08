@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using tsbindgen.Core.Renaming;
 using tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
 using tsbindgen.SinglePhase.Model.Types;
@@ -7,8 +8,9 @@ namespace tsbindgen.SinglePhase.Model.Symbols;
 /// <summary>
 /// Represents a type (class, struct, interface, enum, delegate).
 /// Loaded during reflection, transformed during shaping.
+/// IMMUTABLE - use wither helpers to create modified copies.
 /// </summary>
-public sealed class TypeSymbol
+public sealed record TypeSymbol
 {
     /// <summary>
     /// Stable identifier for this type.
@@ -26,10 +28,10 @@ public sealed class TypeSymbol
     public required string ClrName { get; init; }
 
     /// <summary>
-    /// TypeScript emit name (set by Renamer after shaping).
+    /// TypeScript emit name (set by NameApplication after reservation).
     /// Example: "List_1" for List`1, "Console$Error" for nested types.
     /// </summary>
-    public string TsEmitName { get; set; } = "";
+    public string TsEmitName { get; init; } = "";
 
     /// <summary>
     /// Accessibility level.
@@ -54,7 +56,7 @@ public sealed class TypeSymbol
     /// <summary>
     /// Generic parameters declared by this type.
     /// </summary>
-    public required IReadOnlyList<GenericParameterSymbol> GenericParameters { get; init; }
+    public required ImmutableArray<GenericParameterSymbol> GenericParameters { get; init; }
 
     /// <summary>
     /// Base type (null for interfaces, System.Object, System.ValueType).
@@ -64,7 +66,7 @@ public sealed class TypeSymbol
     /// <summary>
     /// Implemented interfaces.
     /// </summary>
-    public required IReadOnlyList<TypeReference> Interfaces { get; init; }
+    public required ImmutableArray<TypeReference> Interfaces { get; init; }
 
     /// <summary>
     /// All members (methods, properties, fields, events, constructors).
@@ -74,7 +76,7 @@ public sealed class TypeSymbol
     /// <summary>
     /// Nested types.
     /// </summary>
-    public required IReadOnlyList<TypeSymbol> NestedTypes { get; init; }
+    public required ImmutableArray<TypeSymbol> NestedTypes { get; init; }
 
     /// <summary>
     /// True if this is a value type (struct, enum).
@@ -105,6 +107,27 @@ public sealed class TypeSymbol
     /// XML documentation comment (if available).
     /// </summary>
     public string? Documentation { get; init; }
+
+    // Wither helpers for pure transformations
+
+    public TypeSymbol WithMembers(TypeMembers members) => this with { Members = members };
+
+    public TypeSymbol WithAddedMethods(IEnumerable<MethodSymbol> methods) =>
+        this with { Members = Members with { Methods = Members.Methods.AddRange(methods) } };
+
+    public TypeSymbol WithRemovedProperties(Func<PropertySymbol, bool> predicate) =>
+        this with { Members = Members with { Properties = Members.Properties.RemoveAll(new Predicate<PropertySymbol>(predicate)) } };
+
+    public TypeSymbol WithAddedProperties(IEnumerable<PropertySymbol> properties) =>
+        this with { Members = Members with { Properties = Members.Properties.AddRange(properties) } };
+
+    public TypeSymbol WithRemovedMethods(Func<MethodSymbol, bool> predicate) =>
+        this with { Members = Members with { Methods = Members.Methods.RemoveAll(new Predicate<MethodSymbol>(predicate)) } };
+
+    public TypeSymbol WithAddedFields(IEnumerable<FieldSymbol> fields) =>
+        this with { Members = Members with { Fields = Members.Fields.AddRange(fields) } };
+
+    public TypeSymbol WithTsEmitName(string tsEmitName) => this with { TsEmitName = tsEmitName };
 }
 
 public enum TypeKind
@@ -119,8 +142,9 @@ public enum TypeKind
 
 /// <summary>
 /// Generic parameter declared by a type or method.
+/// IMMUTABLE record.
 /// </summary>
-public sealed class GenericParameterSymbol
+public sealed record GenericParameterSymbol
 {
     /// <summary>
     /// Unique identifier for this parameter.
@@ -140,7 +164,7 @@ public sealed class GenericParameterSymbol
     /// <summary>
     /// Constraints on this parameter (resolved by ConstraintCloser).
     /// </summary>
-    public required IReadOnlyList<TypeReference> Constraints { get; init; }
+    public required ImmutableArray<TypeReference> Constraints { get; init; }
 
     /// <summary>
     /// Raw CLR constraint types from reflection (resolved in Shape phase).
@@ -178,22 +202,23 @@ public enum GenericParameterConstraints
 
 /// <summary>
 /// Container for all members of a type.
+/// IMMUTABLE - use 'with' expressions to create modified copies.
 /// </summary>
-public sealed class TypeMembers
+public sealed record TypeMembers
 {
-    public required IReadOnlyList<MethodSymbol> Methods { get; init; }
-    public required IReadOnlyList<PropertySymbol> Properties { get; init; }
-    public required IReadOnlyList<FieldSymbol> Fields { get; init; }
-    public required IReadOnlyList<EventSymbol> Events { get; init; }
-    public required IReadOnlyList<ConstructorSymbol> Constructors { get; init; }
+    public required ImmutableArray<MethodSymbol> Methods { get; init; }
+    public required ImmutableArray<PropertySymbol> Properties { get; init; }
+    public required ImmutableArray<FieldSymbol> Fields { get; init; }
+    public required ImmutableArray<EventSymbol> Events { get; init; }
+    public required ImmutableArray<ConstructorSymbol> Constructors { get; init; }
 
-    public static TypeMembers Empty { get; } = new()
+    public static readonly TypeMembers Empty = new()
     {
-        Methods = Array.Empty<MethodSymbol>(),
-        Properties = Array.Empty<PropertySymbol>(),
-        Fields = Array.Empty<FieldSymbol>(),
-        Events = Array.Empty<EventSymbol>(),
-        Constructors = Array.Empty<ConstructorSymbol>()
+        Methods = ImmutableArray<MethodSymbol>.Empty,
+        Properties = ImmutableArray<PropertySymbol>.Empty,
+        Fields = ImmutableArray<FieldSymbol>.Empty,
+        Events = ImmutableArray<EventSymbol>.Empty,
+        Constructors = ImmutableArray<ConstructorSymbol>.Empty
     };
 }
 

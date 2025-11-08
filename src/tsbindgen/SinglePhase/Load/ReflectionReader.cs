@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Reflection;
 using tsbindgen.Core.Renaming;
 using tsbindgen.SinglePhase.Model;
@@ -47,6 +48,14 @@ public sealed class ReflectionReader
                 if (!type.IsPublic && !type.IsNestedPublic)
                     continue;
 
+                // Skip compiler-generated types
+                // Common patterns: <Name>e__FixedBuffer, <>c__DisplayClass, <>d__Iterator, <>f__AnonymousType
+                if (IsCompilerGenerated(type.Name))
+                {
+                    _ctx.Log($"Skipping compiler-generated type: {type.FullName}");
+                    continue;
+                }
+
                 var typeSymbol = ReadType(type);
                 var ns = typeSymbol.Namespace;
 
@@ -71,12 +80,12 @@ public sealed class ReflectionReader
                 .Select(t => t.StableId.AssemblyName)
                 .Distinct()
                 .OrderBy(name => name)
-                .ToHashSet();
+                .ToImmutableHashSet();
 
             namespaces.Add(new NamespaceSymbol
             {
                 Name = ns,
-                Types = types,
+                Types = types.ToImmutableArray(),
                 StableId = nsStableId,
                 ContributingAssemblies = contributingAssemblies
             });
@@ -84,8 +93,8 @@ public sealed class ReflectionReader
 
         return new SymbolGraph
         {
-            Namespaces = namespaces,
-            SourceAssemblies = sourceAssemblies
+            Namespaces = namespaces.ToImmutableArray(),
+            SourceAssemblies = sourceAssemblies.ToImmutableHashSet()
         };
     }
 
@@ -99,19 +108,20 @@ public sealed class ReflectionReader
 
         var kind = DetermineTypeKind(type);
         var genericParams = type.IsGenericType
-            ? type.GetGenericArguments().Select(_typeFactory.CreateGenericParameterSymbol).ToList()
-            : new List<GenericParameterSymbol>();
+            ? type.GetGenericArguments().Select(_typeFactory.CreateGenericParameterSymbol).ToImmutableArray()
+            : ImmutableArray<GenericParameterSymbol>.Empty;
 
         var baseType = type.BaseType != null ? _typeFactory.Create(type.BaseType) : null;
-        var interfaces = type.GetInterfaces().Select(_typeFactory.Create).ToList();
+        var interfaces = type.GetInterfaces().Select(_typeFactory.Create).ToImmutableArray();
 
         // Read members
         var members = ReadMembers(type);
 
-        // Read nested types
+        // Read nested types (filter out compiler-generated)
         var nestedTypes = type.GetNestedTypes(BindingFlags.Public)
+            .Where(t => !IsCompilerGenerated(t.Name))
             .Select(ReadType)
-            .ToList();
+            .ToImmutableArray();
 
         return new TypeSymbol
         {
@@ -191,11 +201,11 @@ public sealed class ReflectionReader
 
         return new TypeMembers
         {
-            Methods = methods,
-            Properties = properties,
-            Fields = fields,
-            Events = events,
-            Constructors = constructors
+            Methods = methods.ToImmutableArray(),
+            Properties = properties.ToImmutableArray(),
+            Fields = fields.ToImmutableArray(),
+            Events = events.ToImmutableArray(),
+            Constructors = constructors.ToImmutableArray()
         };
     }
 
@@ -210,10 +220,10 @@ public sealed class ReflectionReader
             MetadataToken = method.MetadataToken
         };
 
-        var parameters = method.GetParameters().Select(ReadParameter).ToList();
+        var parameters = method.GetParameters().Select(ReadParameter).ToImmutableArray();
         var genericParams = method.IsGenericMethod
-            ? method.GetGenericArguments().Select(_typeFactory.CreateGenericParameterSymbol).ToList()
-            : new List<GenericParameterSymbol>();
+            ? method.GetGenericArguments().Select(_typeFactory.CreateGenericParameterSymbol).ToImmutableArray()
+            : ImmutableArray<GenericParameterSymbol>.Empty;
 
         return new MethodSymbol
         {
@@ -243,7 +253,7 @@ public sealed class ReflectionReader
             MetadataToken = property.MetadataToken
         };
 
-        var indexParams = property.GetIndexParameters().Select(ReadParameter).ToList();
+        var indexParams = property.GetIndexParameters().Select(ReadParameter).ToImmutableArray();
         var getter = property.GetGetMethod();
         var setter = property.GetSetMethod();
 
@@ -329,7 +339,7 @@ public sealed class ReflectionReader
         return new ConstructorSymbol
         {
             StableId = stableId,
-            Parameters = ctor.GetParameters().Select(ReadParameter).ToList(),
+            Parameters = ctor.GetParameters().Select(ReadParameter).ToImmutableArray(),
             IsStatic = ctor.IsStatic,
             Visibility = GetConstructorVisibility(ctor)
         };
@@ -422,5 +432,15 @@ public sealed class ReflectionReader
         if (ctor.IsFamilyAndAssembly) return Visibility.PrivateProtected;
         if (ctor.IsAssembly) return Visibility.Internal;
         return Visibility.Private;
+    }
+
+    /// <summary>
+    /// Check if a type name indicates compiler-generated code.
+    /// Compiler-generated types have unspeakable names containing < or >
+    /// Examples: "<Module>", "<PrivateImplementationDetails>", "<Name>e__FixedBuffer", "<>c__DisplayClass"
+    /// </summary>
+    private static bool IsCompilerGenerated(string typeName)
+    {
+        return typeName.Contains('<') || typeName.Contains('>');
     }
 }

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using tsbindgen.Core.Renaming;
 using tsbindgen.SinglePhase.Model;
@@ -11,10 +12,11 @@ namespace tsbindgen.SinglePhase.Shape;
 /// Plans indexer representation (property vs methods).
 /// Single uniform indexers → keep as properties
 /// Multiple/heterogeneous indexers → convert to methods with configured name
+/// PURE - returns new SymbolGraph.
 /// </summary>
 public static class IndexerPlanner
 {
-    public static void Plan(BuildContext ctx, SymbolGraph graph)
+    public static SymbolGraph Plan(BuildContext ctx, SymbolGraph graph)
     {
         ctx.Log("IndexerPlanner: Planning indexer representations...");
 
@@ -26,31 +28,30 @@ public static class IndexerPlanner
         ctx.Log($"IndexerPlanner: Found {typesWithIndexers.Count} types with indexers");
 
         int totalConverted = 0;
+        var updatedGraph = graph;
 
         foreach (var type in typesWithIndexers)
         {
-            var converted = PlanIndexersForType(ctx, type);
-            totalConverted += converted;
+            bool wasConverted;
+            updatedGraph = PlanIndexersForType(ctx, updatedGraph, type, out wasConverted);
+            if (wasConverted)
+                totalConverted++;
         }
 
         ctx.Log($"IndexerPlanner: Converted {totalConverted} indexer groups to methods");
+        return updatedGraph;
     }
 
-    private static int PlanIndexersForType(BuildContext ctx, TypeSymbol type)
+    private static SymbolGraph PlanIndexersForType(BuildContext ctx, SymbolGraph graph, TypeSymbol type, out bool wasConverted)
     {
+        wasConverted = false;
+
         var indexers = type.Members.Properties
             .Where(p => p.IsIndexer)
             .ToList();
 
         if (indexers.Count == 0)
-            return 0;
-
-        // Group indexers by signature pattern and sort for deterministic iteration
-        var indexerGroups = indexers.GroupBy(idx =>
-        {
-            var paramTypes = string.Join(",", idx.IndexParameters.Select(p => GetTypeFullName(p.Type)));
-            return paramTypes;
-        }).OrderBy(g => g.Key).ToList();
+            return graph;
 
         var policy = ctx.Policy.Indexers;
 
@@ -62,53 +63,61 @@ public static class IndexerPlanner
         {
             // Keep as property
             ctx.Log($"IndexerPlanner: Keeping single indexer as property in {type.ClrFullName}");
-            return 0;
+            return graph;
         }
 
         if (!policy.EmitMethodsWhenMultiple)
         {
-            // Policy says don't convert - skip these indexers
-            ctx.Log($"IndexerPlanner: Skipping {indexers.Count} indexers in {type.ClrFullName} (policy)");
+            // Policy says don't convert - remove these indexers entirely
+            ctx.Log($"IndexerPlanner: Removing {indexers.Count} indexers from {type.ClrFullName} (policy: no conversion)");
 
-            // Mark them as ViewOnly so they don't emit
-            foreach (var indexer in indexers)
+            // Pure transformation - remove indexers
+            var graphAfterRemoval = graph.WithUpdatedType(type.ClrFullName, t =>
+                t.WithRemovedProperties(p => p.IsIndexer));
+
+            // Verify (diagnostic only)
+            if (graphAfterRemoval.TryGetType(type.ClrFullName, out var removedVerify))
             {
-                MarkAsViewOnly(indexer);
+                var remaining = removedVerify.Members.Properties.Where(p => p.IsIndexer).ToList();
+                if (remaining.Count > 0)
+                {
+                    ctx.Log($"⚠️ WARNING: {remaining.Count} indexers still remain after removal!");
+                    foreach (var r in remaining)
+                        ctx.Log($"  - {r.ClrName} [{r.StableId.MemberName}{r.StableId.CanonicalSignature}]");
+                }
             }
 
-            return 0;
+            return graphAfterRemoval;
         }
 
         // Convert to methods
         var methodName = policy.MethodName; // Default: "Item"
 
-        var synthesizedMethods = new List<MethodSymbol>();
+        var synthesizedMethods = indexers
+            .Select(indexer => ConvertIndexerToMethod(ctx, type, indexer, methodName))
+            .ToList();
 
-        foreach (var indexer in indexers)
+        // Pure transformation - add methods and remove properties
+        var updatedGraph = graph.WithUpdatedType(type.ClrFullName, t =>
+            t.WithAddedMethods(synthesizedMethods)
+             .WithRemovedProperties(p => p.IsIndexer));
+
+        ctx.Log($"IndexerPlanner: Converted {indexers.Count} indexers to {synthesizedMethods.Count} methods in {type.ClrFullName}");
+
+        // Verify (diagnostic only)
+        if (updatedGraph.TryGetType(type.ClrFullName, out var verifyType))
         {
-            var method = ConvertIndexerToMethod(ctx, type, indexer, methodName);
-            synthesizedMethods.Add(method);
-
-            // Mark original property as ViewOnly
-            MarkAsViewOnly(indexer);
+            var remaining = verifyType.Members.Properties.Where(p => p.IsIndexer).ToList();
+            if (remaining.Count > 0)
+            {
+                ctx.Log($"⚠️ WARNING: {remaining.Count} indexers still remain after removal!");
+                foreach (var r in remaining)
+                    ctx.Log($"  - {r.ClrName} [{r.StableId.MemberName}{r.StableId.CanonicalSignature}]");
+            }
         }
 
-        // Add synthesized methods to the type
-        var updatedMembers = new TypeMembers
-        {
-            Methods = type.Members.Methods.Concat(synthesizedMethods).ToList(),
-            Properties = type.Members.Properties, // Keeps original indexers but marked ViewOnly
-            Fields = type.Members.Fields,
-            Events = type.Members.Events,
-            Constructors = type.Members.Constructors
-        };
-
-        var membersProperty = typeof(TypeSymbol).GetProperty(nameof(TypeSymbol.Members));
-        membersProperty!.SetValue(type, updatedMembers);
-
-        ctx.Log($"IndexerPlanner: Converted {indexers.Count} indexers to methods in {type.ClrFullName}");
-
-        return 1; // Converted one group
+        wasConverted = true;
+        return updatedGraph;
     }
 
     private static MethodSymbol ConvertIndexerToMethod(BuildContext ctx, TypeSymbol type, PropertySymbol indexer, string methodName)
@@ -139,13 +148,18 @@ public static class IndexerPlanner
             "IndexSignatureMethodization",
             indexer.IsStatic);
 
+        // Get the final TS name from Renamer
+        var tsEmitName = ctx.Renamer.GetFinalMemberName(stableId, typeScope, indexer.IsStatic);
+        ctx.Log($"IndexerPlanner: Created method {methodName} with TsEmitName={tsEmitName} in {type.ClrFullName}");
+
         return new MethodSymbol
         {
             StableId = stableId,
             ClrName = methodName,
+            TsEmitName = tsEmitName,  // Set TsEmitName from Renamer
             ReturnType = indexer.PropertyType,
             Parameters = indexer.IndexParameters,
-            GenericParameters = Array.Empty<GenericParameterSymbol>(),
+            GenericParameters = ImmutableArray<GenericParameterSymbol>.Empty,
             IsStatic = indexer.IsStatic,
             IsAbstract = false,
             IsVirtual = indexer.IsVirtual,
@@ -153,16 +167,10 @@ public static class IndexerPlanner
             IsSealed = false,
             IsNew = false,
             Visibility = indexer.Visibility,
-            Provenance = MemberProvenance.IndexerNormalized,
+            Provenance = MemberProvenance.Synthesized,  // Synthesized from indexer
             EmitScope = EmitScope.ClassSurface,
             Documentation = indexer.Documentation
         };
-    }
-
-    private static void MarkAsViewOnly(PropertySymbol property)
-    {
-        var emitScopeProperty = typeof(PropertySymbol).GetProperty(nameof(PropertySymbol.EmitScope));
-        emitScopeProperty!.SetValue(property, EmitScope.ViewOnly);
     }
 
     private static string GetTypeFullName(Model.Types.TypeReference typeRef)

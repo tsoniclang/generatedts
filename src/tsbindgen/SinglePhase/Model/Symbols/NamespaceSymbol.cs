@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using tsbindgen.Core.Renaming;
 
 namespace tsbindgen.SinglePhase.Model.Symbols;
@@ -5,8 +6,9 @@ namespace tsbindgen.SinglePhase.Model.Symbols;
 /// <summary>
 /// Represents a namespace containing types.
 /// Created during aggregation phase.
+/// IMMUTABLE - use 'with' expressions to create modified copies.
 /// </summary>
-public sealed class NamespaceSymbol
+public sealed record NamespaceSymbol
 {
     /// <summary>
     /// Namespace name (e.g., "System.Collections.Generic").
@@ -16,7 +18,7 @@ public sealed class NamespaceSymbol
     /// <summary>
     /// All types in this namespace.
     /// </summary>
-    public required IReadOnlyList<TypeSymbol> Types { get; init; }
+    public required ImmutableArray<TypeSymbol> Types { get; init; }
 
     /// <summary>
     /// Stable identifier for this namespace.
@@ -27,5 +29,5 @@ public sealed class NamespaceSymbol
     /// Assembly names contributing to this namespace.
     /// Multiple assemblies can contribute to the same namespace.
     /// </summary>
-    public required IReadOnlySet<string> ContributingAssemblies { get; init; }
+    public required ImmutableHashSet<string> ContributingAssemblies { get; init; }
 }

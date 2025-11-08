@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Linq;
 using tsbindgen.Core.Renaming;
 using tsbindgen.SinglePhase.Model;
@@ -18,8 +19,9 @@ public static class NameReservation
     /// Reserve all type and member names in the symbol graph.
     /// This is the ONLY place where names are reserved - all other components
     /// must use Renamer.GetFinal*() to retrieve names.
+    /// PURE - reserves names in Renamer and returns new graph with TsEmitName set.
     /// </summary>
-    public static void ReserveAllNames(BuildContext ctx, SymbolGraph graph)
+    public static SymbolGraph ReserveAllNames(BuildContext ctx, SymbolGraph graph)
     {
         ctx.Log("NameReservation: Reserving all TypeScript names...");
 
@@ -27,21 +29,18 @@ public static class NameReservation
         int membersReserved = 0;
         int skippedCompilerGenerated = 0;
 
-        // Process namespaces in deterministic order
+        // Phase 1: Reserve all names in Renamer (populates internal dictionaries)
         foreach (var ns in graph.Namespaces.OrderBy(n => n.Name))
         {
-            // Create namespace scope
             var nsScope = new NamespaceScope
             {
                 ScopeKey = $"ns:{ns.Name}",
                 Namespace = ns.Name,
-                IsInternal = true // Internal scope (facade scope handled separately)
+                IsInternal = true
             };
 
-            // Process types in deterministic order
             foreach (var type in ns.Types.OrderBy(t => t.ClrFullName))
             {
-                // Skip compiler-generated types
                 if (IsCompilerGenerated(type.ClrName))
                 {
                     ctx.Log($"NameReservation: Skipping compiler-generated type {type.ClrFullName}");
@@ -49,12 +48,13 @@ public static class NameReservation
                     continue;
                 }
 
-                // Reserve type name
-                ReserveTypeName(ctx, type, nsScope);
+                // Reserve in Renamer only (don't mutate)
+                var requested = ComputeTypeRequestedBase(type.ClrName);
+                ctx.Renamer.ReserveTypeName(type.StableId, requested, nsScope, "TypeDeclaration", "NameReservation");
                 typesReserved++;
 
-                // Reserve all member names
-                membersReserved += ReserveMemberNames(ctx, type);
+                // Reserve member names
+                membersReserved += ReserveMemberNamesOnly(ctx, type);
             }
         }
 
@@ -63,170 +63,10 @@ public static class NameReservation
         {
             ctx.Log($"NameReservation: Skipped {skippedCompilerGenerated} compiler-generated types");
         }
-    }
 
-    private static void ReserveTypeName(BuildContext ctx, TypeSymbol type, NamespaceScope nsScope)
-    {
-        // Compute requested base name with sanitization
-        var requested = ComputeTypeRequestedBase(type.ClrName);
-
-        ctx.Renamer.ReserveTypeName(
-            stableId: type.StableId,
-            requested: requested,
-            scope: nsScope,
-            reason: "TypeDeclaration",
-            decisionSource: "NameReservation");
-
-        // Set TsEmitName for PhaseGate validation and convenience
-        type.TsEmitName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
-    }
-
-    private static int ReserveMemberNames(BuildContext ctx, TypeSymbol type)
-    {
-        // Create type scope (base - will be modified per member for static/instance)
-        var typeScope = new TypeScope
-        {
-            ScopeKey = $"type:{type.ClrFullName}",
-            TypeFullName = type.ClrFullName,
-            IsStatic = false // Will be overridden for static members
-        };
-
-        int count = 0;
-
-        // Reserve methods in deterministic order
-        foreach (var method in type.Members.Methods.OrderBy(m => m.ClrName))
-        {
-            ReserveMethodName(ctx, method, typeScope);
-            count++;
-        }
-
-        // Reserve properties in deterministic order
-        foreach (var property in type.Members.Properties.OrderBy(p => p.ClrName))
-        {
-            ReservePropertyName(ctx, property, typeScope);
-            count++;
-        }
-
-        // Reserve fields in deterministic order
-        foreach (var field in type.Members.Fields.OrderBy(f => f.ClrName))
-        {
-            ReserveFieldName(ctx, field, typeScope);
-            count++;
-        }
-
-        // Reserve events in deterministic order
-        foreach (var ev in type.Members.Events.OrderBy(e => e.ClrName))
-        {
-            ReserveEventName(ctx, ev, typeScope);
-            count++;
-        }
-
-        // Reserve constructors
-        foreach (var ctor in type.Members.Constructors)
-        {
-            ReserveConstructorName(ctx, ctor, typeScope);
-            count++;
-        }
-
-        return count;
-    }
-
-    private static void ReserveMethodName(BuildContext ctx, MethodSymbol method, TypeScope typeScope)
-    {
-        // Determine reason based on provenance
-        var reason = method.Provenance switch
-        {
-            MemberProvenance.Original => "MethodDeclaration",
-            MemberProvenance.FromInterface => "InterfaceMember",
-            MemberProvenance.Synthesized => "SynthesizedMember",
-            MemberProvenance.HiddenNew => "HiddenNewMember",
-            MemberProvenance.BaseOverload => "BaseOverload",
-            _ => "Unknown"
-        };
-
-        // Compute requested base (handle operators)
-        var requested = ComputeMethodBase(method);
-
-        ctx.Renamer.ReserveMemberName(
-            stableId: method.StableId,
-            requested: requested,
-            scope: typeScope,
-            reason: reason,
-            isStatic: method.IsStatic,
-            decisionSource: "NameReservation");
-
-        // Set TsEmitName for PhaseGate validation
-        method.TsEmitName = ctx.Renamer.GetFinalMemberName(method.StableId, typeScope, method.IsStatic);
-    }
-
-    private static void ReservePropertyName(BuildContext ctx, PropertySymbol property, TypeScope typeScope)
-    {
-        var reason = property.Provenance switch
-        {
-            MemberProvenance.Original => property.IsIndexer ? "IndexerProperty" : "PropertyDeclaration",
-            MemberProvenance.FromInterface => "InterfaceProperty",
-            MemberProvenance.Synthesized => "SynthesizedProperty",
-            _ => "Unknown"
-        };
-
-        var requested = SanitizeMemberName(property.ClrName);
-
-        ctx.Renamer.ReserveMemberName(
-            stableId: property.StableId,
-            requested: requested,
-            scope: typeScope,
-            reason: reason,
-            isStatic: property.IsStatic,
-            decisionSource: "NameReservation");
-
-        // Set TsEmitName for PhaseGate validation
-        property.TsEmitName = ctx.Renamer.GetFinalMemberName(property.StableId, typeScope, property.IsStatic);
-    }
-
-    private static void ReserveFieldName(BuildContext ctx, FieldSymbol field, TypeScope typeScope)
-    {
-        var reason = field.IsConst ? "ConstantField" : "FieldDeclaration";
-        var requested = SanitizeMemberName(field.ClrName);
-
-        ctx.Renamer.ReserveMemberName(
-            stableId: field.StableId,
-            requested: requested,
-            scope: typeScope,
-            reason: reason,
-            isStatic: field.IsStatic,
-            decisionSource: "NameReservation");
-
-        // Set TsEmitName for PhaseGate validation
-        field.TsEmitName = ctx.Renamer.GetFinalMemberName(field.StableId, typeScope, field.IsStatic);
-    }
-
-    private static void ReserveEventName(BuildContext ctx, EventSymbol ev, TypeScope typeScope)
-    {
-        var requested = SanitizeMemberName(ev.ClrName);
-
-        ctx.Renamer.ReserveMemberName(
-            stableId: ev.StableId,
-            requested: requested,
-            scope: typeScope,
-            reason: "EventDeclaration",
-            isStatic: ev.IsStatic,
-            decisionSource: "NameReservation");
-
-        // Set TsEmitName for PhaseGate validation
-        ev.TsEmitName = ctx.Renamer.GetFinalMemberName(ev.StableId, typeScope, ev.IsStatic);
-    }
-
-    private static void ReserveConstructorName(BuildContext ctx, ConstructorSymbol ctor, TypeScope typeScope)
-    {
-        ctx.Renamer.ReserveMemberName(
-            stableId: ctor.StableId,
-            requested: "constructor", // TypeScript always uses "constructor"
-            scope: typeScope,
-            reason: "ConstructorDeclaration",
-            isStatic: ctor.IsStatic, // static constructors exist
-            decisionSource: "NameReservation");
-
-        // Constructors don't have TsEmitName (they're always "constructor" in TypeScript)
+        // Phase 2: Apply names to graph (pure transformation)
+        var updatedGraph = ApplyNamesToGraph(ctx, graph);
+        return updatedGraph;
     }
 
     /// <summary>
@@ -308,14 +148,164 @@ public static class NameReservation
 
     /// <summary>
     /// Check if a type name indicates compiler-generated code.
-    /// Common patterns: <Name>e__FixedBuffer, <>c__DisplayClass, etc.
+    /// Compiler-generated types have unspeakable names containing < or >
+    /// Examples: "<Module>", "<PrivateImplementationDetails>", "<Name>e__FixedBuffer", "<>c__DisplayClass"
     /// </summary>
     private static bool IsCompilerGenerated(string clrName)
     {
-        return clrName.Contains('<') && (
-            clrName.Contains(">e__") ||
-            clrName.Contains(">c__") ||
-            clrName.Contains(">d__") ||
-            clrName.Contains(">f__"));
+        return clrName.Contains('<') || clrName.Contains('>');
+    }
+
+    /// <summary>
+    /// Reserve member names without mutating symbols (Phase 1).
+    /// </summary>
+    private static int ReserveMemberNamesOnly(BuildContext ctx, TypeSymbol type)
+    {
+        var typeScope = new TypeScope
+        {
+            ScopeKey = $"type:{type.ClrFullName}",
+            TypeFullName = type.ClrFullName,
+            IsStatic = false
+        };
+
+        int count = 0;
+
+        foreach (var method in type.Members.Methods.OrderBy(m => m.ClrName))
+        {
+            if (method.Provenance == MemberProvenance.Synthesized)
+            {
+                count++;
+                continue;
+            }
+
+            var reason = method.Provenance switch
+            {
+                MemberProvenance.Original => "MethodDeclaration",
+                MemberProvenance.FromInterface => "InterfaceMember",
+                _ => "Unknown"
+            };
+
+            var requested = ComputeMethodBase(method);
+            ctx.Renamer.ReserveMemberName(method.StableId, requested, typeScope, reason, method.IsStatic, "NameReservation");
+            count++;
+        }
+
+        foreach (var property in type.Members.Properties.OrderBy(p => p.ClrName))
+        {
+            var reason = property.IsIndexer ? "IndexerProperty" : "PropertyDeclaration";
+            var requested = SanitizeMemberName(property.ClrName);
+            ctx.Renamer.ReserveMemberName(property.StableId, requested, typeScope, reason, property.IsStatic, "NameReservation");
+            count++;
+        }
+
+        foreach (var field in type.Members.Fields.OrderBy(f => f.ClrName))
+        {
+            var reason = field.IsConst ? "ConstantField" : "FieldDeclaration";
+            var requested = SanitizeMemberName(field.ClrName);
+            ctx.Renamer.ReserveMemberName(field.StableId, requested, typeScope, reason, field.IsStatic, "NameReservation");
+            count++;
+        }
+
+        foreach (var ev in type.Members.Events.OrderBy(e => e.ClrName))
+        {
+            var requested = SanitizeMemberName(ev.ClrName);
+            ctx.Renamer.ReserveMemberName(ev.StableId, requested, typeScope, reason: "EventDeclaration", ev.IsStatic, "NameReservation");
+            count++;
+        }
+
+        foreach (var ctor in type.Members.Constructors)
+        {
+            ctx.Renamer.ReserveMemberName(ctor.StableId, "constructor", typeScope, "ConstructorDeclaration", ctor.IsStatic, "NameReservation");
+            count++;
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Apply reserved names to graph (Phase 2 - pure transformation).
+    /// </summary>
+    private static SymbolGraph ApplyNamesToGraph(BuildContext ctx, SymbolGraph graph)
+    {
+        var updatedNamespaces = graph.Namespaces.Select(ns => ApplyNamesToNamespace(ctx, ns)).ToImmutableArray();
+        return graph with { Namespaces = updatedNamespaces };
+    }
+
+    private static NamespaceSymbol ApplyNamesToNamespace(BuildContext ctx, NamespaceSymbol ns)
+    {
+        var nsScope = new NamespaceScope
+        {
+            ScopeKey = $"ns:{ns.Name}",
+            Namespace = ns.Name,
+            IsInternal = true
+        };
+
+        var updatedTypes = ns.Types.Select(t =>
+        {
+            if (IsCompilerGenerated(t.ClrName))
+                return t;
+
+            return ApplyNamesToType(ctx, t, nsScope);
+        }).ToImmutableArray();
+
+        return ns with { Types = updatedTypes };
+    }
+
+    private static TypeSymbol ApplyNamesToType(BuildContext ctx, TypeSymbol type, NamespaceScope nsScope)
+    {
+        var typeScope = new TypeScope
+        {
+            ScopeKey = $"type:{type.ClrFullName}",
+            TypeFullName = type.ClrFullName,
+            IsStatic = false
+        };
+
+        // Get TsEmitName from Renamer
+        var tsEmitName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+
+        // Update members
+        var updatedMembers = ApplyNamesToMembers(ctx, type.Members, typeScope);
+
+        // Return new type with updated names
+        return type with
+        {
+            TsEmitName = tsEmitName,
+            Members = updatedMembers
+        };
+    }
+
+    private static TypeMembers ApplyNamesToMembers(BuildContext ctx, TypeMembers members, TypeScope typeScope)
+    {
+        var updatedMethods = members.Methods.Select(m =>
+        {
+            var tsEmitName = ctx.Renamer.GetFinalMemberName(m.StableId, typeScope, m.IsStatic);
+            return m with { TsEmitName = tsEmitName };
+        }).ToImmutableArray();
+
+        var updatedProperties = members.Properties.Select(p =>
+        {
+            var tsEmitName = ctx.Renamer.GetFinalMemberName(p.StableId, typeScope, p.IsStatic);
+            return p with { TsEmitName = tsEmitName };
+        }).ToImmutableArray();
+
+        var updatedFields = members.Fields.Select(f =>
+        {
+            var tsEmitName = ctx.Renamer.GetFinalMemberName(f.StableId, typeScope, f.IsStatic);
+            return f with { TsEmitName = tsEmitName };
+        }).ToImmutableArray();
+
+        var updatedEvents = members.Events.Select(e =>
+        {
+            var tsEmitName = ctx.Renamer.GetFinalMemberName(e.StableId, typeScope, e.IsStatic);
+            return e with { TsEmitName = tsEmitName };
+        }).ToImmutableArray();
+
+        return members with
+        {
+            Methods = updatedMethods.ToImmutableArray(),
+            Properties = updatedProperties.ToImmutableArray(),
+            Fields = updatedFields,
+            Events = updatedEvents
+        };
     }
 }

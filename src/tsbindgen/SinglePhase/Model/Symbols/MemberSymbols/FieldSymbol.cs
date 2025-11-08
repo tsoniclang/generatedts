@@ -5,8 +5,9 @@ namespace tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
 
 /// <summary>
 /// Represents a field member.
+/// IMMUTABLE record.
 /// </summary>
-public sealed class FieldSymbol
+public sealed record FieldSymbol
 {
     /// <summary>
     /// Stable identifier for this field.
@@ -19,9 +20,9 @@ public sealed class FieldSymbol
     public required string ClrName { get; init; }
 
     /// <summary>
-    /// TypeScript emit name (set by Renamer after shaping).
+    /// TypeScript emit name (set by NameApplication after reservation).
     /// </summary>
-    public string TsEmitName { get; set; } = "";
+    public string TsEmitName { get; init; } = "";
 
     /// <summary>
     /// Field type.

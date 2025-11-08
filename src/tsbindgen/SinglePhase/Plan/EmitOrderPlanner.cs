@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+using System.Linq;
 using tsbindgen.SinglePhase.Model;
 using tsbindgen.SinglePhase.Model.Symbols;
 
@@ -66,7 +68,7 @@ public sealed class EmitOrderPlanner
         foreach (var type in sorted)
         {
             // Recursively order nested types
-            var orderedNested = type.NestedTypes.Count > 0
+            var orderedNested = type.NestedTypes.Length > 0
                 ? OrderTypes(type.NestedTypes)
                 : new List<TypeEmitOrder>();
 
@@ -156,8 +158,8 @@ public sealed class EmitOrderPlanner
         {
             Constructors = orderedConstructors,
             Fields = orderedFields,
-            Properties = orderedProperties,
-            Events = orderedEvents,
+            Properties = orderedProperties.ToImmutableArray(),
+            Events = orderedEvents.ToImmutableArray(),
             Methods = orderedMethods
         };
     }

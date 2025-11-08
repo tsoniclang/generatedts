@@ -90,7 +90,7 @@ function createTsConfig() {
             moduleResolution: 'bundler'
         },
         include: [
-            'namespaces/**/*.d.ts'
+            '**/*.d.ts'
         ]
     };
 
@@ -166,10 +166,11 @@ function runTypeScriptCompiler() {
 function validateMetadataFiles() {
     log('Validating metadata files...');
 
-    const namespacesDir = path.join(VALIDATION_DIR, 'namespaces');
+    // New pipeline outputs namespace folders directly to VALIDATION_DIR (no 'namespaces/' subdirectory)
+    const namespacesDir = VALIDATION_DIR;
 
     if (!fs.existsSync(namespacesDir)) {
-        throw new Error('Namespaces directory not found');
+        throw new Error('Validation directory not found');
     }
 
     const namespaces = fs.readdirSync(namespacesDir);
@@ -232,7 +233,7 @@ async function main() {
             console.log('================================================================');
             console.log('');
             console.log(`  Validation directory: ${VALIDATION_DIR}`);
-            console.log(`  Namespaces generated: check ${path.join(VALIDATION_DIR, 'namespaces')}`);
+            console.log(`  Namespaces generated: check ${VALIDATION_DIR}`);
             console.log('');
             console.log('  Run without --skip-tsc to validate TypeScript compilation');
             console.log('');

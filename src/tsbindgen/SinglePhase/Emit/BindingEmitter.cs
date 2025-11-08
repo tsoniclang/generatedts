@@ -121,7 +121,7 @@ public static class BindingEmitter
             NormalizedSignature = normalizedSignature,
             EmitScope = method.EmitScope.ToString(),
             Arity = method.Arity,
-            ParameterCount = method.Parameters.Count
+            ParameterCount = method.Parameters.Length
         };
     }
 
@@ -214,7 +214,7 @@ public static class BindingEmitter
             CanonicalSignature = ctor.StableId.CanonicalSignature,
             NormalizedSignature = normalizedSignature,
             IsStatic = ctor.IsStatic,
-            ParameterCount = ctor.Parameters.Count
+            ParameterCount = ctor.Parameters.Length
         };
     }
 }

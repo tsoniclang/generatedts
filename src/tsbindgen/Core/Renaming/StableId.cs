@@ -27,6 +27,7 @@ public sealed record TypeStableId : StableId
 
 /// <summary>
 /// Stable identity for a member (method, property, field, event).
+/// Equality is based on semantic identity (excluding MetadataToken).
 /// </summary>
 public sealed record MemberStableId : StableId
 {
@@ -50,9 +51,29 @@ public sealed record MemberStableId : StableId
 
     /// <summary>
     /// Optional metadata token for exact CLR correlation.
+    /// NOT included in equality comparison (semantic identity only).
     /// </summary>
     public int? MetadataToken { get; init; }
 
     public override string ToString() =>
         $"{AssemblyName}:{DeclaringClrFullName}::{MemberName}{CanonicalSignature}";
+
+    // Override equality to exclude MetadataToken (semantic equality)
+    public bool Equals(MemberStableId? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+
+        return AssemblyName == other.AssemblyName
+            && DeclaringClrFullName == other.DeclaringClrFullName
+            && MemberName == other.MemberName
+            && CanonicalSignature == other.CanonicalSignature;
+        // MetadataToken intentionally excluded from equality
+    }
+
+    public override int GetHashCode()
+    {
+        return HashCode.Combine(AssemblyName, DeclaringClrFullName, MemberName, CanonicalSignature);
+        // MetadataToken intentionally excluded from hash
+    }
 }

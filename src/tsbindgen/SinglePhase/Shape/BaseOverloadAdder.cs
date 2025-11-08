@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using tsbindgen.Core.Renaming;
 using tsbindgen.SinglePhase.Model;
@@ -97,7 +98,7 @@ public static class BaseOverloadAdder
         // Add to derived class
         var updatedMembers = new TypeMembers
         {
-            Methods = derivedClass.Members.Methods.Concat(addedMethods).ToList(),
+            Methods = derivedClass.Members.Methods.Concat(addedMethods).ToImmutableArray(),
             Properties = derivedClass.Members.Properties,
             Fields = derivedClass.Members.Fields,
             Events = derivedClass.Members.Events,

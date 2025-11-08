@@ -67,7 +67,7 @@ public static class ClassPrinter
         sb.Append(finalName);
 
         // Generic parameters: class Foo<T, U>
-        if (type.GenericParameters.Count > 0)
+        if (type.GenericParameters.Length > 0)
         {
             sb.Append('<');
             sb.Append(string.Join(", ", type.GenericParameters.Select(gp => PrintGenericParameter(gp, ctx))));
@@ -87,7 +87,7 @@ public static class ClassPrinter
         }
 
         // Interfaces: implements IFoo, IBar
-        if (type.Interfaces.Count > 0)
+        if (type.Interfaces.Length > 0)
         {
             sb.Append(" implements ");
             sb.Append(string.Join(", ", type.Interfaces.Select(i => TypeRefPrinter.Print(i, ctx))));
@@ -124,7 +124,7 @@ public static class ClassPrinter
         sb.Append(finalName);
 
         // Generic parameters
-        if (type.GenericParameters.Count > 0)
+        if (type.GenericParameters.Length > 0)
         {
             sb.Append('<');
             sb.Append(string.Join(", ", type.GenericParameters.Select(gp => PrintGenericParameter(gp, ctx))));
@@ -132,7 +132,7 @@ public static class ClassPrinter
         }
 
         // Interfaces
-        if (type.Interfaces.Count > 0)
+        if (type.Interfaces.Length > 0)
         {
             sb.Append(" implements ");
             sb.Append(string.Join(", ", type.Interfaces.Select(i => TypeRefPrinter.Print(i, ctx))));
@@ -240,7 +240,7 @@ public static class ClassPrinter
         sb.Append(finalName);
 
         // Generic parameters
-        if (type.GenericParameters.Count > 0)
+        if (type.GenericParameters.Length > 0)
         {
             sb.Append('<');
             sb.Append(string.Join(", ", type.GenericParameters.Select(gp => PrintGenericParameter(gp, ctx))));
@@ -285,7 +285,7 @@ public static class ClassPrinter
         sb.Append(finalName);
 
         // Generic parameters
-        if (type.GenericParameters.Count > 0)
+        if (type.GenericParameters.Length > 0)
         {
             sb.Append('<');
             sb.Append(string.Join(", ", type.GenericParameters.Select(gp => PrintGenericParameter(gp, ctx))));
@@ -293,7 +293,7 @@ public static class ClassPrinter
         }
 
         // Base interfaces: extends IFoo, IBar
-        if (type.Interfaces.Count > 0)
+        if (type.Interfaces.Length > 0)
         {
             sb.Append(" extends ");
             sb.Append(string.Join(", ", type.Interfaces.Select(i => TypeRefPrinter.Print(i, ctx))));
@@ -465,11 +465,11 @@ public static class ClassPrinter
         sb.Append(gp.Name);
 
         // Constraints from IReadOnlyList<TypeReference>
-        if (gp.Constraints.Count > 0)
+        if (gp.Constraints.Length > 0)
         {
             sb.Append(" extends ");
 
-            if (gp.Constraints.Count == 1)
+            if (gp.Constraints.Length == 1)
             {
                 sb.Append(TypeRefPrinter.Print(gp.Constraints[0], ctx));
             }

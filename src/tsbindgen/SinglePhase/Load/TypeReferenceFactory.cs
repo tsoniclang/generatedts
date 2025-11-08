@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Reflection;
 using tsbindgen.SinglePhase.Model.Types;
 using tsbindgen.SinglePhase.Model.Symbols;
@@ -204,7 +205,7 @@ public sealed class TypeReferenceFactory
             Id = id,
             Name = _ctx.Intern(type.Name),
             Position = type.GenericParameterPosition,
-            Constraints = new List<TypeReference>(), // Empty - ConstraintCloser fills this
+            Constraints = ImmutableArray<TypeReference>.Empty, // Empty - ConstraintCloser fills this
             RawConstraintTypes = type.GetGenericParameterConstraints(), // Raw for ConstraintCloser
             Variance = variance,
             SpecialConstraints = specialConstraints

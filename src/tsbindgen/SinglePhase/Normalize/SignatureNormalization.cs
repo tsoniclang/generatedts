@@ -33,7 +33,7 @@ public static class SignatureNormalization
 
         // Parameters with kinds
         sb.Append("|(");
-        for (int i = 0; i < method.Parameters.Count; i++)
+        for (int i = 0; i < method.Parameters.Length; i++)
         {
             if (i > 0) sb.Append(',');
 
@@ -83,10 +83,10 @@ public static class SignatureNormalization
 
         // Index parameters (for indexers)
         sb.Append('|');
-        if (property.IndexParameters.Count > 0)
+        if (property.IndexParameters.Length > 0)
         {
             sb.Append('(');
-            for (int i = 0; i < property.IndexParameters.Count; i++)
+            for (int i = 0; i < property.IndexParameters.Length; i++)
             {
                 if (i > 0) sb.Append(',');
                 sb.Append(NormalizeTypeName(property.IndexParameters[i].Type.ToString() ?? "unknown"));
@@ -180,7 +180,7 @@ public static class SignatureNormalization
 
         // Parameters with kinds
         sb.Append("|(");
-        for (int i = 0; i < ctor.Parameters.Count; i++)
+        for (int i = 0; i < ctor.Parameters.Length; i++)
         {
             if (i > 0) sb.Append(',');
 

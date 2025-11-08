@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using tsbindgen.SinglePhase.Model;
 using tsbindgen.SinglePhase.Model.Symbols;
@@ -29,7 +30,7 @@ public static class ConstraintCloser
         foreach (var type in allTypes)
         {
             // Close type-level generic parameters
-            if (type.GenericParameters.Count > 0)
+            if (type.GenericParameters.Length > 0)
             {
                 foreach (var gp in type.GenericParameters)
                 {
@@ -41,7 +42,7 @@ public static class ConstraintCloser
             // Close method-level generic parameters
             foreach (var method in type.Members.Methods)
             {
-                if (method.GenericParameters.Count > 0)
+                if (method.GenericParameters.Length > 0)
                 {
                     foreach (var gp in method.GenericParameters)
                     {
@@ -76,16 +77,19 @@ public static class ConstraintCloser
                 {
                     if (gp.RawConstraintTypes != null && gp.RawConstraintTypes.Length > 0)
                     {
-                        var constraints = (List<TypeReference>)gp.Constraints;
-                        constraints.Clear();
+                        var constraintsBuilder = ImmutableArray.CreateBuilder<TypeReference>();
 
                         foreach (var rawType in gp.RawConstraintTypes)
                         {
                             // Uses memoized factory with cycle detection
                             var resolved = typeFactory.Create(rawType);
-                            constraints.Add(resolved);
+                            constraintsBuilder.Add(resolved);
                             totalResolved++;
                         }
+
+                        // Update the Constraints property using reflection (init-only)
+                        var constraintsProperty = typeof(GenericParameterSymbol).GetProperty(nameof(GenericParameterSymbol.Constraints));
+                        constraintsProperty!.SetValue(gp, constraintsBuilder.ToImmutable());
                     }
                 }
 
@@ -96,15 +100,18 @@ public static class ConstraintCloser
                     {
                         if (gp.RawConstraintTypes != null && gp.RawConstraintTypes.Length > 0)
                         {
-                            var constraints = (List<TypeReference>)gp.Constraints;
-                            constraints.Clear();
+                            var constraintsBuilder = ImmutableArray.CreateBuilder<TypeReference>();
 
                             foreach (var rawType in gp.RawConstraintTypes)
                             {
                                 var resolved = typeFactory.Create(rawType);
-                                constraints.Add(resolved);
+                                constraintsBuilder.Add(resolved);
                                 totalResolved++;
                             }
+
+                            // Update the Constraints property using reflection (init-only)
+                            var constraintsProperty = typeof(GenericParameterSymbol).GetProperty(nameof(GenericParameterSymbol.Constraints));
+                            constraintsProperty!.SetValue(gp, constraintsBuilder.ToImmutable());
                         }
                     }
                 }
@@ -124,7 +131,7 @@ public static class ConstraintCloser
         // - Type constraints map directly using intersection types if multiple
         // - Special constraints are documented in metadata but don't affect TS signature
 
-        if (gp.Constraints.Count == 0)
+        if (gp.Constraints.Length == 0)
             return; // No constraints to close
 
         // Policy determines how to merge multiple constraints
@@ -135,7 +142,7 @@ public static class ConstraintCloser
             case Core.Policy.ConstraintMergeStrategy.Intersection:
                 // TypeScript uses intersection automatically with "T extends A & B & C"
                 // No additional work needed - the printer will handle this
-                ctx.Log($"ConstraintCloser: {gp.Name} has {gp.Constraints.Count} constraints (intersection)");
+                ctx.Log($"ConstraintCloser: {gp.Name} has {gp.Constraints.Length} constraints (intersection)");
                 break;
 
             case Core.Policy.ConstraintMergeStrategy.Union:

@@ -44,7 +44,7 @@ public static class SinglePhaseBuilder
 
             // Phase 2: Normalize (build indices)
             ctx.Log("\n--- Phase 2: Normalize ---");
-            graph.BuildIndices();
+            graph = graph.WithIndices();
             ctx.Log("Built symbol indices");
 
             // Phase 3: Shape
@@ -54,7 +54,7 @@ public static class SinglePhaseBuilder
 
             // Phase 3.5: Name Reservation (after Shape, before Plan)
             ctx.Log("\n--- Phase 3.5: Name Reservation ---");
-            Normalize.NameReservation.ReserveAllNames(ctx, graph);
+            graph = Normalize.NameReservation.ReserveAllNames(ctx, graph);
             ctx.Log("Reserved all TypeScript names through Renamer");
 
             // Phase 4: Plan
@@ -149,8 +149,8 @@ public static class SinglePhaseBuilder
         // 5. Static-side analysis
         StaticSideAnalyzer.Analyze(ctx, graph);
 
-        // 6. Indexer planning
-        IndexerPlanner.Plan(ctx, graph);
+        // 6. Indexer planning (PURE - returns new graph)
+        graph = IndexerPlanner.Plan(ctx, graph);
 
         // 7. Hidden member (C# 'new') planning
         HiddenMemberPlanner.Plan(ctx, graph);
@@ -242,5 +242,5 @@ public sealed record EmissionPlan
     public required ImportPlan Imports { get; init; }
     public required EmitOrder EmissionOrder { get; init; }
 
-    public int NamespaceCount => Graph.Namespaces.Count;
+    public int NamespaceCount => Graph.Namespaces.Length;
 }

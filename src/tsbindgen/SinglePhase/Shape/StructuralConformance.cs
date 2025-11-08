@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using tsbindgen.SinglePhase.Model;
 using tsbindgen.SinglePhase.Model.Symbols;
@@ -37,7 +38,7 @@ public static class StructuralConformance
 
     private static int AnalyzeType(BuildContext ctx, SymbolGraph graph, TypeSymbol type)
     {
-        if (type.Interfaces.Count == 0)
+        if (type.Interfaces.Length == 0)
             return 0;
 
         var explicitViews = new List<TypeReference>();
@@ -61,7 +62,7 @@ public static class StructuralConformance
 
         // Update type: remove these interfaces from the implements list
         // and store them for explicit view generation
-        var remainingInterfaces = type.Interfaces.Except(explicitViews).ToList();
+        var remainingInterfaces = type.Interfaces.Except(explicitViews).ToImmutableArray();
 
         var interfacesProperty = typeof(TypeSymbol).GetProperty(nameof(TypeSymbol.Interfaces));
         interfacesProperty!.SetValue(type, remainingInterfaces);

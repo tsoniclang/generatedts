@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using tsbindgen.Core.Renaming;
 using tsbindgen.SinglePhase.Model.Types;
 
@@ -5,8 +6,9 @@ namespace tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
 
 /// <summary>
 /// Represents a method member.
+/// IMMUTABLE record.
 /// </summary>
-public sealed class MethodSymbol
+public sealed record MethodSymbol
 {
     /// <summary>
     /// Stable identifier for this method.
@@ -19,9 +21,9 @@ public sealed class MethodSymbol
     public required string ClrName { get; init; }
 
     /// <summary>
-    /// TypeScript emit name (set by Renamer after shaping).
+    /// TypeScript emit name (set by NameApplication after reservation).
     /// </summary>
-    public string TsEmitName { get; set; } = "";
+    public string TsEmitName { get; init; } = "";
 
     /// <summary>
     /// Return type.
@@ -31,17 +33,17 @@ public sealed class MethodSymbol
     /// <summary>
     /// Method parameters.
     /// </summary>
-    public required IReadOnlyList<ParameterSymbol> Parameters { get; init; }
+    public required ImmutableArray<ParameterSymbol> Parameters { get; init; }
 
     /// <summary>
     /// Generic parameters declared by this method (for generic methods).
     /// </summary>
-    public required IReadOnlyList<GenericParameterSymbol> GenericParameters { get; init; }
+    public required ImmutableArray<GenericParameterSymbol> GenericParameters { get; init; }
 
     /// <summary>
     /// Method arity (generic parameter count).
     /// </summary>
-    public int Arity => GenericParameters.Count;
+    public int Arity => GenericParameters.Length;
 
     /// <summary>
     /// True if this is a static method.
@@ -102,8 +104,9 @@ public sealed class MethodSymbol
 
 /// <summary>
 /// Represents a method or indexer parameter.
+/// IMMUTABLE record.
 /// </summary>
-public sealed class ParameterSymbol
+public sealed record ParameterSymbol
 {
     /// <summary>
     /// Parameter name.

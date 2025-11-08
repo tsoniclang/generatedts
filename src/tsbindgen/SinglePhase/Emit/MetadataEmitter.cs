@@ -125,7 +125,7 @@ public static class MetadataEmitter
             IsOverride = method.IsOverride,
             IsSealed = method.IsSealed,
             Arity = method.Arity,
-            ParameterCount = method.Parameters.Count,
+            ParameterCount = method.Parameters.Length,
             SourceInterface = method.SourceInterface != null ? GetTypeRefName(method.SourceInterface) : null
         };
     }
@@ -220,7 +220,7 @@ public static class MetadataEmitter
         {
             NormalizedSignature = normalizedSignature,
             IsStatic = ctor.IsStatic,
-            ParameterCount = ctor.Parameters.Count
+            ParameterCount = ctor.Parameters.Length
         };
     }
 

@@ -5,8 +5,9 @@ namespace tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
 
 /// <summary>
 /// Represents an event member.
+/// IMMUTABLE record.
 /// </summary>
-public sealed class EventSymbol
+public sealed record EventSymbol
 {
     /// <summary>
     /// Stable identifier for this event.
@@ -19,9 +20,9 @@ public sealed class EventSymbol
     public required string ClrName { get; init; }
 
     /// <summary>
-    /// TypeScript emit name (set by Renamer after shaping).
+    /// TypeScript emit name (set by NameApplication after reservation).
     /// </summary>
-    public string TsEmitName { get; set; } = "";
+    public string TsEmitName { get; init; } = "";
 
     /// <summary>
     /// Event handler type (delegate type).

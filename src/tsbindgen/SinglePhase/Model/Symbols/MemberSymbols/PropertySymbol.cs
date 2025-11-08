@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using tsbindgen.Core.Renaming;
 using tsbindgen.SinglePhase.Model.Types;
 
@@ -5,8 +6,9 @@ namespace tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
 
 /// <summary>
 /// Represents a property member.
+/// IMMUTABLE record.
 /// </summary>
-public sealed class PropertySymbol
+public sealed record PropertySymbol
 {
     /// <summary>
     /// Stable identifier for this property.
@@ -19,9 +21,9 @@ public sealed class PropertySymbol
     public required string ClrName { get; init; }
 
     /// <summary>
-    /// TypeScript emit name (set by Renamer after shaping).
+    /// TypeScript emit name (set by NameApplication after reservation).
     /// </summary>
-    public string TsEmitName { get; set; } = "";
+    public string TsEmitName { get; init; } = "";
 
     /// <summary>
     /// Property type.
@@ -32,12 +34,12 @@ public sealed class PropertySymbol
     /// Index parameters (for indexers).
     /// Empty for normal properties.
     /// </summary>
-    public required IReadOnlyList<ParameterSymbol> IndexParameters { get; init; }
+    public required ImmutableArray<ParameterSymbol> IndexParameters { get; init; }
 
     /// <summary>
     /// True if this is an indexer.
     /// </summary>
-    public bool IsIndexer => IndexParameters.Count > 0;
+    public bool IsIndexer => IndexParameters.Length > 0;
 
     /// <summary>
     /// True if this property has a getter.

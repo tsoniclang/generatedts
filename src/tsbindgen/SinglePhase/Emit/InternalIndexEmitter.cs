@@ -140,7 +140,7 @@ public static class InternalIndexEmitter
         sb.Append($"interface __{finalName}$views");
 
         // Generic parameters
-        if (type.GenericParameters.Count > 0)
+        if (type.GenericParameters.Length > 0)
         {
             sb.Append('<');
             sb.Append(string.Join(", ", type.GenericParameters.Select(gp => gp.Name)));
@@ -182,7 +182,7 @@ public static class InternalIndexEmitter
         sb.Append(finalName);
 
         // Generic parameters
-        if (type.GenericParameters.Count > 0)
+        if (type.GenericParameters.Length > 0)
         {
             sb.Append('<');
             var genericParams = string.Join(", ", type.GenericParameters.Select(gp => gp.Name));
@@ -195,7 +195,7 @@ public static class InternalIndexEmitter
         sb.Append("$instance");
 
         // Generic arguments
-        if (type.GenericParameters.Count > 0)
+        if (type.GenericParameters.Length > 0)
         {
             sb.Append('<');
             sb.Append(string.Join(", ", type.GenericParameters.Select(gp => gp.Name)));
@@ -207,7 +207,7 @@ public static class InternalIndexEmitter
         sb.Append("$views");
 
         // Generic arguments
-        if (type.GenericParameters.Count > 0)
+        if (type.GenericParameters.Length > 0)
         {
             sb.Append('<');
             sb.Append(string.Join(", ", type.GenericParameters.Select(gp => gp.Name)));

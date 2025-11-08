@@ -127,7 +127,7 @@ public static class PhaseGate
                     // Check for collisions within same scope
                     if (method.EmitScope == EmitScope.ClassSurface)
                     {
-                        var signature = $"{method.TsEmitName}_{method.Parameters.Count}";
+                        var signature = $"{method.TsEmitName}_{method.Parameters.Length}";
                         if (!memberNames.Add(signature))
                         {
                             validationCtx.WarningCount++;
@@ -231,10 +231,10 @@ public static class PhaseGate
 
                     foreach (var requiredMethod in iface.Members.Methods)
                     {
-                        var methodSig = $"{requiredMethod.ClrName}({requiredMethod.Parameters.Count})";
+                        var methodSig = $"{requiredMethod.ClrName}({requiredMethod.Parameters.Length})";
                         var exists = representableMethods.Any(m =>
                             m.ClrName == requiredMethod.ClrName &&
-                            m.Parameters.Count == requiredMethod.Parameters.Count);
+                            m.Parameters.Length == requiredMethod.Parameters.Length);
 
                         if (!exists)
                         {
@@ -514,6 +514,17 @@ public static class PhaseGate
                     .Where(p => p.EmitScope == EmitScope.ViewOnly)
                     .ToList();
 
+                // Guard: indexer properties must NOT be ViewOnly (they should be converted or kept as properties)
+                foreach (var property in viewOnlyProperties)
+                {
+                    if (property.IsIndexer)
+                    {
+                        validationCtx.ErrorCount++;
+                        validationCtx.Diagnostics.Add(
+                            $"ERROR: Indexer property {property.ClrName} in {type.ClrFullName} must not be ViewOnly (should be converted to methods or kept as property)");
+                    }
+                }
+
                 totalViewOnlyMembers += viewOnlyMethods.Count + viewOnlyProperties.Count;
 
                 if (viewOnlyMethods.Count == 0 && viewOnlyProperties.Count == 0)
@@ -681,7 +692,7 @@ public static class PhaseGate
                     var scopeName = method.IsStatic ? "static" : "instance";
 
                     // Methods can have overloads, so we use signature for uniqueness
-                    var signature = $"{finalName}({method.Parameters.Count})";
+                    var signature = $"{finalName}({method.Parameters.Length})";
 
                     if (!scopeSet.Add(signature))
                     {

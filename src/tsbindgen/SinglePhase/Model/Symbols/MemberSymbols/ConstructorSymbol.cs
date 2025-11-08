@@ -1,11 +1,13 @@
+using System.Collections.Immutable;
 using tsbindgen.Core.Renaming;
 
 namespace tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
 
 /// <summary>
 /// Represents a constructor.
+/// IMMUTABLE record.
 /// </summary>
-public sealed class ConstructorSymbol
+public sealed record ConstructorSymbol
 {
     /// <summary>
     /// Stable identifier for this constructor.
@@ -15,7 +17,7 @@ public sealed class ConstructorSymbol
     /// <summary>
     /// Constructor parameters.
     /// </summary>
-    public required IReadOnlyList<ParameterSymbol> Parameters { get; init; }
+    public required ImmutableArray<ParameterSymbol> Parameters { get; init; }
 
     /// <summary>
     /// True if this is a static constructor (type initializer).

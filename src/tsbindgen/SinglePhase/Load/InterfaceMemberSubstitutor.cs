@@ -59,7 +59,7 @@ public static class InterfaceMemberSubstitution
 
     private static int ProcessType(BuildContext ctx, TypeSymbol type, Dictionary<string, TypeSymbol> interfaceIndex)
     {
-        if (type.Interfaces.Count == 0)
+        if (type.Interfaces.Length == 0)
             return 0;
 
         int substitutionCount = 0;
@@ -101,10 +101,10 @@ public static class InterfaceMemberSubstitution
     {
         var map = new Dictionary<string, TypeReference>();
 
-        if (interfaceSymbol.GenericParameters.Count != closedInterfaceRef.TypeArguments.Count)
+        if (interfaceSymbol.GenericParameters.Length != closedInterfaceRef.TypeArguments.Count)
             return map; // Mismatch - skip
 
-        for (int i = 0; i < interfaceSymbol.GenericParameters.Count; i++)
+        for (int i = 0; i < interfaceSymbol.GenericParameters.Length; i++)
         {
             var param = interfaceSymbol.GenericParameters[i];
             var arg = closedInterfaceRef.TypeArguments[i];
