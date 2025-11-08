@@ -146,18 +146,34 @@ Use Write tool with:
 
 **Exception:** Using `tee` to capture command output while also saving to file is acceptable (see .tests/ directory usage).
 
-### NEVER USE GIT RESET
+### NEVER USE GIT RESET OR GIT CHECKOUT --
 
-**🚨 CRITICAL RULE: NEVER use git reset commands. 🚨**
+**🚨 CRITICAL RULE: NEVER use git reset or git checkout -- commands. 🚨**
 
 - **NEVER** use `git reset --soft`
 - **NEVER** use `git reset --mixed`
 - **NEVER** use `git reset --hard`
+- **NEVER** use `git checkout -- .` or `git checkout -- <file>`
+- **NEVER** use `git restore` to discard changes
 - **NEVER** attempt to undo commits by resetting
 - **If a commit is wrong**: Create a new commit to fix it or use `git revert`
 - **If on wrong branch**: Create a new branch from current position and work from there
+- **If changes need to be discarded**: Commit them to a temporary branch first, THEN switch branches
 
-Git reset can cause data loss and confusion. Always move forward with new commits.
+Git reset and checkout -- cause PERMANENT DATA LOSS. Always commit before switching contexts.
+
+### NEVER USE GIT STASH
+
+**🚨 CRITICAL RULE: NEVER use git stash commands. 🚨**
+
+- **NEVER** use `git stash`
+- **NEVER** use `git stash pop`
+- **NEVER** use `git stash apply`
+- **NEVER** attempt to save work in stash
+- **If you need to switch branches**: Commit your work first, even if it's a WIP commit
+- **If work is unfinished**: Create a branch like `wip-feature-name` and commit there
+
+Git stash causes confusion, branch conflicts, and data loss every single time. Always use branches and commits instead.
 
 ### WORKING DIRECTORIES
 
