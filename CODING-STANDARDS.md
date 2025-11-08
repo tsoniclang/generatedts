@@ -8,6 +8,7 @@
 - **Language Version**: C# 13 (latest features allowed)
 - **Naming**: Follow .NET naming conventions
 - **Null Safety**: Use nullable reference types (`#nullable enable`)
+- **Architecture**: Functional programming style - static classes with pure functions only
 
 ### Naming Conventions
 
@@ -32,23 +33,120 @@ public void MapType(Type type)
 private const int MaxTypeDepth = 10;
 ```
 
+### Functional Programming Style
+
+**CRITICAL**: This codebase uses a **strict functional programming approach**. All implementation classes must be static with pure functions.
+
+#### Class Structure Requirements
+
+```csharp
+// ✅ CORRECT - Static class with static methods (functional style)
+public static class TypeScriptEmit
+{
+    public static string Emit(NamespaceModel model)
+    {
+        // Pure function - no instance state
+    }
+
+    private static string ToTypeScriptType(TypeReference typeRef)
+    {
+        // Pure helper function
+    }
+}
+
+// ❌ WRONG - Instance class (object-oriented style)
+public class TypeScriptEmitter
+{
+    private readonly Config _config;  // Instance state - not allowed
+
+    public string Emit(NamespaceModel model)
+    {
+        // Instance method - not allowed
+    }
+}
+```
+
+#### File and Class Naming
+
+**File names must be nouns or noun phrases, NEVER agent/doer patterns with "-er" or "-or" suffix.**
+
+```csharp
+// ✅ CORRECT naming
+TypeScriptEmit.cs      // Noun phrase describing the module
+MetadataEmit.cs        // Noun phrase
+Reflect.cs             // Verb used as noun (reflection operations)
+NameTransformation.cs  // Noun phrase
+DiagnosticsSummary.cs  // Noun phrase
+
+// ❌ WRONG naming - avoid "-er" suffix (implies agent/doer)
+TypeScriptEmitter.cs   // Agent pattern - not allowed
+MetadataGenerator.cs   // Agent pattern - not allowed
+TypeMapper.cs          // Agent pattern - not allowed
+AssemblyProcessor.cs   // Agent pattern - not allowed
+```
+
+**Rationale**:
+- "-er" suffix implies an agent that performs actions (OOP thinking)
+- Functional style focuses on operations/transformations, not agents
+- File name = namespace of operations, not a class that does operations
+- Think "emit TypeScript" not "an emitter that emits TypeScript"
+
+#### Data Classes (Models/Records)
+
+Data-only classes (records, models, configs) can be non-static but must be **immutable**:
+
+```csharp
+// ✅ CORRECT - Immutable data class
+public sealed record TypeModel(
+    string ClrName,
+    string TsAlias,
+    TypeKind Kind,
+    IReadOnlyList<MethodModel> Methods);
+
+// ✅ CORRECT - Immutable config class
+public sealed class GeneratorConfig
+{
+    public required string OutputDirectory { get; init; }
+    public required string[] Namespaces { get; init; }
+}
+
+// ❌ WRONG - Mutable data class
+public class Config
+{
+    public string OutputDirectory { get; set; }  // Mutable - not allowed
+    private List<string> _cache = new();         // Mutable state - not allowed
+}
+```
+
 ### File Organization
 
 Each file should contain:
 1. Using statements (sorted alphabetically)
 2. Single namespace declaration
-3. Single class/interface/enum
+3. Single static class with pure functions (for logic)
+   OR single record/data class (for models)
 
 ```csharp
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace GenerateDts;
+namespace tsbindgen.Render.Output;
 
-public sealed class TypeMapper
+/// <summary>
+/// Emits TypeScript declaration files (.d.ts) from NamespaceModel.
+/// </summary>
+public static class TypeScriptEmit
 {
-    // Implementation
+    public static string Emit(NamespaceModel model)
+    {
+        // Pure function implementation
+    }
+
+    private static string FormatType(TypeReference type)
+    {
+        // Pure helper function
+    }
 }
 ```
 

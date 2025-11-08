@@ -1,6 +1,6 @@
 using System.Reflection;
 
-namespace GenerateDts;
+namespace tsbindgen;
 
 public sealed class AssemblyProcessor
 {

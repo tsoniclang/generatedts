@@ -1,4 +1,4 @@
-namespace GenerateDts.Config;
+namespace tsbindgen.Config;
 
 /// <summary>
 /// Defines the naming convention to apply when transforming CLR identifiers to TypeScript.
