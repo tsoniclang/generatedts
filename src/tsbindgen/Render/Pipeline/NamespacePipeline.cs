@@ -1,7 +1,6 @@
 using System.Text.Json;
 using tsbindgen.Config;
 using tsbindgen.Render.Analysis;
-using tsbindgen.Render;
 using tsbindgen.Render.Output;
 using tsbindgen.Render.Transform;
 using tsbindgen.Snapshot;
@@ -34,9 +33,6 @@ public static class NamespacePipeline
             var model = ModelTransform.Build(bundle, config);
 
             // Apply analysis passes (per-namespace, before cross-namespace passes)
-            model = CovarianceAdjustments.Apply(model);
-            model = OverloadAdjustments.Apply(model);
-            model = ExplicitInterfaceReview.Apply(model);
             model = DiagnosticsSummary.Apply(model);
 
             models[clrName] = model;
