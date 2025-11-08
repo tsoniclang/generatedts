@@ -45,11 +45,20 @@ public static class PhaseGate
 
         if (validationContext.ErrorCount > 0)
         {
+            // Build sample diagnostics message for error output
+            var sample = validationContext.Diagnostics.Take(20).ToList();
+            var sampleText = string.Join("\n", sample.Select(d => $"  {d}"));
+
+            if (validationContext.Diagnostics.Count > 20)
+            {
+                sampleText += $"\n  ... and {validationContext.Diagnostics.Count - 20} more diagnostics";
+            }
+
             ctx.Diagnostics.Error(Core.Diagnostics.DiagnosticCodes.ValidationFailed,
-                $"PhaseGate validation failed with {validationContext.ErrorCount} errors");
+                $"PhaseGate validation failed with {validationContext.ErrorCount} errors\n\nSample diagnostics (first 20):\n{sampleText}");
         }
 
-        // Record diagnostics
+        // Record all diagnostics for later analysis
         foreach (var diagnostic in validationContext.Diagnostics)
         {
             ctx.Log($"PhaseGate: {diagnostic}");
