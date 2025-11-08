@@ -58,6 +58,11 @@ public static class PolicyDefaults
         {
             UseNamespaceDirectories = true,
             AlwaysAliasImports = false
+        },
+
+        StaticSide = new StaticSidePolicy
+        {
+            Action = StaticSideAction.Analyze
         }
     };
 }

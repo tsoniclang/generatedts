@@ -14,6 +14,7 @@ public sealed record GenerationPolicy
     public required DiagnosticPolicy Diagnostics { get; init; }
     public required RenamingPolicy Renaming { get; init; }
     public required ModulesPolicy Modules { get; init; }
+    public required StaticSidePolicy StaticSide { get; init; }
 }
 
 public sealed record InterfacePolicy
@@ -243,4 +244,34 @@ public sealed record ModulesPolicy
     /// If false, use bare imports when safe.
     /// </summary>
     public required bool AlwaysAliasImports { get; init; }
+}
+
+public sealed record StaticSidePolicy
+{
+    /// <summary>
+    /// Action to take when static-side inheritance issues are detected.
+    /// Default: Analyze (just emit diagnostics, no renames).
+    /// </summary>
+    public required StaticSideAction Action { get; init; }
+}
+
+public enum StaticSideAction
+{
+    /// <summary>
+    /// Analyze and emit diagnostics only (default).
+    /// No behavior change - just warns about potential TS2417 errors.
+    /// </summary>
+    Analyze,
+
+    /// <summary>
+    /// Automatically rename conflicting static members.
+    /// Uses Renamer to add suffixes to derived static members that conflict with base.
+    /// Bindings track the renames for runtime correlation.
+    /// </summary>
+    AutoRename,
+
+    /// <summary>
+    /// Fail build when static-side conflicts are detected.
+    /// </summary>
+    Error
 }
