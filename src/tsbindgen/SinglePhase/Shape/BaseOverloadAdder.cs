@@ -54,7 +54,8 @@ public static class BaseOverloadAdder
         var addedMethods = new List<MethodSymbol>();
 
         // For each base method name, check if derived has all the same overloads
-        foreach (var (methodName, baseMethods) in baseMethodsByName)
+        // Sort by method name for deterministic iteration
+        foreach (var (methodName, baseMethods) in baseMethodsByName.OrderBy(kvp => kvp.Key))
         {
             if (!derivedMethodsByName.TryGetValue(methodName, out var derivedMethods))
             {

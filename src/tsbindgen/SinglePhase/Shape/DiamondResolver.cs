@@ -55,7 +55,8 @@ public static class DiamondResolver
 
         int resolved = 0;
 
-        foreach (var group in methodGroups)
+        // Sort by method name for deterministic iteration
+        foreach (var group in methodGroups.OrderBy(g => g.Key))
         {
             // Check if these are true diamond conflicts (same name, different signatures from different paths)
             var methods = group.ToList();
@@ -139,7 +140,8 @@ public static class DiamondResolver
                 .Where(g => g.Count() > 1)
                 .ToList();
 
-            foreach (var group in methodGroups)
+            // Sort by method name for deterministic iteration
+            foreach (var group in methodGroups.OrderBy(g => g.Key))
             {
                 var methods = group.ToList();
 

@@ -35,7 +35,8 @@ public sealed class ReflectionReader
         var namespaceGroups = new Dictionary<string, List<TypeSymbol>>();
         var sourceAssemblies = new HashSet<string>();
 
-        foreach (var assembly in assemblies)
+        // Sort assemblies by name for deterministic iteration
+        foreach (var assembly in assemblies.OrderBy(a => a.GetName().FullName))
         {
             sourceAssemblies.Add(assembly.Location);
             _ctx.Log($"Reading types from {assembly.GetName().Name}...");
@@ -68,6 +69,8 @@ public sealed class ReflectionReader
 
             var contributingAssemblies = types
                 .Select(t => t.StableId.AssemblyName)
+                .Distinct()
+                .OrderBy(name => name)
                 .ToHashSet();
 
             namespaces.Add(new NamespaceSymbol

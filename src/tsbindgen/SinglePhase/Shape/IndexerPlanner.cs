@@ -45,12 +45,12 @@ public static class IndexerPlanner
         if (indexers.Count == 0)
             return 0;
 
-        // Group indexers by signature pattern
+        // Group indexers by signature pattern and sort for deterministic iteration
         var indexerGroups = indexers.GroupBy(idx =>
         {
             var paramTypes = string.Join(",", idx.IndexParameters.Select(p => GetTypeFullName(p.Type)));
             return paramTypes;
-        }).ToList();
+        }).OrderBy(g => g.Key).ToList();
 
         var policy = ctx.Policy.Indexers;
 

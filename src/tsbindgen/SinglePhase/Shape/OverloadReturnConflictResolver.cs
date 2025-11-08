@@ -34,10 +34,11 @@ public static class OverloadReturnConflictResolver
 
     private static int ResolveForType(BuildContext ctx, TypeSymbol type)
     {
-        // Group methods by signature excluding return type
+        // Group methods by signature excluding return type, sorted for deterministic iteration
         var methodGroups = type.Members.Methods
             .GroupBy(m => GetSignatureWithoutReturn(ctx, m))
             .Where(g => g.Count() > 1)
+            .OrderBy(g => g.Key)
             .ToList();
 
         int resolved = 0;
@@ -71,11 +72,12 @@ public static class OverloadReturnConflictResolver
             resolved++;
         }
 
-        // Do the same for properties (indexers can have return-type conflicts)
+        // Do the same for properties (indexers can have return-type conflicts), sorted for deterministic iteration
         var propertyGroups = type.Members.Properties
             .Where(p => p.IsIndexer)
             .GroupBy(p => GetPropertySignatureWithoutReturn(ctx, p))
             .Where(g => g.Count() > 1)
+            .OrderBy(g => g.Key)
             .ToList();
 
         foreach (var group in propertyGroups)
