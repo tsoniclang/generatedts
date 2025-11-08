@@ -171,9 +171,24 @@ Git reset and checkout -- cause PERMANENT DATA LOSS. Always commit before switch
 - **NEVER** use `git stash apply`
 - **NEVER** attempt to save work in stash
 - **If you need to switch branches**: Commit your work first, even if it's a WIP commit
-- **If work is unfinished**: Create a branch like `wip-feature-name` and commit there
+- **If work is unfinished**: Create a timestamped branch and commit there
 
-Git stash causes confusion, branch conflicts, and data loss every single time. Always use branches and commits instead.
+**Correct Workflow** (instead of stash):
+```bash
+# Create timestamped branch for current work
+git checkout -b wip-feature-name-$(date +%Y%m%d-%H%M%S)
+git add -A
+git commit -m "wip: Description of current work"
+
+# Now switch to other branch safely
+git checkout other-branch
+# ... do other work ...
+
+# Return to your WIP branch
+git checkout wip-feature-name-20251108-084530
+```
+
+Git stash causes confusion, branch conflicts, and data loss every single time. Always use timestamped branches and commits instead.
 
 ### WORKING DIRECTORIES
 
