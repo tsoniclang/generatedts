@@ -115,9 +115,19 @@ public static class OverloadReturnConflictResolver
 
     private static string GetPropertySignatureWithoutReturn(BuildContext ctx, PropertySymbol property)
     {
-        // Signature: "this[param1Type,param2Type,...]"
+        // Signature: "this[param1Type,param2Type,...]|accessor=get/set/both/none"
+        // Accessor kind is important - getters and setters should not conflict with each other
         var paramTypes = property.IndexParameters.Select(p => GetTypeFullName(p.Type)).ToList();
-        return $"this[{string.Join(",", paramTypes)}]";
+
+        var accessor = (property.HasGetter, property.HasSetter) switch
+        {
+            (true, true) => "both",
+            (true, false) => "get",
+            (false, true) => "set",
+            _ => "none"
+        };
+
+        return $"this[{string.Join(",", paramTypes)}]|accessor={accessor}";
     }
 
     private static MethodSymbol SelectRepresentative(List<MethodSymbol> methods)
