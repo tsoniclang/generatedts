@@ -1,12 +1,37 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code when working with the tsbindgen project.
+This file provides guidance to Claude Code (claude.ai/code) when working with the tsbindgen project.
 
 ## Critical Guidelines
 
+### NEVER ACT WITHOUT EXPLICIT USER APPROVAL
+
+**YOU MUST ALWAYS ASK FOR PERMISSION BEFORE:**
+
+- Making architectural decisions or changes
+- Implementing new features or functionality
+- Modifying type mapping rules or generation logic
+- Changing metadata structure or output format
+- Adding new dependencies or packages
+- Modifying reflection or MetadataLoadContext usage patterns
+
+**ONLY make changes AFTER the user explicitly approves.** When you identify issues or potential improvements, explain them clearly and wait for the user's decision. Do NOT assume what the user wants or make "helpful" changes without permission.
+
+### ANSWER QUESTIONS AND STOP
+
+**CRITICAL RULE**: If the user asks you a question - whether as part of a larger text or just the question itself - you MUST:
+
+1. **Answer ONLY that question**
+2. **STOP your response completely**
+3. **DO NOT continue with any other tasks or implementation**
+4. **DO NOT proceed with previous tasks**
+5. **Wait for the user's next instruction**
+
+This applies to ANY question, even if it seems like part of a larger task or discussion.
+
 ### FUNCTIONAL PROGRAMMING STYLE - MANDATORY
 
-**🚨 CRITICAL ARCHITECTURAL RULE: This codebase uses strict functional programming. 🚨**
+**MANDATORY**: This codebase follows strict functional programming principles:
 
 #### All Implementation Code Must Be:
 
@@ -24,14 +49,12 @@ This file provides guidance to Claude Code when working with the tsbindgen proje
 - MetadataEmit.cs        (noun phrase - "the metadata emission")
 - Reflect.cs             (verb as noun - "reflection operations")
 - NameTransformation.cs  (noun phrase - "name transformation")
-- ModelBuild.cs          (noun phrase - "model building")
 
 ❌ WRONG naming (OOP agent/doer pattern):
 - TypeScriptEmitter.cs   (agent that emits)
 - MetadataGenerator.cs   (agent that generates)
 - TypeMapper.cs          (agent that maps)
 - AssemblyProcessor.cs   (agent that processes)
-- ModelBuilder.cs        (agent that builds) ← FIX THIS
 ```
 
 #### Code Structure Examples
@@ -62,11 +85,12 @@ public class TypeScriptEmitter
 ```
 
 **Immutable Data Classes (Records/Models)**:
+
 ```csharp
 // ✅ CORRECT - Immutable record
 public sealed record TypeModel(
     string ClrName,
-    string TsAlias,
+    string TsEmitName,
     IReadOnlyList<MethodModel> Methods);
 
 // ❌ WRONG - Mutable class
@@ -76,38 +100,7 @@ public class TypeModel
 }
 ```
 
-**Rationale**:
-- Functional style = operations/transformations, not agents that perform actions
-- Think "emit TypeScript" not "an emitter that emits"
-- File name describes WHAT the module does, not WHO does it
-- Eliminates mutable state bugs, makes code easier to reason about
-
 **See CODING-STANDARDS.md for complete functional programming guidelines.**
-
-### NEVER ACT WITHOUT EXPLICIT USER APPROVAL
-
-**YOU MUST ALWAYS ASK FOR PERMISSION BEFORE:**
-
-- Making architectural decisions or changes
-- Implementing new features or functionality
-- Modifying type mapping rules or generation logic
-- Changing metadata structure or output format
-- Adding new dependencies or packages
-- Modifying reflection or MetadataLoadContext usage patterns
-
-**ONLY make changes AFTER the user explicitly approves.** When you identify issues or potential improvements, explain them clearly and wait for the user's decision. Do NOT assume what the user wants or make "helpful" changes without permission.
-
-### ANSWER QUESTIONS AND STOP
-
-**CRITICAL RULE**: If the user asks you a question - whether as part of a larger text or just the question itself - you MUST:
-
-1. **Answer ONLY that question**
-2. **STOP your response completely**
-3. **DO NOT continue with any other tasks or implementation**
-4. **DO NOT proceed with previous tasks**
-5. **Wait for the user's next instruction**
-
-This applies to ANY question, even if it seems like part of a larger task or discussion.
 
 ### NEVER USE AUTOMATED SCRIPTS FOR FIXES
 
@@ -121,74 +114,156 @@ This applies to ANY question, even if it seems like part of a larger task or dis
 
 Automated scripts break syntax in unpredictable ways and destroy codebases.
 
-### ALWAYS USE WRITE TOOL FOR FILE CREATION
+### GIT SAFETY RULES
 
-**🚨 CRITICAL RULE: Use the Write tool, NOT cat/heredocs for creating files. 🚨**
+#### NEVER DISCARD UNCOMMITTED WORK
 
-- **ALWAYS** use the `Write` tool to create new files
-- **NEVER** use `cat > file << 'EOF'` or `cat << 'EOF' | tee file`
-- **NEVER** use bash heredocs for file creation
-- The Write tool is cleaner, safer, and designed for this purpose
+**🚨 CRITICAL RULE: NEVER use commands that permanently delete uncommitted changes. 🚨**
 
-**Bad Example:**
-```bash
-cat > .analysis/report.md << 'EOF'
-# Report content here
-EOF
-```
+These commands cause **PERMANENT DATA LOSS** that cannot be recovered:
 
-**Good Example:**
-```
-Use Write tool with:
-- file_path: "/absolute/path/to/.analysis/report.md"
-- content: "# Report content here"
-```
-
-**Exception:** Using `tee` to capture command output while also saving to file is acceptable (see .tests/ directory usage).
-
-### NEVER USE GIT RESET OR GIT CHECKOUT --
-
-**🚨 CRITICAL RULE: NEVER use git reset or git checkout -- commands. 🚨**
-
+- **NEVER** use `git reset --hard`
 - **NEVER** use `git reset --soft`
 - **NEVER** use `git reset --mixed`
-- **NEVER** use `git reset --hard`
-- **NEVER** use `git checkout -- .` or `git checkout -- <file>`
+- **NEVER** use `git reset HEAD`
+- **NEVER** use `git checkout -- .`
+- **NEVER** use `git checkout -- <file>`
 - **NEVER** use `git restore` to discard changes
-- **NEVER** attempt to undo commits by resetting
-- **If a commit is wrong**: Create a new commit to fix it or use `git revert`
-- **If on wrong branch**: Create a new branch from current position and work from there
-- **If changes need to be discarded**: Commit them to a temporary branch first, THEN switch branches
+- **NEVER** use `git clean -fd`
 
-Git reset and checkout -- cause PERMANENT DATA LOSS. Always commit before switching contexts.
+**Why this matters for AI sessions:**
+- Uncommitted work is invisible to future AI sessions
+- Once discarded, changes cannot be recovered
+- AI cannot help fix problems it cannot see
 
-### NEVER USE GIT STASH
+**What to do instead:**
 
-**🚨 CRITICAL RULE: NEVER use git stash commands. 🚨**
+| Situation | ❌ WRONG | ✅ CORRECT |
+|-----------|---------|-----------|
+| Need to switch branches | `git checkout main` (loses changes) | Commit first, then switch |
+| Made mistakes | `git reset --hard` | Commit to temp branch, start fresh |
+| Want clean slate | `git restore .` | Commit current state, then revert |
+| On wrong branch | `git checkout --` | Commit here, then cherry-pick |
 
-- **NEVER** use `git stash`
-- **NEVER** use `git stash pop`
-- **NEVER** use `git stash apply`
-- **NEVER** attempt to save work in stash
-- **If you need to switch branches**: Commit your work first, even if it's a WIP commit
-- **If work is unfinished**: Create a timestamped branch and commit there
+**Safe workflow:**
 
-**Correct Workflow** (instead of stash):
 ```bash
-# Create timestamped branch for current work
-git checkout -b wip-feature-name-$(date +%Y%m%d-%H%M%S)
+# Always commit before switching context
 git add -A
-git commit -m "wip: Description of current work"
-
-# Now switch to other branch safely
+git commit -m "wip: current progress on feature X"
 git checkout other-branch
-# ... do other work ...
 
-# Return to your WIP branch
-git checkout wip-feature-name-20251108-084530
+# If commit was wrong, fix with new commit or revert
+git revert HEAD  # Creates new commit that undoes last commit
+# OR
+git commit -m "fix: correct the previous commit"
 ```
 
-Git stash causes confusion, branch conflicts, and data loss every single time. Always use timestamped branches and commits instead.
+#### NEVER USE GIT STASH
+
+**🚨 CRITICAL RULE: NEVER use git stash - it hides work and causes data loss. 🚨**
+
+- **NEVER** use `git stash`
+- **NEVER** use `git stash push`
+- **NEVER** use `git stash pop`
+- **NEVER** use `git stash apply`
+- **NEVER** use `git stash drop`
+
+**Why stash is dangerous:**
+- Stashed changes are invisible to AI sessions
+- Easy to forget what's stashed
+- Stash can be accidentally dropped
+- Causes merge conflicts when applied
+- No clear history of when/why stashed
+
+**What to do instead - Use WIP branches:**
+
+```bash
+# Instead of stash, create a timestamped WIP branch
+git checkout -b wip/feature-name-$(date +%Y%m%d-%H%M%S)
+git add -A
+git commit -m "wip: in-progress work on feature X"
+git push -u origin wip/feature-name-$(date +%Y%m%d-%H%M%S)
+
+# Now switch to other work safely
+git checkout main
+# ... do other work ...
+
+# Return to your WIP later
+git checkout wip/feature-name-20251108-084530
+# Continue working...
+
+# When done, squash WIP commits or rebase
+git rebase -i main
+```
+
+**Benefits of WIP branches over stash:**
+- ✅ Work is visible in git history
+- ✅ Work is backed up on remote
+- ✅ AI can see the work in future sessions
+- ✅ Can have multiple WIP branches
+- ✅ Clear timestamps show when work was done
+- ✅ Can share WIP with others if needed
+
+#### Safe Branch Switching
+
+**ALWAYS commit before switching branches:**
+
+```bash
+# Check current status
+git status
+
+# If there are changes, commit them first
+git add -A
+git commit -m "wip: current state before switching"
+
+# NOW safe to switch
+git checkout other-branch
+```
+
+**If you accidentally started work on wrong branch:**
+
+```bash
+# DON'T use git reset or git checkout --
+# Instead, commit the work here
+git add -A
+git commit -m "wip: work started on wrong branch"
+
+# Create correct branch from current state
+git checkout -b correct-branch-name
+
+# Previous branch will still have the commit
+# You can cherry-pick it or just continue on new branch
+```
+
+#### Recovery from Mistakes
+
+If you realize you made a mistake AFTER committing:
+
+```bash
+# ✅ CORRECT: Create a fix commit
+git commit -m "fix: correct the mistake from previous commit"
+
+# ✅ CORRECT: Revert the bad commit
+git revert HEAD
+
+# ❌ WRONG: Try to undo with reset
+git reset --hard HEAD~1  # NEVER DO THIS - loses history
+```
+
+**If you accidentally committed to main:**
+
+```bash
+# DON'T panic or use git reset
+# Just create a feature branch from current position
+git checkout -b feat/your-feature-name
+
+# Push the branch
+git push -u origin feat/your-feature-name
+
+# When merged, it will fast-forward (no conflicts)
+# Main will catch up to the same commit
+```
 
 ### WORKING DIRECTORIES
 
@@ -199,6 +274,7 @@ Git stash causes confusion, branch conflicts, and data loss every single time. A
 **Purpose:** Save validation run output for analysis without re-running
 
 **Usage:**
+
 ```bash
 # Create directory (gitignored)
 mkdir -p .tests
@@ -206,13 +282,13 @@ mkdir -p .tests
 # Run validation with tee - shows output AND saves to file
 node scripts/validate.js | tee .tests/validation-$(date +%s).txt
 
-# Run TypeScript compiler directly with tee
-npx tsc --project .tests/validation | tee .tests/tsc-$(date +%s).txt
+# Run completeness verification
+node scripts/verify-completeness.js | tee .tests/completeness-$(date +%s).txt
 
 # Analyze saved output later without re-running:
 grep "TS2416" .tests/validation-*.txt
 tail -50 .tests/validation-*.txt
-grep -A10 "System.Collections" .tests/tsc-*.txt
+grep "types lost" .tests/completeness-*.txt
 ```
 
 **Benefits:**
@@ -228,6 +304,7 @@ grep -A10 "System.Collections" .tests/tsc-*.txt
 **Purpose:** Keep analysis artifacts separate from source code
 
 **Usage:**
+
 ```bash
 # Create directory (gitignored)
 mkdir -p .analysis
@@ -248,7 +325,34 @@ mkdir -p .analysis
 - Safe place for comprehensive documentation
 - Gitignored - no risk of committing debug artifacts
 
-**Note:** All directories (`.tests/`, `.analysis/`) should be added to `.gitignore`
+#### .todos/ Directory (Persistent Task Tracking)
+
+**Purpose:** Track multi-step tasks across conversation sessions
+
+**Usage:**
+
+```bash
+# Create task file: YYYY-MM-DD-task-name.md
+# Example: 2025-01-13-completeness-verification.md
+
+# Task file must include:
+# - Task overview and objectives
+# - Current status (completed work)
+# - Detailed remaining work list
+# - Important decisions made
+# - Code locations affected
+# - Testing requirements
+# - Special considerations
+
+# Mark complete: YYYY-MM-DD-task-name-COMPLETED.md
+```
+
+**Benefits:**
+- Resume complex tasks across sessions with full context
+- No loss of progress or decisions
+- Gitignored for persistence
+
+**Note:** All directories (`.tests/`, `.analysis/`, `.todos/`) should be added to `.gitignore`
 
 ## Session Startup
 
@@ -279,6 +383,7 @@ Enable TypeScript code in the Tsonic compiler to reference .NET BCL types with f
 - Handles .NET 10 BCL assemblies including System.Private.CoreLib
 - Uses MetadataLoadContext for assemblies that can't be loaded normally
 - Validates output with TypeScript compiler (tsc)
+- Verifies completeness to ensure zero data loss through pipeline
 
 ## Architecture
 
@@ -299,39 +404,49 @@ The generator uses a strict four-phase pipeline:
 - Input: Multiple `AssemblySnapshot` files
 - Process: Merge types from multiple assemblies by namespace
 - Output: `NamespaceBundle` - aggregated CLR data (still no TypeScript concepts)
-- Files: `namespaces/*.snapshot.json` (optional debug output)
+- Files: `namespaces/*.snapshot.json` (debug output)
 - Code: `src/tsbindgen/Snapshot/Aggregate.cs`
 
-**Phase 3: Transform** (CLR→TypeScript bridge - creates TsAlias)
+**Phase 3: Transform** (CLR→TypeScript bridge - creates TsEmitName)
 - Input: `NamespaceBundle` (CLR)
 - Process:
   - `ModelTransform.Build()` - Apply name transformations via `NameTransformation.Apply()`
   - Analysis passes (covariance, diamond inheritance, explicit interfaces, etc.)
-- Output: `NamespaceModel` (in-memory, has both CLR names and TS aliases)
+- Output: `NamespaceModel` (in-memory, has both CLR names and TS names)
 - Code: `src/tsbindgen/Render/Transform/ModelTransform.cs`
-- **This is where `TsAlias` is created based on CLI options**
+- **This is where `TsEmitName` is created based on CLI options**
 
 **Phase 4: Emit** (TypeScript domain - generates files)
-- Input: `NamespaceModel` (with TsAlias already set)
+- Input: `NamespaceModel` (with TsEmitName already set)
 - Process:
   - `TypeScriptEmit` - Generate `.d.ts` declarations
   - `MetadataEmit` - Generate `.metadata.json`
   - `BindingEmit` - Generate `.bindings.json` (CLR→TS name mappings)
-  - `ModuleStubEmit` - Generate `.js` module stubs
+  - `TypeScriptTypeListEmit` - Generate `typelist.json` (completeness verification)
 - Output: String content for files
 - Write to disk:
   - `index.d.ts` - TypeScript declarations
   - `metadata.json` - CLR-specific info for Tsonic compiler
   - `bindings.json` - CLR name → TS name mappings
-  - `index.js` - Module stub for imports
-  - `snapshot.json` - Post-analysis debug snapshot
+  - `typelist.json` - What was actually emitted (for verification)
+  - `snapshot.json` - Post-transform snapshot (for verification)
 - Code: `src/tsbindgen/Render/Output/*.cs`
 
 **CRITICAL**:
-- `TsAlias` is created in **Phase 3** (Transform) using `NameTransformation.Apply()`
+- `TsEmitName` is created in **Phase 3** (Transform) using `NameTransformation.Apply()`
 - Phases 1-2 use **only CLR names** (no TypeScript concepts)
-- Phase 3 creates **both CLR names and TsAlias** in models
-- Phase 4 uses the **TsAlias** from models (no further name transformation)
+- Phase 3 creates **both CLR names and TsEmitName** in models
+- Phase 4 uses the **TsEmitName** from models (no further name transformation)
+
+### Completeness Verification
+
+The pipeline ensures **100% data integrity** through verification:
+
+1. **snapshot.json** - What was reflected/transformed (Phase 2/3 output)
+2. **typelist.json** - What was actually emitted to .d.ts (Phase 4 output)
+3. **verify-completeness.js** - Compares the two to ensure zero data loss
+
+Both files use the same flat structure with `tsEmitName` as the key (e.g., `"Delegate$InvocationListEnumerator_1"` for nested types).
 
 ### Output Files Per Namespace
 
@@ -354,43 +469,10 @@ Each namespace generates multiple companion files:
    - Tracks member name transformations
    - Used for runtime binding
 
-### Code Organization
-
-```
-src/tsbindgen/
-├── Cli/
-│   ├── Program.cs                    # CLI entry point
-│   └── GenerateCommand.cs            # Pipeline orchestration (Phases 1-4)
-├── Reflection/
-│   └── Reflect.cs                    # Phase 1: Assembly reflection
-├── Snapshot/
-│   ├── SnapshotModels.cs             # Phase 1-2 data structures (CLR only, no TsAlias)
-│   ├── SnapshotIO.cs                 # Snapshot persistence
-│   └── Aggregate.cs                  # Phase 2: Namespace aggregation
-├── Render/
-│   ├── Pipeline/
-│   │   └── NamespacePipeline.cs      # Phase 3-4 orchestration
-│   ├── Transform/
-│   │   └── ModelTransform.cs         # Phase 3: Transform (creates TsAlias)
-│   ├── Analysis/                     # Phase 3: Analysis passes
-│   ├── Output/
-│   │   ├── TypeScriptEmit.cs         # Phase 4: .d.ts emission
-│   │   ├── MetadataEmit.cs           # Phase 4: metadata.json emission
-│   │   └── BindingEmit.cs            # Phase 4: bindings.json emission
-│   ├── MemberModels.cs               # Phase 3 data structures (has TsAlias)
-│   ├── TypeModel.cs                  # Phase 3 type models (has TsAlias)
-│   └── NamespaceModel.cs             # Phase 3 namespace model (has TsAlias)
-└── Config/
-    └── NameTransformation.cs         # Name transformation logic (used in Phase 3)
-
-scripts/
-└── validate.js                       # Full BCL validation script
-
-.analysis/                            # Generated analysis reports
-├── session-status-report-*.md
-├── remaining-errors-comprehensive.md
-└── boolean-fix-impact.md
-```
+4. **Type List** (`typelist.json`)
+   - List of all types and members actually emitted
+   - Used for completeness verification
+   - Flat structure matching snapshot.json
 
 ## Critical Implementation Patterns
 
@@ -428,27 +510,17 @@ if (type.FullName == "System.Boolean") return "boolean";
 
 ### Known .NET/TypeScript Impedance Mismatches
 
-1. **Property Covariance** (625 TS2416 errors, 48% of total)
+1. **Property Covariance** (~12 TS2417 errors)
    - C# allows properties to return more specific types than interfaces require
    - TypeScript doesn't support property overloads (unlike methods)
    - Status: Documented limitation, safe to ignore or use type assertions
 
-2. **Array Interface Implementation** (392 TS2420 errors, 30%)
-   - We map `IEnumerable<T>` → `ReadonlyArray<T>` for ergonomics
-   - .NET classes don't implement array methods (length, concat, etc.)
-   - Status: Design decision, use `.ToArray()` when array methods needed
-
-3. **Type-Forwarding Assemblies** (138 of 233 TS2694 errors)
-   - Many .NET assemblies in shared runtime forward types to System.Private.*
-   - These generate empty .d.ts files (only branded numeric types)
-   - Status: Architectural limitation, low priority
-
-4. **Generic Static Members** (~44 errors)
+2. **Generic Static Members**
    - C# allows `static T DefaultValue` in `class List<T>`
    - TypeScript doesn't support this
    - Status: Intentionally skipped, tracked in metadata
 
-5. **Indexers** (~90 instances)
+3. **Indexers** (~241 instances)
    - C# indexers with different parameter types cause duplicate identifiers
    - Status: Intentionally skipped from declarations, tracked in metadata
 
@@ -491,13 +563,6 @@ class List_1<T> {
 // TypeScript: int | null
 ```
 
-### Namespaces Preserved
-
-```csharp
-// C#: System.Collections.Generic.List<T>
-// TypeScript: System.Collections.Generic.List_1<T>
-```
-
 ### Generic Arity in Names
 
 ```typescript
@@ -515,23 +580,35 @@ node scripts/validate.js
 
 # With output capture for later analysis
 node scripts/validate.js | tee .tests/validation-$(date +%s).txt
+
+# Run completeness verification
+node scripts/verify-completeness.js | tee .tests/completeness-$(date +%s).txt
 ```
 
 ### Validation Steps
 
 1. Cleans `.tests/validation/` directory
-2. Generates all 67 BCL assemblies
+2. Generates all 130 BCL namespaces (4,047 types)
 3. Creates `index.d.ts` with triple-slash references
 4. Creates `tsconfig.json`
 5. Runs TypeScript compiler (`tsc`)
 6. Reports error breakdown
+
+### Completeness Verification Steps
+
+1. Loads `snapshot.json` from each namespace (what was reflected/transformed)
+2. Loads `typelist.json` from each namespace (what was emitted)
+3. Compares types and members using `tsEmitName` as key
+4. Filters intentional omissions (indexers, etc.)
+5. Reports any data loss
 
 ### Success Criteria
 
 - ✅ **Zero syntax errors (TS1xxx)** - All output is valid TypeScript
 - ✅ **All assemblies generate** - No generation failures
 - ✅ **All metadata files present** - Each .d.ts has matching .metadata.json
-- ⚠️ **Semantic errors acceptable** - TS2xxx errors are expected (cross-assembly refs, known limitations)
+- ✅ **100% type coverage** - All reflected types appear in typelist
+- ⚠️ **Semantic errors acceptable** - TS2xxx errors are expected (known limitations)
 
 ### Error Categories
 
@@ -547,23 +624,17 @@ TS6200 - Duplicate type aliases (expected for branded types)
 
 ```bash
 dotnet run --project src/tsbindgen/tsbindgen.csproj -- \
-  /path/to/Assembly.dll \
+  generate -a /path/to/Assembly.dll \
   --out-dir output/
 ```
 
-### Adding a New BCL Assembly to Validation
-
-1. Edit `scripts/validate.js`
-2. Add assembly name to `BCL_ASSEMBLIES` array
-3. Run validation to verify generation
-4. Update STATUS.md with new assembly count
-
 ### Investigating Type Mapping Issues
 
-1. Generate single assembly: `dotnet run -- path/to/Assembly.dll --out-dir /tmp/test`
-2. Inspect output: `cat /tmp/test/Assembly.d.ts`
-3. Check metadata: `cat /tmp/test/Assembly.metadata.json`
-4. Validate: `npx tsc --noEmit /tmp/test/Assembly.d.ts`
+1. Generate single assembly: `dotnet run -- generate -a path/to/Assembly.dll --out-dir /tmp/test`
+2. Inspect output: `cat /tmp/test/Assembly/index.d.ts`
+3. Check metadata: `cat /tmp/test/Assembly/metadata.json`
+4. Check typelist: `cat /tmp/test/Assembly/typelist.json`
+5. Validate: `npx tsc --noEmit /tmp/test/Assembly/index.d.ts`
 
 ### Analyzing Validation Errors
 
@@ -575,10 +646,10 @@ node scripts/validate.js 2>&1 | tee .tests/run.txt
 grep "error TS" .tests/run.txt | sed 's/.*error \(TS[0-9]*\).*/\1/' | sort | uniq -c | sort -rn
 
 # Find specific error examples
-grep "TS2416" .tests/run.txt | head -20
+grep "TS2417" .tests/run.txt | head -20
 
 # See errors for specific file
-grep "System.Collections.Generic.d.ts" .tests/run.txt
+grep "System.Collections.Generic" .tests/run.txt
 ```
 
 ## Build Commands
@@ -593,6 +664,9 @@ dotnet run --project src/tsbindgen/tsbindgen.csproj -- <args>
 # Validate all BCL assemblies
 node scripts/validate.js
 
+# Verify completeness
+node scripts/verify-completeness.js
+
 # Capture validation output
 node scripts/validate.js | tee .tests/validation-$(date +%s).txt
 ```
@@ -601,10 +675,12 @@ node scripts/validate.js | tee .tests/validation-$(date +%s).txt
 
 ### Branch Strategy
 
-1. **Work on feature branches**: `feature/feature-name` or `fix/bug-name`
+1. **Work on feature branches**: `feat/feature-name` or `fix/bug-name`
 2. **Commit frequently**: Small, focused commits
-3. **Clear commit messages**: Follow format in coding-standards.md
+3. **Clear commit messages**: Follow format below
 4. **Push regularly**: Keep remote in sync
+5. **NEVER commit to main directly**
+6. **Verify branch before commit**: `git branch --show-current`
 
 ### Commit Message Format
 
@@ -613,72 +689,71 @@ node scripts/validate.js | tee .tests/validation-$(date +%s).txt
 
 <body>
 
-<footer>
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 **Types**: feat, fix, docs, refactor, test, chore
 
 **Example**:
+
 ```
 fix: Use name-based type comparisons for MetadataLoadContext compatibility
 
 Changed MapPrimitiveType() to use type.FullName comparisons instead of
 typeof() because MetadataLoadContext types are different instances.
 
-Fixes #123
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
-## Progress Tracking
+### Workflow Summary
 
-### Current Status (as of 2025-11-03)
+**Critical rules (see detailed Git Safety Rules section above):**
+1. ✅ **ALWAYS commit before switching contexts** - Even if work is incomplete
+2. ✅ **NEVER discard uncommitted work** - Use WIP branches instead
+3. ✅ **NEVER use git stash** - Use timestamped WIP branches
+4. ✅ **NEVER use git reset --hard** - Use git revert for fixes
+5. ✅ **Verify branch**: `git branch --show-current` before committing
+6. ✅ **Push WIP branches**: Backup work on remote
+7. ✅ **Use git revert not git reset** - To undo commits
 
-- **55 BCL assemblies** generated
-- **96.1% error reduction** (32,912 → 1,298 errors)
+**Standard workflow:**
+
+```bash
+# 1. Verify you're on correct branch
+git branch --show-current
+
+# 2. Make changes and commit frequently
+git add -A
+git commit -m "feat: descriptive message"
+
+# 3. Push to remote
+git push
+```
+
+## Current Status
+
+### Metrics (as of 2025-11-08)
+
+- **130 BCL namespaces** generated
+- **4,047 types** emitted
 - **Zero syntax errors** (TS1xxx)
-- **Type safety: 9.6/10**
-- **Production ready** for internal use
-- **External use**: Needs user documentation (1-2 days)
+- **12 semantic errors** (TS2417 - property covariance, expected)
+- **100% type coverage** - All reflected types accounted for
+- **241 indexers** intentionally omitted (tracked in metadata)
 
-### Error Distribution (1,298 total)
+### Completeness Verification
 
-```
- 625 TS2416 (48%) - Property/method type variance
- 392 TS2420 (30%) - Interface implementation gaps
- 233 TS2694 (18%) - Missing type references
-  55 TS6200 ( 4%) - Branded types (by design)
-  48 other  (<1%) - Minor edge cases
-```
+✅ **VERIFICATION PASSED - ALL REFLECTED DATA ACCOUNTED FOR**
 
-### Known Limitations
-
-1. **Property Covariance** (625 errors) - TypeScript limitation, use type assertions
-2. **Array Interface Implementation** (300 errors) - Design decision, use `.ToArray()`
-3. **Type-Forwarding Assemblies** (138 errors) - .NET architecture artifact
-4. **Intentional Omissions** - Indexers (~90), generic static members (~44)
-
-See `.analysis/remaining-errors-comprehensive.md` for complete details.
-
-## Recent Major Fixes
-
-### Boolean Mapping Bug Fix (commit dcf59e3) ⭐ CRITICAL
-
-**Impact**: -910 errors (-41.4%)
-
-**Problem**: `typeof(bool)` comparisons fail for MetadataLoadContext types, causing all boolean properties to be typed as `number`.
-
-**Solution**: Changed to name-based comparisons using `type.FullName`.
-
-**Lesson**: Always use name-based type comparisons when working with MetadataLoadContext.
-
-### Type-Forwarding Discovery (commit 6a24dac)
-
-**Finding**: Many .NET assemblies in shared runtime are type-forwarding only (no actual types).
-
-**Impact**: Adding 6 assemblies only reduced TS2694 by 2 errors (instead of expected -120+).
-
-**Root Cause**: Type-forwarding assemblies reference types that live in System.Private.* or ref packs.
-
-**Decision**: Accept current state rather than implement complex dual-path system.
+- Types in snapshots: 4,047
+- Types in typelists: 4,047
+- Members in snapshots: 75,977
+- Members in typelists: 37,863 (ViewOnly and duplicate members filtered)
+- Intentional omissions: 241 indexers
 
 ## When You Get Stuck
 
@@ -694,15 +769,17 @@ If you encounter issues:
 
 - **STATUS.md** - Current project state and metrics
 - **CODING-STANDARDS.md** - C# style guidelines
-- **.analysis/remaining-errors-comprehensive.md** - Complete error catalog
-- **.analysis/session-status-report-*.md** - Recent session work
 - **scripts/validate.js** - BCL assembly validation script
+- **scripts/verify-completeness.js** - Completeness verification script
+- **.analysis/** - Analysis reports and documentation
 
 ## Remember
 
 1. **Type safety first** - Never weaken types without approval
 2. **MetadataLoadContext requires name-based comparisons** - Never use `typeof()`
 3. **Validation is expensive** - Always capture output with `tee`
-4. **Document limitations** - Known issues go in metadata
-5. **Ask before changing** - Get user approval for all decisions
-6. **Semantic errors are expected** - Focus on zero syntax errors
+4. **Functional programming only** - Static classes, pure functions, immutable data
+5. **Commit before switching** - Never discard uncommitted work
+6. **Never use git stash** - Use WIP branches instead
+7. **Ask before changing** - Get user approval for all decisions
+8. **100% data integrity** - Run completeness verification to ensure zero loss
