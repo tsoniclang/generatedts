@@ -31,6 +31,73 @@ public static class TypeScriptReservedWords
     }
 
     /// <summary>
+    /// Result of sanitization operation with metadata.
+    /// </summary>
+    public sealed record SanitizeResult
+    {
+        /// <summary>
+        /// The sanitized identifier, safe for TypeScript emission.
+        /// </summary>
+        public required string Sanitized { get; init; }
+
+        /// <summary>
+        /// Original identifier before sanitization.
+        /// </summary>
+        public required string Original { get; init; }
+
+        /// <summary>
+        /// True if the identifier was modified during sanitization.
+        /// </summary>
+        public required bool WasSanitized { get; init; }
+
+        /// <summary>
+        /// Reason for sanitization (e.g., "ReservedWord").
+        /// Null if no sanitization was needed.
+        /// </summary>
+        public string? Reason { get; init; }
+    }
+
+    /// <summary>
+    /// Sanitize an identifier for TypeScript emission.
+    /// Reserved words get a trailing underscore suffix.
+    /// Returns metadata about the sanitization for diagnostics.
+    /// </summary>
+    public static SanitizeResult Sanitize(string identifier)
+    {
+        if (string.IsNullOrEmpty(identifier))
+        {
+            return new SanitizeResult
+            {
+                Sanitized = identifier ?? string.Empty,
+                Original = identifier ?? string.Empty,
+                WasSanitized = false,
+                Reason = null
+            };
+        }
+
+        // Check if it's a reserved word
+        if (IsReservedWord(identifier))
+        {
+            return new SanitizeResult
+            {
+                Sanitized = identifier + "_",
+                Original = identifier,
+                WasSanitized = true,
+                Reason = "ReservedWord"
+            };
+        }
+
+        // Not a reserved word - no sanitization needed
+        return new SanitizeResult
+        {
+            Sanitized = identifier,
+            Original = identifier,
+            WasSanitized = false,
+            Reason = null
+        };
+    }
+
+    /// <summary>
     /// Sanitize parameter name by appending underscore suffix if it's a reserved word.
     /// Used for method/constructor parameters.
     /// Example: "switch" → "switch_", "type" → "type_"

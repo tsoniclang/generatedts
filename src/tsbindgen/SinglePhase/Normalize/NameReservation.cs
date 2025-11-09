@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Linq;
+using tsbindgen.Core;
 using tsbindgen.Core.Renaming;
 using tsbindgen.SinglePhase.Model;
 using tsbindgen.SinglePhase.Model.Symbols;
@@ -9,9 +10,16 @@ namespace tsbindgen.SinglePhase.Normalize;
 
 /// <summary>
 /// Reserves all TypeScript names through the central Renamer.
-/// Runs after Shape phase, before Plan phase.
-/// Computes proper base names (sanitizes `+` → `_`, `` ` `` → `_`),
-/// reserves through Renamer, and sets TsEmitName for PhaseGate validation.
+/// Runs after Shape phase, before Plan phase (Phase 3.5).
+///
+/// Process:
+/// 1. Applies syntax transforms (`+` → `_`, `` ` `` → `_`, etc.)
+/// 2. Applies reserved word sanitization (adds `_` suffix)
+/// 3. Reserves names through Renamer
+/// 4. Sets TsEmitName on symbols for PhaseGate validation
+///
+/// Skips members that already have rename decisions from earlier passes
+/// (e.g., HiddenMemberPlanner, IndexerPlanner).
 /// </summary>
 public static class NameReservation
 {
@@ -78,7 +86,8 @@ public static class NameReservation
 
     /// <summary>
     /// Compute the requested base name for a type.
-    /// Applies syntax transforms only (nested `+` → `_`, generic arity, etc.)
+    /// Applies syntax transforms (nested `+` → `_`, generic arity, etc.)
+    /// then sanitizes reserved words (adds `_` suffix).
     /// Does NOT apply style/casing - Renamer handles that.
     /// </summary>
     private static string ComputeTypeRequestedBase(string clrName)
@@ -97,7 +106,9 @@ public static class NameReservation
         baseName = baseName.Replace('[', '_');
         baseName = baseName.Replace(']', '_');
 
-        return baseName;
+        // Apply reserved word sanitization
+        var sanitized = TypeScriptReservedWords.Sanitize(baseName);
+        return sanitized.Sanitized;
     }
 
     private static string ComputeMethodBase(MethodSymbol method)
@@ -107,7 +118,7 @@ public static class NameReservation
         // Handle operators (map to policy-defined names)
         if (name.StartsWith("op_"))
         {
-            return name switch
+            var mapped = name switch
             {
                 "op_Equality" => "equals",
                 "op_Inequality" => "notEquals",
@@ -135,6 +146,10 @@ public static class NameReservation
                 "op_LessThanOrEqual" => "lessThanOrEqual",
                 _ => name.Replace("op_", "operator_")
             };
+
+            // Apply reserved word sanitization to operator names
+            var sanitized = TypeScriptReservedWords.Sanitize(mapped);
+            return sanitized.Sanitized;
         }
 
         // Accessors (get_, set_, add_, remove_) and regular methods use CLR name
@@ -144,13 +159,15 @@ public static class NameReservation
     private static string SanitizeMemberName(string name)
     {
         // Remove invalid TS identifier characters
-        var sanitized = name.Replace('<', '_');
-        sanitized = sanitized.Replace('>', '_');
-        sanitized = sanitized.Replace('[', '_');
-        sanitized = sanitized.Replace(']', '_');
-        sanitized = sanitized.Replace('+', '_');
+        var cleaned = name.Replace('<', '_');
+        cleaned = cleaned.Replace('>', '_');
+        cleaned = cleaned.Replace('[', '_');
+        cleaned = cleaned.Replace(']', '_');
+        cleaned = cleaned.Replace('+', '_');
 
-        return sanitized;
+        // Apply reserved word sanitization
+        var sanitized = TypeScriptReservedWords.Sanitize(cleaned);
+        return sanitized.Sanitized;
     }
 
     /// <summary>
