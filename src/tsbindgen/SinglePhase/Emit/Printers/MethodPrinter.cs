@@ -24,10 +24,15 @@ public static class MethodPrinter
         var finalName = ctx.Renamer.GetFinalMemberName(method.StableId, scope);
 
         // Modifiers
-        if (method.IsStatic)
+        // IMPORTANT: Don't emit static/abstract modifiers for interface members
+        // - TypeScript interfaces don't support static members (C# 11 feature)
+        // - TypeScript interface methods are implicitly abstract
+        var isInterface = declaringType.Kind == TypeKind.Interface;
+
+        if (method.IsStatic && !isInterface)
             sb.Append("static ");
 
-        if (method.IsAbstract)
+        if (method.IsAbstract && !isInterface)
             sb.Append("abstract ");
 
         // Method name
@@ -135,10 +140,13 @@ public static class MethodPrinter
         var finalName = ctx.Renamer.GetFinalMemberName(method.StableId, scope);
 
         // Modifiers
-        if (method.IsStatic)
+        // IMPORTANT: Don't emit static/abstract modifiers for interface members
+        var isInterface = declaringType.Kind == TypeKind.Interface;
+
+        if (method.IsStatic && !isInterface)
             sb.Append("static ");
 
-        if (method.IsAbstract)
+        if (method.IsAbstract && !isInterface)
             sb.Append("abstract ");
 
         // Method name

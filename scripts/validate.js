@@ -222,8 +222,9 @@ function validateMetadataFiles() {
         // Skip non-directories (files like index.d.ts, bindings.json)
         if (!fs.statSync(nsPath).isDirectory()) continue;
 
-        // Skip the 'internal' utility directory (empty namespace, not a real namespace)
-        if (ns === 'internal') continue;
+        // Skip internal subdirectories (not real namespaces)
+        // 'internal' was used before for root namespace, '_root' is used now to avoid case collision
+        if (ns === 'internal' || ns === '_root') continue;
 
         const indexPath = path.join(nsPath, 'internal', 'index.d.ts');
         const metadataPath = path.join(nsPath, 'internal', 'metadata.json');

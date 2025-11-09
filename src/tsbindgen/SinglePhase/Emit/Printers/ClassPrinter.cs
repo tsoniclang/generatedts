@@ -383,8 +383,8 @@ public static class ClassPrinter
     {
         var members = type.Members;
 
-        // Properties - only emit ClassSurface members
-        foreach (var prop in members.Properties.Where(p => p.EmitScope == EmitScope.ClassSurface))
+        // Properties - only emit ClassSurface members, skip static (TypeScript doesn't support static interface members)
+        foreach (var prop in members.Properties.Where(p => !p.IsStatic && p.EmitScope == EmitScope.ClassSurface))
         {
             var propScope = ScopeFactory.ClassSurface(type, prop.IsStatic);
             var finalName = ctx.Renamer.GetFinalMemberName(prop.StableId, propScope);
@@ -397,8 +397,8 @@ public static class ClassPrinter
             sb.AppendLine(";");
         }
 
-        // Methods - only emit ClassSurface members
-        foreach (var method in members.Methods.Where(m => m.EmitScope == EmitScope.ClassSurface))
+        // Methods - only emit ClassSurface members, skip static (TypeScript doesn't support static interface members)
+        foreach (var method in members.Methods.Where(m => !m.IsStatic && m.EmitScope == EmitScope.ClassSurface))
         {
             sb.Append("    ");
             sb.Append(MethodPrinter.Print(method, type, ctx));

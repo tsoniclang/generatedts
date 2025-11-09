@@ -30,9 +30,11 @@ public static class InternalIndexEmitter
             // Generate .d.ts content
             var content = GenerateNamespaceDeclaration(ctx, nsOrder);
 
-            // Write to file: output/Namespace.Name/internal/index.d.ts
+            // Write to file: output/Namespace.Name/internal/index.d.ts (or _root for empty namespace)
             var namespacePath = Path.Combine(outputDirectory, ns.Name);
-            var internalPath = Path.Combine(namespacePath, "internal");
+            // Use _root for empty namespace to avoid case-sensitivity collision with "Internal" namespace
+            var subdirName = ns.IsRoot ? "_root" : "internal";
+            var internalPath = Path.Combine(namespacePath, subdirName);
             Directory.CreateDirectory(internalPath);
 
             var outputFile = Path.Combine(internalPath, "index.d.ts");
@@ -81,21 +83,36 @@ public static class InternalIndexEmitter
 
             if (hasViews)
             {
-                // Emit class with $instance suffix (non-exported)
+                // Emit class with $instance suffix (non-exported in namespaces, exported in root)
                 var instanceClass = ClassPrinter.PrintInstance(typeOrder.Type, ctx);
                 var indentedInstance = Indent(instanceClass, indent);
+
+                // ROOT NAMESPACE FIX: Add export keyword for module-level declarations
+                if (isRoot)
+                    sb.Append("export ");
+
                 sb.AppendLine(indentedInstance);
                 sb.AppendLine();
 
-                // Emit companion views interface (non-exported)
+                // Emit companion views interface (non-exported in namespaces, exported in root)
                 var viewsInterface = EmitCompanionViewsInterface(typeOrder.Type, views, ctx);
                 var indentedViews = Indent(viewsInterface, indent);
+
+                // ROOT NAMESPACE FIX: Add export keyword for module-level declarations
+                if (isRoot)
+                    sb.Append("export ");
+
                 sb.AppendLine(indentedViews);
                 sb.AppendLine();
 
-                // Emit intersection type alias (exported)
+                // Emit intersection type alias (always exported)
                 var typeAlias = EmitIntersectionTypeAlias(typeOrder.Type, ctx);
                 var indentedAlias = Indent(typeAlias, indent);
+
+                // ROOT NAMESPACE FIX: Add export keyword if not already present
+                if (isRoot && !typeAlias.TrimStart().StartsWith("export "))
+                    sb.Append("export ");
+
                 sb.AppendLine(indentedAlias);
                 sb.AppendLine();
             }
@@ -104,6 +121,11 @@ public static class InternalIndexEmitter
                 // Normal emission (no views)
                 var typeDecl = ClassPrinter.Print(typeOrder.Type, ctx);
                 var indented = Indent(typeDecl, indent);
+
+                // ROOT NAMESPACE FIX: Add export keyword for module-level declarations
+                if (isRoot)
+                    sb.Append("export ");
+
                 sb.AppendLine(indented);
                 sb.AppendLine();
             }

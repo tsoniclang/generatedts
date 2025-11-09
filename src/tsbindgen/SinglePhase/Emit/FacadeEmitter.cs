@@ -51,9 +51,10 @@ public static class FacadeEmitter
         sb.AppendLine($"// Facade - Public API Surface");
         sb.AppendLine();
 
-        // Import from internal/index.d.ts
+        // Import from internal/index.d.ts (or _root/index.d.ts for empty namespace)
         sb.AppendLine("// Import internal declarations");
-        sb.AppendLine($"import * as Internal from './internal/index';");
+        var subdirName = ns.IsRoot ? "_root" : "internal";
+        sb.AppendLine($"import * as Internal from './{subdirName}/index';");
         sb.AppendLine();
 
         // Import from dependencies (if any)
@@ -76,7 +77,7 @@ public static class FacadeEmitter
         if (ns.IsRoot)
         {
             sb.AppendLine("// Re-export root namespace types (module-level)");
-            sb.AppendLine($"export * from './internal/index';");
+            sb.AppendLine($"export * from './{subdirName}/index';");
             sb.AppendLine();
         }
         else if (!ns.Name.Contains('.'))
