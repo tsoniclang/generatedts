@@ -27,6 +27,7 @@ public static class NameReservation
 
         int typesReserved = 0;
         int membersReserved = 0;
+        int membersSkippedAlreadyRenamed = 0;
         int skippedCompilerGenerated = 0;
 
         // Phase 1: Reserve all names in Renamer (populates internal dictionaries)
@@ -54,11 +55,17 @@ public static class NameReservation
                 typesReserved++;
 
                 // Reserve member names
-                membersReserved += ReserveMemberNamesOnly(ctx, type);
+                var (reserved, skipped) = ReserveMemberNamesOnly(ctx, type);
+                membersReserved += reserved;
+                membersSkippedAlreadyRenamed += skipped;
             }
         }
 
         ctx.Log("NameReservation", $"Reserved {typesReserved} type names, {membersReserved} member names");
+        if (membersSkippedAlreadyRenamed > 0)
+        {
+            ctx.Log("NameReservation", $"Skipped {membersSkippedAlreadyRenamed} members (already renamed by earlier passes)");
+        }
         if (skippedCompilerGenerated > 0)
         {
             ctx.Log("NameReservation", $"Skipped {skippedCompilerGenerated} compiler-generated types");
@@ -158,8 +165,10 @@ public static class NameReservation
 
     /// <summary>
     /// Reserve member names without mutating symbols (Phase 1).
+    /// Returns (Reserved, Skipped) counts.
+    /// Skips members that already have rename decisions from earlier passes.
     /// </summary>
-    private static int ReserveMemberNamesOnly(BuildContext ctx, TypeSymbol type)
+    private static (int Reserved, int Skipped) ReserveMemberNamesOnly(BuildContext ctx, TypeSymbol type)
     {
         var typeScope = new TypeScope
         {
@@ -168,13 +177,15 @@ public static class NameReservation
             IsStatic = false
         };
 
-        int count = 0;
+        int reserved = 0;
+        int skipped = 0;
 
         foreach (var method in type.Members.Methods.OrderBy(m => m.ClrName))
         {
-            if (method.Provenance == MemberProvenance.Synthesized)
+            // Check if already renamed by earlier pass (e.g., HiddenMemberPlanner, IndexerPlanner)
+            if (ctx.Renamer.TryGetDecision(method.StableId, out var existingDecision))
             {
-                count++;
+                skipped++;
                 continue;
             }
 
@@ -182,44 +193,73 @@ public static class NameReservation
             {
                 MemberProvenance.Original => "MethodDeclaration",
                 MemberProvenance.FromInterface => "InterfaceMember",
+                MemberProvenance.Synthesized => "SynthesizedMember",
                 _ => "Unknown"
             };
 
             var requested = ComputeMethodBase(method);
             ctx.Renamer.ReserveMemberName(method.StableId, requested, typeScope, reason, method.IsStatic, "NameReservation");
-            count++;
+            reserved++;
         }
 
         foreach (var property in type.Members.Properties.OrderBy(p => p.ClrName))
         {
+            // Check if already renamed (e.g., IndexerPlanner)
+            if (ctx.Renamer.TryGetDecision(property.StableId, out var existingDecision))
+            {
+                skipped++;
+                continue;
+            }
+
             var reason = property.IsIndexer ? "IndexerProperty" : "PropertyDeclaration";
             var requested = SanitizeMemberName(property.ClrName);
             ctx.Renamer.ReserveMemberName(property.StableId, requested, typeScope, reason, property.IsStatic, "NameReservation");
-            count++;
+            reserved++;
         }
 
         foreach (var field in type.Members.Fields.OrderBy(f => f.ClrName))
         {
+            // Check if already renamed
+            if (ctx.Renamer.TryGetDecision(field.StableId, out var existingDecision))
+            {
+                skipped++;
+                continue;
+            }
+
             var reason = field.IsConst ? "ConstantField" : "FieldDeclaration";
             var requested = SanitizeMemberName(field.ClrName);
             ctx.Renamer.ReserveMemberName(field.StableId, requested, typeScope, reason, field.IsStatic, "NameReservation");
-            count++;
+            reserved++;
         }
 
         foreach (var ev in type.Members.Events.OrderBy(e => e.ClrName))
         {
+            // Check if already renamed
+            if (ctx.Renamer.TryGetDecision(ev.StableId, out var existingDecision))
+            {
+                skipped++;
+                continue;
+            }
+
             var requested = SanitizeMemberName(ev.ClrName);
             ctx.Renamer.ReserveMemberName(ev.StableId, requested, typeScope, reason: "EventDeclaration", ev.IsStatic, "NameReservation");
-            count++;
+            reserved++;
         }
 
         foreach (var ctor in type.Members.Constructors)
         {
+            // Check if already renamed
+            if (ctx.Renamer.TryGetDecision(ctor.StableId, out var existingDecision))
+            {
+                skipped++;
+                continue;
+            }
+
             ctx.Renamer.ReserveMemberName(ctor.StableId, "constructor", typeScope, "ConstructorDeclaration", ctor.IsStatic, "NameReservation");
-            count++;
+            reserved++;
         }
 
-        return count;
+        return (reserved, skipped);
     }
 
     /// <summary>
