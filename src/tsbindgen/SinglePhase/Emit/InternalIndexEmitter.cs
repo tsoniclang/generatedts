@@ -57,11 +57,9 @@ public static class InternalIndexEmitter
         sb.AppendLine($"// Assembly: {string.Join(", ", nsOrder.Namespace.ContributingAssemblies)}");
         sb.AppendLine();
 
-        // Branded primitive types (if this is System namespace)
-        if (nsOrder.Namespace.Name == "System")
-        {
-            EmitBrandedPrimitives(sb);
-        }
+        // Branded primitive types (emitted in all namespaces for cross-namespace type references)
+        // Every namespace needs these to reference System types (Int32 → int, etc.)
+        EmitBrandedPrimitives(sb);
 
         // ROOT NAMESPACE FIX: Types in root namespace (empty name) are emitted at module level
         // No namespace wrapper for root - types are module-level declarations

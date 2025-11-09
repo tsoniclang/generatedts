@@ -41,13 +41,53 @@ public static class TypeRefPrinter
         return "any";
     }
 
+    /// <summary>
+    /// Map CLR primitive types to TypeScript types.
+    /// Returns null if not a primitive type.
+    /// </summary>
+    private static string? MapPrimitiveType(string fullName)
+    {
+        return fullName switch
+        {
+            // Boolean
+            "System.Boolean" => "boolean",
+
+            // Numeric types → branded types (defined in each namespace)
+            "System.SByte" => "sbyte",
+            "System.Byte" => "byte",
+            "System.Int16" => "short",
+            "System.UInt16" => "ushort",
+            "System.Int32" => "int",
+            "System.UInt32" => "uint",
+            "System.Int64" => "long",
+            "System.UInt64" => "ulong",
+            "System.Single" => "float",
+            "System.Double" => "double",
+            "System.Decimal" => "decimal",
+            "System.IntPtr" => "nint",
+            "System.UIntPtr" => "nuint",
+
+            // String
+            "System.String" => "string",
+
+            // Void
+            "System.Void" => "void",
+
+            // Object
+            "System.Object" => "any",
+
+            _ => null
+        };
+    }
+
     private static string PrintNamed(NamedTypeReference named, BuildContext ctx)
     {
-        // HARDENING: Map System.IntPtr and System.UIntPtr to 'number'
-        // These are pointer-sized integers used for native interop
-        if (named.FullName == "System.IntPtr" || named.FullName == "System.UIntPtr")
+        // Map CLR primitive types to TypeScript branded types or built-in types
+        // This ensures cross-namespace references work correctly
+        var mappedType = MapPrimitiveType(named.FullName);
+        if (mappedType != null)
         {
-            return "number";
+            return mappedType;
         }
 
         // Use simple name and sanitize for TypeScript
