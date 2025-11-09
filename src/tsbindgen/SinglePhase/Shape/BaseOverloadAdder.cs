@@ -114,12 +114,7 @@ public static class BaseOverloadAdder
     private static MethodSymbol CreateBaseOverloadMethod(BuildContext ctx, TypeSymbol derivedClass, MethodSymbol baseMethod)
     {
         // M5 FIX: Base scope without #static/#instance suffix - ReserveMemberName will add it
-        var typeScope = new TypeScope
-        {
-            TypeFullName = derivedClass.ClrFullName,
-            IsStatic = false,
-            ScopeKey = $"type:{derivedClass.ClrFullName}"
-        };
+        var typeScope = ScopeFactory.ClassBase(derivedClass);
 
         var stableId = new MemberStableId
         {

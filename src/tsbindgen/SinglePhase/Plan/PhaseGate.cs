@@ -2089,12 +2089,9 @@ public static class PhaseGate
                     continue;
 
                 // Get class surface scope for collision detection
-                var classSurfaceScope = new TypeScope
-                {
-                    ScopeKey = $"type:{type.ClrFullName}",
-                    TypeFullName = type.ClrFullName,
-                    IsStatic = false
-                };
+                // NOTE: Using ClassBase because GetFinalMemberName still takes isStatic parameter
+                // TODO: Change to ClassSurface when isStatic removed from GetFinalMemberName
+                var classSurfaceScope = ScopeFactory.ClassBase(type);
 
                 // Collect class surface member names for PG_NAME_004 checks
                 var classSurfaceNames = new HashSet<string>();
@@ -2130,12 +2127,9 @@ public static class PhaseGate
                     }
 
                     var interfaceTypeName = GetTypeReferenceName(view.InterfaceReference);
-                    var viewScope = new TypeScope
-                    {
-                        ScopeKey = $"view:{type.StableId}:{interfaceStableId}",
-                        TypeFullName = type.ClrFullName,
-                        IsStatic = false
-                    };
+                    // NOTE: Using ViewBase because GetFinalMemberName still takes isStatic parameter
+                    // TODO: Change to ViewSurface when isStatic removed from GetFinalMemberName
+                    var viewScope = ScopeFactory.ViewBase(type, interfaceStableId);
 
                     // PG_NAME_003: Check for collisions within this view
                     var viewMemberNames = new Dictionary<string, string>(); // emittedName -> first member description

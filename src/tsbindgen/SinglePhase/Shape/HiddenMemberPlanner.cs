@@ -42,12 +42,7 @@ public static class HiddenMemberPlanner
 
         var count = 0;
         // M5 FIX: Use correct scope format with type: prefix
-        var typeScope = new TypeScope
-        {
-            TypeFullName = type.ClrFullName,
-            IsStatic = false, // Will be set per member
-            ScopeKey = $"type:{type.ClrFullName}" // Base scope, ReserveMemberName will add #static or #instance
-        };
+        var typeScope = ScopeFactory.ClassBase(type); // Base scope, ReserveMemberName will add #static or #instance
 
         // Process methods marked with IsNew
         foreach (var method in type.Members.Methods.Where(m => m.IsNew))

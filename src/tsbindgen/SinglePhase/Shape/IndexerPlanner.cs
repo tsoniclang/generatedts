@@ -110,12 +110,7 @@ public static class IndexerPlanner
         // Setter: void set_Item(TIndex index, T value)
 
         // M5 FIX: Base scope without #static/#instance suffix - ReserveMemberName will add it
-        var typeScope = new TypeScope
-        {
-            TypeFullName = type.ClrFullName,
-            IsStatic = indexer.IsStatic,
-            ScopeKey = $"type:{type.ClrFullName}"
-        };
+        var typeScope = ScopeFactory.ClassBase(type);
 
         // Always create getter
         if (indexer.HasGetter)
@@ -141,7 +136,7 @@ public static class IndexerPlanner
                 indexer.IsStatic);
 
             // Get final name with full scope (including #static/#instance)
-            var getterScope = RenamerScopes.ClassSide(type, indexer.IsStatic);
+            var getterScope = ScopeFactory.ClassSurface(type, indexer.IsStatic);
             var getterTsEmitName = ctx.Renamer.GetFinalMemberName(getterStableId, getterScope, indexer.IsStatic);
 
             yield return new MethodSymbol
@@ -204,7 +199,7 @@ public static class IndexerPlanner
                 indexer.IsStatic);
 
             // Get final name with full scope (including #static/#instance)
-            var setterScope = RenamerScopes.ClassSide(type, indexer.IsStatic);
+            var setterScope = ScopeFactory.ClassSurface(type, indexer.IsStatic);
             var setterTsEmitName = ctx.Renamer.GetFinalMemberName(setterStableId, setterScope, indexer.IsStatic);
 
             yield return new MethodSymbol

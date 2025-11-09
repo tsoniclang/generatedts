@@ -15,11 +15,11 @@ namespace tsbindgen.SinglePhase.Renaming;
 ///
 /// USAGE PATTERN:
 /// - Reservations: Use BASE scopes (no #instance/#static suffix) - ReserveMemberName adds it
-/// - Lookups:      Use FULL scopes (with #instance/#static suffix)
+/// - Lookups:      Use SURFACE scopes (with #instance/#static suffix)
 ///
-/// M5 CRITICAL: View members MUST be looked up with View(), not ClassInstance()/ClassStatic().
+/// M5 CRITICAL: View members MUST be looked up with ViewSurface(), not ClassSurface().
 /// </summary>
-public static class RenamerScopes
+public static class ScopeFactory
 {
     // ============================================================================
     // NAMESPACE SCOPES (full only - no base/full distinction)
@@ -114,7 +114,7 @@ public static class RenamerScopes
     /// Use for: GetFinalMemberName, TryGetDecision calls when isStatic is dynamic
     /// Preferred over manual ternary: cleaner call-sites
     /// </summary>
-    public static TypeScope ClassSide(TypeSymbol type, bool isStatic)
+    public static TypeScope ClassSurface(TypeSymbol type, bool isStatic)
     {
         return isStatic ? ClassStatic(type) : ClassInstance(type);
     }
@@ -148,7 +148,7 @@ public static class RenamerScopes
     /// M5 FIX: This is what emitters were missing - they were using ClassInstance()/ClassStatic()
     /// for view members, causing PG_NAME_004 collisions.
     /// </summary>
-    public static TypeScope View(TypeSymbol type, string interfaceStableId, bool isStatic)
+    public static TypeScope ViewSurface(TypeSymbol type, string interfaceStableId, bool isStatic)
     {
         return new TypeScope
         {

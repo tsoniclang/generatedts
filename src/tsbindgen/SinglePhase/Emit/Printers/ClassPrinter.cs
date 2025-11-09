@@ -2,6 +2,7 @@ using System.Text;
 using tsbindgen.SinglePhase.Model;
 using tsbindgen.SinglePhase.Model.Symbols;
 using tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
+using tsbindgen.SinglePhase.Renaming;
 
 namespace tsbindgen.SinglePhase.Emit.Printers;
 
@@ -47,12 +48,7 @@ public static class ClassPrinter
         var sb = new StringBuilder();
 
         // Get final TypeScript name from Renamer
-        var nsScope = new SinglePhase.Renaming.NamespaceScope
-        {
-            Namespace = type.Namespace,
-            IsInternal = true, // We're in internal scope
-            ScopeKey = $"ns:{type.Namespace}"
-        };
+        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
         var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
 
         // Add $instance suffix if requested (for companion views pattern)
@@ -108,12 +104,7 @@ public static class ClassPrinter
         // Structs emit as classes in TypeScript (with metadata noting value semantics)
         var sb = new StringBuilder();
 
-        var nsScope = new SinglePhase.Renaming.NamespaceScope
-        {
-            Namespace = type.Namespace,
-            IsInternal = true,
-            ScopeKey = $"ns:{type.Namespace}"
-        };
+        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
         var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
 
         // Add $instance suffix if requested (for companion views pattern)
@@ -153,12 +144,7 @@ public static class ClassPrinter
         // Static classes emit as abstract classes with static members in TypeScript
         var sb = new StringBuilder();
 
-        var nsScope = new SinglePhase.Renaming.NamespaceScope
-        {
-            Namespace = type.Namespace,
-            IsInternal = true,
-            ScopeKey = $"ns:{type.Namespace}"
-        };
+        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
         var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
 
         sb.Append("abstract class ");
@@ -177,12 +163,7 @@ public static class ClassPrinter
     {
         var sb = new StringBuilder();
 
-        var nsScope = new SinglePhase.Renaming.NamespaceScope
-        {
-            Namespace = type.Namespace,
-            IsInternal = true,
-            ScopeKey = $"ns:{type.Namespace}"
-        };
+        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
         var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
 
         sb.Append("enum ");
@@ -228,12 +209,7 @@ public static class ClassPrinter
         // Delegates emit as type aliases to function signatures
         var sb = new StringBuilder();
 
-        var nsScope = new SinglePhase.Renaming.NamespaceScope
-        {
-            Namespace = type.Namespace,
-            IsInternal = true,
-            ScopeKey = $"ns:{type.Namespace}"
-        };
+        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
         var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
 
         sb.Append("type ");
@@ -273,12 +249,7 @@ public static class ClassPrinter
     {
         var sb = new StringBuilder();
 
-        var nsScope = new SinglePhase.Renaming.NamespaceScope
-        {
-            Namespace = type.Namespace,
-            IsInternal = true,
-            ScopeKey = $"ns:{type.Namespace}"
-        };
+        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
         var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
 
         sb.Append("interface ");

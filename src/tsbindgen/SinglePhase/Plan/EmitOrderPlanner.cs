@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Linq;
 using tsbindgen.SinglePhase.Model;
 using tsbindgen.SinglePhase.Model.Symbols;
+using tsbindgen.SinglePhase.Renaming;
 
 namespace tsbindgen.SinglePhase.Plan;
 
@@ -53,12 +54,7 @@ public sealed class EmitOrderPlanner
         // 3. Arity (for overloaded generic types)
 
         // Get namespace scope for name resolution (assuming all types in same namespace)
-        var nsScope = types.Count > 0 ? new SinglePhase.Renaming.NamespaceScope
-        {
-            Namespace = types[0].Namespace,
-            IsInternal = true,
-            ScopeKey = $"ns:{types[0].Namespace}:internal"
-        } : null;
+        var nsScope = types.Count > 0 ? ScopeFactory.NamespaceInternal(types[0].Namespace) : null;
 
         var sorted = types.OrderBy(t => GetKindSortOrder(t.Kind))
                           .ThenBy(t => nsScope != null ? _ctx.Renamer.GetFinalTypeName(t.StableId, nsScope) : t.ClrName)

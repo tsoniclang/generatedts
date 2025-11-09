@@ -4,6 +4,7 @@ using tsbindgen.SinglePhase.Emit.Printers;
 using tsbindgen.SinglePhase.Model;
 using tsbindgen.SinglePhase.Model.Symbols;
 using tsbindgen.SinglePhase.Plan;
+using tsbindgen.SinglePhase.Renaming;
 
 namespace tsbindgen.SinglePhase.Emit;
 
@@ -129,12 +130,7 @@ public static class InternalIndexEmitter
         var sb = new StringBuilder();
 
         // Get final type name
-        var nsScope = new SinglePhase.Renaming.NamespaceScope
-        {
-            Namespace = type.Namespace,
-            IsInternal = true,
-            ScopeKey = $"ns:{type.Namespace}:internal"
-        };
+        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
         var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
 
         // Companion interface: __TypeName$views<...>
@@ -170,12 +166,7 @@ public static class InternalIndexEmitter
         var sb = new StringBuilder();
 
         // Get final type name
-        var nsScope = new SinglePhase.Renaming.NamespaceScope
-        {
-            Namespace = type.Namespace,
-            IsInternal = true,
-            ScopeKey = $"ns:{type.Namespace}:internal"
-        };
+        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
         var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
 
         // Type alias: export type TypeName<...> = TypeName$instance<...> & __TypeName$views<...>
