@@ -61,8 +61,16 @@ public static class InternalIndexEmitter
             EmitBrandedPrimitives(sb);
         }
 
-        // Namespace declaration
-        sb.AppendLine($"export namespace {nsOrder.Namespace.Name} {{");
+        // ROOT NAMESPACE FIX: Types in root namespace (empty name) are emitted at module level
+        // No namespace wrapper for root - types are module-level declarations
+        var isRoot = nsOrder.Namespace.IsRoot;
+        var indent = isRoot ? "" : "    ";
+
+        if (!isRoot)
+        {
+            // Non-root: Wrap in namespace declaration
+            sb.AppendLine($"export namespace {nsOrder.Namespace.Name} {{");
+        }
 
         // Emit types in order
         foreach (var typeOrder in nsOrder.OrderedTypes)
@@ -75,19 +83,19 @@ public static class InternalIndexEmitter
             {
                 // Emit class with $instance suffix (non-exported)
                 var instanceClass = ClassPrinter.PrintInstance(typeOrder.Type, ctx);
-                var indentedInstance = Indent(instanceClass, "    ");
+                var indentedInstance = Indent(instanceClass, indent);
                 sb.AppendLine(indentedInstance);
                 sb.AppendLine();
 
                 // Emit companion views interface (non-exported)
                 var viewsInterface = EmitCompanionViewsInterface(typeOrder.Type, views, ctx);
-                var indentedViews = Indent(viewsInterface, "    ");
+                var indentedViews = Indent(viewsInterface, indent);
                 sb.AppendLine(indentedViews);
                 sb.AppendLine();
 
                 // Emit intersection type alias (exported)
                 var typeAlias = EmitIntersectionTypeAlias(typeOrder.Type, ctx);
-                var indentedAlias = Indent(typeAlias, "    ");
+                var indentedAlias = Indent(typeAlias, indent);
                 sb.AppendLine(indentedAlias);
                 sb.AppendLine();
             }
@@ -95,13 +103,17 @@ public static class InternalIndexEmitter
             {
                 // Normal emission (no views)
                 var typeDecl = ClassPrinter.Print(typeOrder.Type, ctx);
-                var indented = Indent(typeDecl, "    ");
+                var indented = Indent(typeDecl, indent);
                 sb.AppendLine(indented);
                 sb.AppendLine();
             }
         }
 
-        sb.AppendLine("}");
+        if (!isRoot)
+        {
+            // Close namespace wrapper
+            sb.AppendLine("}");
+        }
 
         return sb.ToString();
     }

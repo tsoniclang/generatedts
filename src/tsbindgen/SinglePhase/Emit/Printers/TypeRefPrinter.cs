@@ -43,15 +43,46 @@ public static class TypeRefPrinter
 
     private static string PrintNamed(NamedTypeReference named, BuildContext ctx)
     {
+        // HARDENING: Map System.IntPtr and System.UIntPtr to 'number'
+        // These are pointer-sized integers used for native interop
+        if (named.FullName == "System.IntPtr" || named.FullName == "System.UIntPtr")
+        {
+            return "number";
+        }
+
         // Use simple name and sanitize for TypeScript
         var baseName = SanitizeClrName(named.Name);
+
+        // HARDENING: Guarantee non-empty type names (defensive check)
+        // This should never happen after TypeReferenceFactory hardening, but fail-safe
+        if (string.IsNullOrWhiteSpace(baseName))
+        {
+            ctx.Diagnostics.Warning(
+                Core.Diagnostics.DiagnosticCodes.UnresolvedType,
+                $"Empty type name for {named.AssemblyName}:{named.FullName}. " +
+                $"Emitting 'unknown' as fallback.");
+            return "unknown";
+        }
 
         // Handle generic type arguments
         if (named.TypeArguments.Count == 0)
             return baseName;
 
         // Print generic type with arguments: Foo<T, U>
-        var args = string.Join(", ", named.TypeArguments.Select(arg => Print(arg, ctx)));
+        // HARDENING: Only print <...> if args is non-empty
+        var argParts = named.TypeArguments.Select(arg => Print(arg, ctx)).ToList();
+        var nonEmptyArgs = argParts.Where(a => !string.IsNullOrWhiteSpace(a)).ToList();
+
+        if (nonEmptyArgs.Count == 0)
+        {
+            // All type arguments erased - emit without generics
+            ctx.Diagnostics.Warning(
+                Core.Diagnostics.DiagnosticCodes.UnresolvedType,
+                $"All type arguments erased for {named.FullName}. Emitting non-generic form.");
+            return baseName;
+        }
+
+        var args = string.Join(", ", nonEmptyArgs);
         return $"{baseName}<{args}>";
     }
 

@@ -70,9 +70,16 @@ public static class FacadeEmitter
             }
         }
 
-        // Re-export internal namespace
-        // Note: Skip for dotted namespaces as TypeScript doesn't support dots in export import identifiers
-        if (!ns.Name.Contains('.'))
+        // ROOT NAMESPACE FIX: Re-export internal namespace
+        // For root namespace (empty name), use direct re-export instead of import alias
+        // For non-root, skip dotted namespaces as TypeScript doesn't support dots in export import identifiers
+        if (ns.IsRoot)
+        {
+            sb.AppendLine("// Re-export root namespace types (module-level)");
+            sb.AppendLine($"export * from './internal/index';");
+            sb.AppendLine();
+        }
+        else if (!ns.Name.Contains('.'))
         {
             sb.AppendLine("// Re-export namespace");
             sb.AppendLine($"export import {ns.Name} = Internal.{ns.Name};");
@@ -97,7 +104,15 @@ public static class FacadeEmitter
                         _ => "type"
                     };
 
-                    sb.AppendLine($"export type {export.ExportName} = {ns.Name}.{export.ExportName};");
+                    // ROOT NAMESPACE FIX: For root namespace, export directly (no namespace qualifier)
+                    if (ns.IsRoot)
+                    {
+                        sb.AppendLine($"export type {export.ExportName} = Internal.{export.ExportName};");
+                    }
+                    else
+                    {
+                        sb.AppendLine($"export type {export.ExportName} = {ns.Name}.{export.ExportName};");
+                    }
                 }
             }
         }

@@ -30,4 +30,16 @@ public sealed record NamespaceSymbol
     /// Multiple assemblies can contribute to the same namespace.
     /// </summary>
     public required ImmutableHashSet<string> ContributingAssemblies { get; init; }
+
+    /// <summary>
+    /// True if this is the root/global namespace (empty name).
+    /// Root namespace types are emitted at module level in TypeScript (no namespace wrapper).
+    /// </summary>
+    public bool IsRoot => string.IsNullOrEmpty(Name);
+
+    /// <summary>
+    /// Returns namespace name or null if this is the root namespace.
+    /// Used by emitters to avoid printing empty namespace tokens.
+    /// </summary>
+    public string? SafeNameOrNull => IsRoot ? null : Name;
 }

@@ -107,6 +107,30 @@ public sealed class TypeReferenceFactory
         var namespaceName = type.Namespace ?? "";
         var name = type.Name;
 
+        // HARDENING: Guarantee Name is never empty
+        // If type.Name is null/empty, derive from FullName (last segment after '.' or '+')
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            if (!string.IsNullOrWhiteSpace(fullName))
+            {
+                // Extract last segment: "System.Foo.Bar+Nested" -> "Nested"
+                var lastDot = fullName.LastIndexOf('.');
+                var lastPlus = fullName.LastIndexOf('+');
+                var lastSeparator = Math.Max(lastDot, lastPlus);
+
+                name = lastSeparator >= 0
+                    ? fullName.Substring(lastSeparator + 1)
+                    : fullName;
+            }
+            else
+            {
+                // Last resort: use a synthetic name
+                name = "UnknownType";
+                _ctx.Log("TypeReferenceFactory",
+                    $"WARNING: Type with empty Name and FullName from assembly {assemblyName}. Using synthetic name.");
+            }
+        }
+
         // Handle generic types
         var arity = 0;
         var typeArgs = new List<TypeReference>();
