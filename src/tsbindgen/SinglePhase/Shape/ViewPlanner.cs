@@ -138,11 +138,34 @@ public static class ViewPlanner
             var ifaceRef = group.First().ifaceRef;
 
             // Collect new ViewMembers from this group (sorted by StableId for determinism)
-            var newViewMembers = group
+            // Check for duplicates - if we get the same StableId twice, that's a bug upstream
+            var viewMembersList = group
                 .Select(x => new ViewMember(
                     Kind: x.kind,
                     StableId: x.stableId,
                     ClrName: x.clrName))
+                .ToList();
+
+            var duplicateGroups = viewMembersList
+                .GroupBy(vm => vm.StableId)
+                .Where(g => g.Count() > 1)
+                .ToList();
+
+            if (duplicateGroups.Any())
+            {
+                var duplicateDetails = string.Join("\n", duplicateGroups.Select(g =>
+                    $"  StableId: {g.Key}\n" +
+                    $"  Count: {g.Count()}\n" +
+                    $"  Members: {string.Join(", ", g.Select(vm => $"{vm.Kind}:{vm.ClrName}"))}"));
+
+                throw new InvalidOperationException(
+                    $"ViewPlanner: Duplicate members found in view for {type.ClrFullName}\n" +
+                    $"Interface: {ifaceStableId}\n" +
+                    $"Duplicates:\n{duplicateDetails}\n\n" +
+                    $"This indicates a data integrity bug upstream. Same member should not appear twice with identical StableId.");
+            }
+
+            var newViewMembers = viewMembersList
                 .OrderBy(vm => vm.StableId.ToString())
                 .ToList();
 
