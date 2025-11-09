@@ -1,21 +1,16 @@
 #!/usr/bin/env node
 /**
- * Validation script for tsbindgen Single-Phase Architecture (NEW PIPELINE)
+ * Validation script for tsbindgen namespace-based output
  *
  * This script:
- * 1. Cleans the validation-new directory
- * 2. Runs tsbindgen generate command with --use-new-pipeline flag
+ * 1. Cleans the validation directory
+ * 2. Runs tsbindgen generate command on the full .NET framework
  * 3. Creates a tsconfig.json in the output directory
  * 4. Runs TypeScript compiler to validate all declarations
  * 5. Reports error breakdown by category
- *
- * Usage:
- *   node scripts/validate-new.js              # Full validation
- *   node scripts/validate-new.js --skip-tsc   # Skip TypeScript compilation
- *   node scripts/validate-new.js --verbose    # Enable verbose logging from tsbindgen
  */
 
-import { execSync, spawn } from 'child_process';
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -29,90 +24,51 @@ const DOTNET_VERSION = '10.0.0-rc.1.25451.107';
 const DOTNET_HOME = os.homedir() + '/dotnet';
 const DOTNET_RUNTIME_PATH = `${DOTNET_HOME}/shared/Microsoft.NETCore.App/${DOTNET_VERSION}`;
 
-const VALIDATION_DIR = path.join(__dirname, '..', '.tests', 'validation-new');
+const VALIDATION_DIR = path.join(__dirname, '..', '.tests', 'validation');
 const PROJECT_ROOT = path.join(__dirname, '..');
 
 function log(message) {
-    console.log(`[validate-new] ${message}`);
+    console.log(`[validate] ${message}`);
 }
 
 function error(message) {
-    console.error(`[validate-new] ERROR: ${message}`);
+    console.error(`[validate] ERROR: ${message}`);
 }
 
 function cleanValidationDir() {
-    log('Cleaning validation-new directory...');
+    log('Cleaning validation directory...');
     if (fs.existsSync(VALIDATION_DIR)) {
         fs.rmSync(VALIDATION_DIR, { recursive: true, force: true });
     }
     fs.mkdirSync(VALIDATION_DIR, { recursive: true });
 }
 
-function generateTypes(verbose = false) {
-    return new Promise((resolve, reject) => {
-        log('Generating TypeScript declarations using Single-Phase Architecture...');
-        log(`  Source: ${DOTNET_RUNTIME_PATH}`);
-        log(`  Output: ${VALIDATION_DIR}`);
-        log(`  Pipeline: Single-Phase Architecture (--use-new-pipeline)`);
-        if (verbose) {
-            log(`  Verbose: enabled`);
-        }
-        log('');
+function generateTypes() {
+    log('Generating TypeScript declarations for entire .NET framework...');
+    log(`  Source: ${DOTNET_RUNTIME_PATH}`);
+    log(`  Output: ${VALIDATION_DIR}`);
+    log('');
 
-        const projectPath = path.join(PROJECT_ROOT, 'src', 'tsbindgen', 'tsbindgen.csproj');
+    const projectPath = path.join(PROJECT_ROOT, 'src', 'tsbindgen', 'tsbindgen.csproj');
 
-        // Build arguments array
-        const args = [
-            'run',
-            '--project', projectPath,
-            '--',
-            'generate',
-            '-d', DOTNET_RUNTIME_PATH,
-            '-o', VALIDATION_DIR,
-            '--use-new-pipeline'
-        ];
-
-        // Add --verbose only if requested
-        if (verbose) {
-            args.push('--verbose');
-        }
-
-        // Use spawn for streaming output (no buffering, no shell)
-        const child = spawn('dotnet', args, {
-            stdio: ['inherit', 'pipe', 'pipe'], // stdin=inherit, stdout=pipe, stderr=pipe
-            shell: false // Direct execution, no shell wrapper
-        });
-
-        // Stream stdout in real-time
-        child.stdout.on('data', (data) => {
-            process.stdout.write(data);
-        });
-
-        // Stream stderr in real-time
-        child.stderr.on('data', (data) => {
-            process.stderr.write(data);
-        });
-
-        // Handle process completion
-        child.on('close', (code) => {
-            if (code === 0) {
-                log('');
-                log('✓ Type generation completed');
-                log('');
-                resolve();
-            } else {
-                error(`Type generation failed with exit code ${code}`);
-                reject(new Error('Type generation failed'));
+    try {
+        const output = execSync(
+            `dotnet run --project "${projectPath}" -- generate -d "${DOTNET_RUNTIME_PATH}" -o "${VALIDATION_DIR}" --debug-typelist`,
+            {
+                stdio: 'pipe',
+                encoding: 'utf-8',
+                maxBuffer: 10 * 1024 * 1024 // 10MB buffer
             }
-        });
+        );
 
-        // Handle process errors
-        child.on('error', (err) => {
-            error('Failed to spawn dotnet process');
-            console.error(err);
-            reject(err);
-        });
-    });
+        console.log(output);
+        log('✓ Type generation completed');
+        log('');
+    } catch (err) {
+        error('Failed to generate types');
+        console.error(err.stderr || err.stdout || err.message);
+        throw new Error('Type generation failed');
+    }
 }
 
 function createTsConfig() {
@@ -129,7 +85,7 @@ function createTsConfig() {
             moduleResolution: 'bundler'
         },
         include: [
-            '**/*.d.ts'
+            'namespaces/**/*.d.ts'
         ]
     };
 
@@ -163,7 +119,7 @@ function runTypeScriptCompiler() {
     }
 
     // Save full output to file
-    const outputPath = path.join(PROJECT_ROOT, '.tests', 'tsc-validation-new.txt');
+    const outputPath = path.join(PROJECT_ROOT, '.tests', 'tsc-validation.txt');
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     fs.writeFileSync(outputPath, output);
 
@@ -205,11 +161,10 @@ function runTypeScriptCompiler() {
 function validateMetadataFiles() {
     log('Validating metadata files...');
 
-    // New pipeline outputs namespace folders directly to VALIDATION_DIR (no 'namespaces/' subdirectory)
-    const namespacesDir = VALIDATION_DIR;
+    const namespacesDir = path.join(VALIDATION_DIR, 'namespaces');
 
     if (!fs.existsSync(namespacesDir)) {
-        throw new Error('Validation directory not found');
+        throw new Error('Namespaces directory not found');
     }
 
     const namespaces = fs.readdirSync(namespacesDir);
@@ -218,15 +173,10 @@ function validateMetadataFiles() {
 
     for (const ns of namespaces) {
         const nsPath = path.join(namespacesDir, ns);
-
-        // Skip non-directories (files like index.d.ts, bindings.json)
         if (!fs.statSync(nsPath).isDirectory()) continue;
 
-        // Skip the 'internal' utility directory (empty namespace, not a real namespace)
-        if (ns === 'internal') continue;
-
-        const indexPath = path.join(nsPath, 'internal', 'index.d.ts');
-        const metadataPath = path.join(nsPath, 'internal', 'metadata.json');
+        const indexPath = path.join(nsPath, 'index.d.ts');
+        const metadataPath = path.join(nsPath, 'metadata.json');
 
         if (!fs.existsSync(indexPath)) {
             error(`  Missing index.d.ts in ${ns}`);
@@ -249,13 +199,12 @@ function validateMetadataFiles() {
 async function main() {
     console.log('');
     console.log('================================================================');
-    console.log('tsbindgen - Single-Phase Architecture Validation (NEW PIPELINE)');
+    console.log('tsbindgen - Full Framework Validation');
     console.log('================================================================');
     console.log('');
 
-    // Check for command-line flags
+    // Check for --skip-tsc flag
     const skipTsc = process.argv.includes('--skip-tsc');
-    const verbose = process.argv.includes('--verbose');
 
     try {
         // Step 1: Clean and prepare
@@ -264,8 +213,8 @@ async function main() {
         // Step 2: Create tsconfig (before generation so it exists even if generation fails)
         createTsConfig();
 
-        // Step 3: Generate all types using new pipeline (streaming, no buffer)
-        await generateTypes(verbose);
+        // Step 3: Generate all types
+        generateTypes();
 
         // Step 4: Validate metadata files
         validateMetadataFiles();
@@ -278,7 +227,7 @@ async function main() {
             console.log('================================================================');
             console.log('');
             console.log(`  Validation directory: ${VALIDATION_DIR}`);
-            console.log(`  Namespaces generated: check ${VALIDATION_DIR}`);
+            console.log(`  Namespaces generated: check ${path.join(VALIDATION_DIR, 'namespaces')}`);
             console.log('');
             console.log('  Run without --skip-tsc to validate TypeScript compilation');
             console.log('');
@@ -291,7 +240,7 @@ async function main() {
         // Print results
         console.log('');
         console.log('================================================================');
-        console.log('VALIDATION RESULTS (Single-Phase Architecture)');
+        console.log('VALIDATION RESULTS');
         console.log('================================================================');
         console.log('');
         console.log(`  Total errors: ${result.totalErrors}`);
@@ -316,7 +265,7 @@ async function main() {
             console.log('  ✓ VALIDATION PASSED - No TypeScript syntax errors');
             console.log('');
             console.log('  Note: Semantic errors are expected and documented.');
-            console.log('  See improvement-roadmap.md for details.');
+            console.log('  See CLAUDE.md for details on known limitations.');
             console.log('');
             process.exit(0);
         } else {
