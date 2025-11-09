@@ -141,7 +141,7 @@ public static class IndexerPlanner
                 indexer.IsStatic);
 
             // Get final name with full scope (including #static/#instance)
-            var getterScope = indexer.IsStatic ? RenamerScopes.ClassStatic(type) : RenamerScopes.ClassInstance(type);
+            var getterScope = RenamerScopes.ClassSide(type, indexer.IsStatic);
             var getterTsEmitName = ctx.Renamer.GetFinalMemberName(getterStableId, getterScope, indexer.IsStatic);
 
             yield return new MethodSymbol
@@ -204,7 +204,7 @@ public static class IndexerPlanner
                 indexer.IsStatic);
 
             // Get final name with full scope (including #static/#instance)
-            var setterScope = indexer.IsStatic ? RenamerScopes.ClassStatic(type) : RenamerScopes.ClassInstance(type);
+            var setterScope = RenamerScopes.ClassSide(type, indexer.IsStatic);
             var setterTsEmitName = ctx.Renamer.GetFinalMemberName(setterStableId, setterScope, indexer.IsStatic);
 
             yield return new MethodSymbol

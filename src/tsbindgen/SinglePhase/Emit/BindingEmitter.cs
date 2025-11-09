@@ -101,13 +101,13 @@ public static class BindingEmitter
         {
             // ViewOnly member - use view scope
             var interfaceStableId = RenamerScopes.GetInterfaceStableId(method.SourceInterface);
-            var viewScope = RenamerScopes.ViewScope(declaringType, interfaceStableId, method.IsStatic);
+            var viewScope = RenamerScopes.View(declaringType, interfaceStableId, method.IsStatic);
             tsEmitName = ctx.Renamer.GetFinalMemberName(method.StableId, viewScope, method.IsStatic);
         }
         else
         {
             // Class surface member - use class scope
-            var classScope = method.IsStatic ? RenamerScopes.ClassStatic(declaringType) : RenamerScopes.ClassInstance(declaringType);
+            var classScope = RenamerScopes.ClassSide(declaringType, method.IsStatic);
             tsEmitName = ctx.Renamer.GetFinalMemberName(method.StableId, classScope, method.IsStatic);
         }
 
@@ -135,13 +135,13 @@ public static class BindingEmitter
         {
             // ViewOnly member - use view scope
             var interfaceStableId = RenamerScopes.GetInterfaceStableId(property.SourceInterface);
-            var viewScope = RenamerScopes.ViewScope(declaringType, interfaceStableId, property.IsStatic);
+            var viewScope = RenamerScopes.View(declaringType, interfaceStableId, property.IsStatic);
             tsEmitName = ctx.Renamer.GetFinalMemberName(property.StableId, viewScope, property.IsStatic);
         }
         else
         {
             // Class surface member - use class scope
-            var classScope = property.IsStatic ? RenamerScopes.ClassStatic(declaringType) : RenamerScopes.ClassInstance(declaringType);
+            var classScope = RenamerScopes.ClassSide(declaringType, property.IsStatic);
             tsEmitName = ctx.Renamer.GetFinalMemberName(property.StableId, classScope, property.IsStatic);
         }
 
@@ -165,7 +165,7 @@ public static class BindingEmitter
     private static FieldBinding GenerateFieldBinding(FieldSymbol field, TypeSymbol declaringType, BuildContext ctx)
     {
         // Fields are always ClassSurface, use class scope
-        var classScope = field.IsStatic ? RenamerScopes.ClassStatic(declaringType) : RenamerScopes.ClassInstance(declaringType);
+        var classScope = RenamerScopes.ClassSide(declaringType, field.IsStatic);
         var tsEmitName = ctx.Renamer.GetFinalMemberName(field.StableId, classScope, field.IsStatic);
 
         // Generate normalized signature for universal matching
@@ -185,7 +185,7 @@ public static class BindingEmitter
     private static EventBinding GenerateEventBinding(EventSymbol evt, TypeSymbol declaringType, BuildContext ctx)
     {
         // Events are always ClassSurface, use class scope
-        var classScope = evt.IsStatic ? RenamerScopes.ClassStatic(declaringType) : RenamerScopes.ClassInstance(declaringType);
+        var classScope = RenamerScopes.ClassSide(declaringType, evt.IsStatic);
         var tsEmitName = ctx.Renamer.GetFinalMemberName(evt.StableId, classScope, evt.IsStatic);
 
         // Generate normalized signature for universal matching
