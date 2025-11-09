@@ -273,7 +273,8 @@ public sealed class ReflectionReader
             IsOverride = IsMethodOverride(method),
             IsSealed = method.IsFinal,
             Visibility = GetVisibility(method),
-            Provenance = MemberProvenance.Original
+            Provenance = MemberProvenance.Original,
+            EmitScope = EmitScope.ClassSurface  // All reflected members start on class surface
         };
     }
 
@@ -319,7 +320,8 @@ public sealed class ReflectionReader
             IsOverride = getter != null && IsMethodOverride(getter),
             IsAbstract = (getter ?? setter)?.IsAbstract ?? false,
             Visibility = GetPropertyVisibility(property),
-            Provenance = MemberProvenance.Original
+            Provenance = MemberProvenance.Original,
+            EmitScope = EmitScope.ClassSurface  // All reflected members start on class surface
         };
     }
 
@@ -344,7 +346,8 @@ public sealed class ReflectionReader
             IsConst = field.IsLiteral,
             ConstValue = field.IsLiteral ? field.GetRawConstantValue() : null,
             Visibility = GetFieldVisibility(field),
-            Provenance = MemberProvenance.Original
+            Provenance = MemberProvenance.Original,
+            EmitScope = EmitScope.ClassSurface  // All reflected members start on class surface
         };
     }
 
@@ -384,7 +387,8 @@ public sealed class ReflectionReader
             IsVirtual = addMethod?.IsVirtual ?? false,
             IsOverride = addMethod != null && IsMethodOverride(addMethod),
             Visibility = GetEventVisibility(evt),
-            Provenance = MemberProvenance.Original
+            Provenance = MemberProvenance.Original,
+            EmitScope = EmitScope.ClassSurface  // All reflected members start on class surface
         };
     }
 

@@ -60,9 +60,10 @@ public sealed record FieldSymbol
     public required MemberProvenance Provenance { get; init; }
 
     /// <summary>
-    /// Emit scope.
+    /// Where this member should be emitted (class surface, view, or omitted).
+    /// MUST be explicitly set during Shape phase - defaults to Unspecified.
     /// </summary>
-    public EmitScope EmitScope { get; init; } = EmitScope.ClassSurface;
+    public EmitScope EmitScope { get; init; }
 
     /// <summary>
     /// Documentation.

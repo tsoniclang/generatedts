@@ -29,7 +29,7 @@ const DOTNET_VERSION = '10.0.0-rc.1.25451.107';
 const DOTNET_HOME = os.homedir() + '/dotnet';
 const DOTNET_RUNTIME_PATH = `${DOTNET_HOME}/shared/Microsoft.NETCore.App/${DOTNET_VERSION}`;
 
-const VALIDATION_DIR = path.join(__dirname, '..', '.tests', 'validation-new');
+const VALIDATION_DIR = path.join(__dirname, '..', '.tests', 'validate');
 const PROJECT_ROOT = path.join(__dirname, '..');
 
 function log(message) {

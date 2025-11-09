@@ -49,8 +49,31 @@ public static class DiamondResolver
 
     private static (SymbolGraph UpdatedGraph, int ResolvedCount) ResolveForType(BuildContext ctx, SymbolGraph graph, TypeSymbol type, Core.Policy.DiamondResolutionStrategy strategy)
     {
-        // Find methods that come from multiple paths
+        // Skip types that don't have methods: enums, delegates, static namespaces
+        // Interfaces, classes, and structs can have diamond inheritance patterns
+        if (type.Kind is TypeKind.Enum or TypeKind.Delegate or TypeKind.StaticNamespace)
+        {
+            return (graph, 0);
+        }
+
+        // Process per-scope to avoid cross-scope contamination
+        int resolved = 0;
+        var updatedGraph = graph;
+
+        (updatedGraph, var classDetected) = ResolveForScope(ctx, updatedGraph, type, EmitScope.ClassSurface, strategy);
+        resolved += classDetected;
+
+        (updatedGraph, var viewDetected) = ResolveForScope(ctx, updatedGraph, type, EmitScope.ViewOnly, strategy);
+        resolved += viewDetected;
+
+        return (updatedGraph, resolved);
+    }
+
+    private static (SymbolGraph UpdatedGraph, int Detected) ResolveForScope(BuildContext ctx, SymbolGraph graph, TypeSymbol type, EmitScope scope, Core.Policy.DiamondResolutionStrategy strategy)
+    {
+        // Find methods that come from multiple paths in this scope
         var methodGroups = type.Members.Methods
+            .Where(m => m.EmitScope == scope)
             .GroupBy(m => m.ClrName)
             .Where(g => g.Count() > 1)
             .ToList();
@@ -58,8 +81,7 @@ public static class DiamondResolver
         if (methodGroups.Count == 0)
             return (graph, 0);
 
-        int resolved = 0;
-        var methodsToMarkViewOnly = new HashSet<MethodSymbol>();
+        int detected = 0;
 
         // Sort by method name for deterministic iteration
         foreach (var group in methodGroups.OrderBy(g => g.Key))
@@ -79,55 +101,28 @@ public static class DiamondResolver
             if (signatureGroups.Count <= 1)
                 continue;
 
-            // Diamond conflict detected
-            ctx.Log("DiamondResolver", $"Diamond conflict in {type.ClrFullName}.{group.Key} - {signatureGroups.Count} signatures");
+            // Diamond conflict detected - log it, PhaseGate will validate
+            ctx.Log("DiamondResolver",
+                $"Diamond conflict in {type.ClrFullName}.{group.Key} (scope: {scope}) - {signatureGroups.Count} signatures. " +
+                $"Strategy: {strategy}. PhaseGate will validate.");
 
             if (strategy == Core.Policy.DiamondResolutionStrategy.OverloadAll)
             {
                 // Keep all overloads - they're already in the members list
-                // Just ensure they all have unique names via renamer if needed
-                foreach (var method in methods)
-                {
-                    EnsureMethodRenamed(ctx, type, method);
-                }
-                resolved += methods.Count;
+                // Renamer will handle unique names if needed
+                detected += methods.Count;
             }
             else if (strategy == Core.Policy.DiamondResolutionStrategy.PreferDerived)
             {
-                // Keep only the most derived version (first in list, typically)
-                // Mark others as ViewOnly
-                foreach (var method in methods.Skip(1))
-                {
-                    methodsToMarkViewOnly.Add(method);
-                }
-                resolved++;
+                // Log that we would prefer derived, but don't modify scopes
+                // PhaseGate will catch duplicates if this causes problems
+                detected++;
             }
         }
 
-        // If no methods need updating, return original graph
-        if (methodsToMarkViewOnly.Count == 0)
-            return (graph, resolved);
-
-        // Build new method list with updated EmitScope
-        var updatedMethods = type.Members.Methods.Select(m =>
-        {
-            if (methodsToMarkViewOnly.Contains(m))
-            {
-                return m with { EmitScope = EmitScope.ViewOnly };
-            }
-            return m;
-        }).ToImmutableArray();
-
-        // Update the type immutably
-        var updatedGraph = graph.WithUpdatedType(type.StableId.ToString(), t => t with
-        {
-            Members = t.Members with
-            {
-                Methods = updatedMethods
-            }
-        });
-
-        return (updatedGraph, resolved);
+        // Don't modify EmitScope - just detect conflicts and let PhaseGate handle them
+        // Return graph unchanged since we're only logging
+        return (graph, detected);
     }
 
     private static void EnsureMethodRenamed(BuildContext ctx, TypeSymbol type, MethodSymbol method)

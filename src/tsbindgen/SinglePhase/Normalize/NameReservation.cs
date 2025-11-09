@@ -536,6 +536,21 @@ public static class NameReservation
                 continue;
             }
 
+            // Guard: Never reserve names for Unspecified members - this is a developer mistake
+            if (method.EmitScope == EmitScope.Unspecified)
+            {
+                throw new InvalidOperationException(
+                    $"Cannot reserve name for method with Unspecified EmitScope: {method.StableId} in {type.ClrFullName}. " +
+                    "EmitScope must be explicitly set during Shape phase.");
+            }
+
+            // Skip Omitted members - they don't need name reservations
+            if (method.EmitScope == EmitScope.Omitted)
+            {
+                skipped++;
+                continue;
+            }
+
             // Check if already renamed by earlier pass (e.g., HiddenMemberPlanner, IndexerPlanner)
             // M5 FIX: Pass class scope and isStatic to TryGetDecision
             var methodCheckScope = ScopeFactory.ClassSurface(type, method.IsStatic);
@@ -571,6 +586,21 @@ public static class NameReservation
                 continue;
             }
 
+            // Guard: Never reserve names for Unspecified members - this is a developer mistake
+            if (property.EmitScope == EmitScope.Unspecified)
+            {
+                throw new InvalidOperationException(
+                    $"Cannot reserve name for property with Unspecified EmitScope: {property.StableId} in {type.ClrFullName}. " +
+                    "EmitScope must be explicitly set during Shape phase.");
+            }
+
+            // Skip Omitted members - they don't need name reservations
+            if (property.EmitScope == EmitScope.Omitted)
+            {
+                skipped++;
+                continue;
+            }
+
             // Check if already renamed (e.g., IndexerPlanner)
             // M5 FIX: Pass class scope and isStatic to TryGetDecision
             var propertyCheckScope = ScopeFactory.ClassSurface(type, property.IsStatic);
@@ -588,6 +618,21 @@ public static class NameReservation
 
         foreach (var field in type.Members.Fields.OrderBy(f => f.ClrName))
         {
+            // Guard: Never reserve names for Unspecified members - this is a developer mistake
+            if (field.EmitScope == EmitScope.Unspecified)
+            {
+                throw new InvalidOperationException(
+                    $"Cannot reserve name for field with Unspecified EmitScope: {field.StableId} in {type.ClrFullName}. " +
+                    "EmitScope must be explicitly set during Shape phase.");
+            }
+
+            // Skip Omitted members - they don't need name reservations
+            if (field.EmitScope == EmitScope.Omitted)
+            {
+                skipped++;
+                continue;
+            }
+
             // Check if already renamed
             // M5 FIX: Pass class scope and isStatic to TryGetDecision
             var fieldCheckScope = ScopeFactory.ClassSurface(type, field.IsStatic);
@@ -605,6 +650,21 @@ public static class NameReservation
 
         foreach (var ev in type.Members.Events.OrderBy(e => e.ClrName))
         {
+            // Guard: Never reserve names for Unspecified members - this is a developer mistake
+            if (ev.EmitScope == EmitScope.Unspecified)
+            {
+                throw new InvalidOperationException(
+                    $"Cannot reserve name for event with Unspecified EmitScope: {ev.StableId} in {type.ClrFullName}. " +
+                    "EmitScope must be explicitly set during Shape phase.");
+            }
+
+            // Skip Omitted members - they don't need name reservations
+            if (ev.EmitScope == EmitScope.Omitted)
+            {
+                skipped++;
+                continue;
+            }
+
             // Check if already renamed
             // M5 FIX: Pass class scope and isStatic to TryGetDecision
             var eventCheckScope = ScopeFactory.ClassSurface(type, ev.IsStatic);

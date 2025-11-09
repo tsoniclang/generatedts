@@ -86,10 +86,10 @@ public sealed record MethodSymbol
     public required MemberProvenance Provenance { get; init; }
 
     /// <summary>
-    /// Where this member should be emitted (ClassSurface, StaticSurface, ViewOnly).
-    /// Determined during shaping.
+    /// Where this member should be emitted (class surface, view, or omitted).
+    /// MUST be explicitly set during Shape phase - defaults to Unspecified.
     /// </summary>
-    public EmitScope EmitScope { get; init; } = EmitScope.ClassSurface;
+    public EmitScope EmitScope { get; init; }
 
     /// <summary>
     /// XML documentation comment.
@@ -213,6 +213,13 @@ public enum MemberProvenance
 
 public enum EmitScope
 {
+    /// <summary>
+    /// Unspecified - member placement has not been decided yet.
+    /// This is the default state and MUST be explicitly set to a real scope.
+    /// PhaseGate will error (PG_FIN_001) if any member reaches emission with this value.
+    /// </summary>
+    Unspecified = 0,
+
     /// <summary>
     /// Emit on the main class/interface surface.
     /// </summary>

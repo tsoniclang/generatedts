@@ -39,15 +39,38 @@ public static class OverloadReturnConflictResolver
 
     private static (SymbolGraph UpdatedGraph, int ResolvedCount) ResolveForType(BuildContext ctx, SymbolGraph graph, TypeSymbol type)
     {
+        // Skip types that don't emit methods: enums, delegates, static namespaces
+        // Interfaces, classes, and structs all need return-type conflict resolution
+        if (type.Kind is TypeKind.Enum or TypeKind.Delegate or TypeKind.StaticNamespace)
+        {
+            return (graph, 0);
+        }
+
+        // Process per-scope to avoid cross-scope contamination (class surface vs view surface)
+        int resolved = 0;
+        var updatedGraph = graph;
+
+        (updatedGraph, var classDetected) = ResolveForScope(ctx, updatedGraph, type, EmitScope.ClassSurface);
+        resolved += classDetected;
+
+        (updatedGraph, var viewDetected) = ResolveForScope(ctx, updatedGraph, type, EmitScope.ViewOnly);
+        resolved += viewDetected;
+
+        return (updatedGraph, resolved);
+    }
+
+    private static (SymbolGraph UpdatedGraph, int Detected) ResolveForScope(BuildContext ctx, SymbolGraph graph, TypeSymbol type, EmitScope scope)
+    {
         // Group methods by signature excluding return type, sorted for deterministic iteration
+        // Only consider methods in this scope (and not Omitted)
         var methodGroups = type.Members.Methods
+            .Where(m => m.EmitScope == scope)
             .GroupBy(m => GetSignatureWithoutReturn(ctx, m))
             .Where(g => g.Count() > 1)
             .OrderBy(g => g.Key)
             .ToList();
 
-        int resolved = 0;
-        var methodsToMarkViewOnly = new HashSet<MethodSymbol>();
+        int detected = 0;
 
         foreach (var group in methodGroups)
         {
@@ -59,34 +82,21 @@ public static class OverloadReturnConflictResolver
             if (returnTypes.Count <= 1)
                 continue; // Same return type, no conflict
 
-            // Return-type conflict detected
-            ctx.Log("OverloadReturnConflictResolver", $"Return-type conflict in {type.ClrFullName}.{methods[0].ClrName} - {returnTypes.Count} return types");
+            // Return-type conflict detected - log it, PhaseGate will catch this
+            ctx.Log("OverloadReturnConflictResolver",
+                $"Return-type conflict in {type.ClrFullName}.{methods[0].ClrName} " +
+                $"(scope:{scope}, stable:{methods[0].StableId}) – {returnTypes.Count} return types. PhaseGate will validate.");
 
-            // Select a representative method to keep on the class surface
-            // Prefer non-void, prefer immutable returns (no ref/out parameters)
-            var representative = SelectRepresentative(methods);
-
-            // Mark others as ViewOnly
-            foreach (var method in methods)
-            {
-                if (method != representative)
-                {
-                    methodsToMarkViewOnly.Add(method);
-                }
-            }
-
-            resolved++;
+            detected++;
         }
 
-        // Do the same for properties (indexers can have return-type conflicts), sorted for deterministic iteration
+        // Do the same for properties (indexers can have return-type conflicts)
         var propertyGroups = type.Members.Properties
-            .Where(p => p.IsIndexer)
+            .Where(p => p.IsIndexer && p.EmitScope == scope)
             .GroupBy(p => GetPropertySignatureWithoutReturn(ctx, p))
             .Where(g => g.Count() > 1)
             .OrderBy(g => g.Key)
             .ToList();
-
-        var propertiesToMarkViewOnly = new HashSet<PropertySymbol>();
 
         foreach (var group in propertyGroups)
         {
@@ -97,55 +107,15 @@ public static class OverloadReturnConflictResolver
             if (propertyTypes.Count <= 1)
                 continue;
 
-            ctx.Log("OverloadReturnConflictResolver", $"Property type conflict in {type.ClrFullName} indexers - {propertyTypes.Count} types");
+            ctx.Log("OverloadReturnConflictResolver",
+                $"Property type conflict in {type.ClrFullName} indexers (scope: {scope}) - {propertyTypes.Count} types. PhaseGate will validate.");
 
-            var representative = properties.First(); // Simple: keep first
-
-            foreach (var property in properties)
-            {
-                if (property != representative)
-                {
-                    propertiesToMarkViewOnly.Add(property);
-                }
-            }
-
-            resolved++;
+            detected++;
         }
 
-        // If nothing needs updating, return original graph
-        if (methodsToMarkViewOnly.Count == 0 && propertiesToMarkViewOnly.Count == 0)
-            return (graph, resolved);
-
-        // Build updated member lists immutably
-        var updatedMethods = type.Members.Methods.Select(m =>
-        {
-            if (methodsToMarkViewOnly.Contains(m))
-            {
-                return m with { EmitScope = EmitScope.ViewOnly };
-            }
-            return m;
-        }).ToImmutableArray();
-
-        var updatedProperties = type.Members.Properties.Select(p =>
-        {
-            if (propertiesToMarkViewOnly.Contains(p))
-            {
-                return p with { EmitScope = EmitScope.ViewOnly };
-            }
-            return p;
-        }).ToImmutableArray();
-
-        // Update the type immutably
-        var updatedGraph = graph.WithUpdatedType(type.StableId.ToString(), t => t with
-        {
-            Members = t.Members with
-            {
-                Methods = updatedMethods,
-                Properties = updatedProperties
-            }
-        });
-
-        return (updatedGraph, resolved);
+        // Don't modify EmitScope - just detect conflicts and let PhaseGate handle them
+        // Return graph unchanged since we're only logging
+        return (graph, detected);
     }
 
     private static string GetSignatureWithoutReturn(BuildContext ctx, MethodSymbol method)

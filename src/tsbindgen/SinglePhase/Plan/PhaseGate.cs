@@ -2606,10 +2606,51 @@ public static class PhaseGate
                         viewOnlyMembers.Add(field.StableId);
                 }
 
-                // PG_FIN_001: Check all members have valid EmitScope
-                // NOTE: ClassSurface is the default and is valid - we just want to catch truly uninitialized members
-                // Since all member symbols have default EmitScope = ClassSurface, this check is currently a no-op
-                // Left as placeholder for future enhancement if we add explicit uninitialized state
+                // PG_FIN_001: Check all members have explicit EmitScope (not Unspecified)
+                // Every member MUST have deliberate placement decision - no defaults allowed
+                foreach (var prop in type.Members.Properties)
+                {
+                    if (prop.EmitScope == EmitScope.Unspecified)
+                    {
+                        validationCtx.RecordDiagnostic(
+                            Core.Diagnostics.DiagnosticCodes.PG_FIN_001,
+                            "ERROR",
+                            $"Property {prop.ClrName} in {type.ClrFullName} has no EmitScope placement (still Unspecified)");
+                    }
+                }
+
+                foreach (var method in type.Members.Methods)
+                {
+                    if (method.EmitScope == EmitScope.Unspecified)
+                    {
+                        validationCtx.RecordDiagnostic(
+                            Core.Diagnostics.DiagnosticCodes.PG_FIN_001,
+                            "ERROR",
+                            $"Method {method.ClrName} in {type.ClrFullName} has no EmitScope placement (still Unspecified)");
+                    }
+                }
+
+                foreach (var field in type.Members.Fields)
+                {
+                    if (field.EmitScope == EmitScope.Unspecified)
+                    {
+                        validationCtx.RecordDiagnostic(
+                            Core.Diagnostics.DiagnosticCodes.PG_FIN_001,
+                            "ERROR",
+                            $"Field {field.ClrName} in {type.ClrFullName} has no EmitScope placement (still Unspecified)");
+                    }
+                }
+
+                foreach (var evt in type.Members.Events)
+                {
+                    if (evt.EmitScope == EmitScope.Unspecified)
+                    {
+                        validationCtx.RecordDiagnostic(
+                            Core.Diagnostics.DiagnosticCodes.PG_FIN_001,
+                            "ERROR",
+                            $"Event {evt.ClrName} in {type.ClrFullName} has no EmitScope placement (still Unspecified)");
+                    }
+                }
 
                 // PG_FIN_007: Check for dual-role clashes (same StableId in both ClassSurface and ViewOnly)
                 var dualRole = classSurfaceMembers.Intersect(viewOnlyMembers).ToList();
