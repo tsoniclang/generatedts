@@ -46,6 +46,28 @@ public static class ExplicitImplSynthesizer
     {
         ctx.Log("ExplicitImplSynthesizer", $"Processing type {type.ClrFullName} with {type.Interfaces.Length} interfaces");
 
+        // DEBUG: Check for duplicates in existing members (should never happen)
+        var methodDuplicates = type.Members.Methods
+            .GroupBy(m => m.StableId)
+            .Where(g => g.Count() > 1)
+            .ToList();
+
+        var propertyDuplicates = type.Members.Properties
+            .GroupBy(p => p.StableId)
+            .Where(g => g.Count() > 1)
+            .ToList();
+
+        if (methodDuplicates.Any() || propertyDuplicates.Any())
+        {
+            var details = string.Join("\n",
+                methodDuplicates.Select(g => $"  Method {g.Key}: {g.Count()} duplicates")
+                .Concat(propertyDuplicates.Select(g => $"  Property {g.Key}: {g.Count()} duplicates")));
+
+            throw new InvalidOperationException(
+                $"ExplicitImplSynthesizer: Type {type.ClrFullName} already has duplicate members BEFORE synthesis:\n{details}\n" +
+                $"This indicates a loader bug or earlier pass adding duplicates.");
+        }
+
         // Collect all interface members required
         var requiredMembers = CollectInterfaceMembers(ctx, graph, type);
 
@@ -76,6 +98,61 @@ public static class ExplicitImplSynthesizer
         {
             var synthesized = SynthesizeProperty(ctx, type, iface, property);
             synthesizedProperties.Add(synthesized);
+        }
+
+        // DEDUPLICATION: Multiple interfaces may require the same member (e.g., ICollection.CopyTo and IList.CopyTo)
+        // Keep only the first synthesis of each unique StableId (deterministic)
+        var uniqueMethods = synthesizedMethods.GroupBy(m => m.StableId).Select(g => g.First()).ToList();
+        var uniqueProperties = synthesizedProperties.GroupBy(p => p.StableId).Select(g => g.First()).ToList();
+
+        if (synthesizedMethods.Count != uniqueMethods.Count)
+        {
+            ctx.Log("ExplicitImplSynthesizer",
+                $"Deduplicated {synthesizedMethods.Count - uniqueMethods.Count} duplicate methods " +
+                $"(multiple interfaces required same member)");
+        }
+
+        if (synthesizedProperties.Count != uniqueProperties.Count)
+        {
+            ctx.Log("ExplicitImplSynthesizer",
+                $"Deduplicated {synthesizedProperties.Count - uniqueProperties.Count} duplicate properties " +
+                $"(multiple interfaces required same member)");
+        }
+
+        synthesizedMethods = uniqueMethods;
+        synthesizedProperties = uniqueProperties;
+
+        // VALIDATION: Check for duplicates WITHIN the synthesized list (should be none after deduplication)
+        var methodStableIdGroups = synthesizedMethods.GroupBy(m => m.StableId).Where(g => g.Count() > 1).ToList();
+        var propertyStableIdGroups = synthesizedProperties.GroupBy(p => p.StableId).Where(g => g.Count() > 1).ToList();
+
+        if (methodStableIdGroups.Any() || propertyStableIdGroups.Any())
+        {
+            var details = string.Join("\n",
+                methodStableIdGroups.Select(g => $"  Method: {g.Key} ({g.Count()} copies)")
+                .Concat(propertyStableIdGroups.Select(g => $"  Property: {g.Key} ({g.Count()} copies)")));
+
+            throw new InvalidOperationException(
+                $"ExplicitImplSynthesizer: Synthesized list contains INTERNAL duplicates for {type.ClrFullName}:\n{details}\n" +
+                $"This indicates multiple interfaces required the same member.");
+        }
+
+        // VALIDATION: Check if adding these members would create duplicates with existing
+        var existingMethodStableIds = type.Members.Methods.Select(m => m.StableId).ToHashSet();
+        var existingPropertyStableIds = type.Members.Properties.Select(p => p.StableId).ToHashSet();
+
+        var duplicateMethodsToAdd = synthesizedMethods.Where(m => existingMethodStableIds.Contains(m.StableId)).ToList();
+        var duplicatePropertiesToAdd = synthesizedProperties.Where(p => existingPropertyStableIds.Contains(p.StableId)).ToList();
+
+        if (duplicateMethodsToAdd.Any() || duplicatePropertiesToAdd.Any())
+        {
+            var details = string.Join("\n",
+                duplicateMethodsToAdd.Select(m => $"  Method: {m.StableId}")
+                .Concat(duplicatePropertiesToAdd.Select(p => $"  Property: {p.StableId}")));
+
+            throw new InvalidOperationException(
+                $"ExplicitImplSynthesizer: Attempting to add duplicate members to {type.ClrFullName}:\n{details}\n" +
+                $"This would create duplicates with existing. Check FindMissingMembers logic.");
         }
 
         // Add synthesized members to the type (immutably)
@@ -146,21 +223,11 @@ public static class ExplicitImplSynthesizer
         var missingProperties = new List<(TypeReference Iface, PropertySymbol Property)>();
 
         // Check each required method
+        // FIX: Compare by StableId directly instead of re-canonicalizing signatures
+        // After canonical format change, re-canonicalizing causes mismatches
         foreach (var (iface, method) in required.Methods)
         {
-            var sig = ctx.CanonicalizeMethod(
-                method.ClrName,
-                method.Parameters.Select(p => GetTypeFullName(p.Type)).ToList(),
-                GetTypeFullName(method.ReturnType));
-
-            var exists = type.Members.Methods.Any(m =>
-            {
-                var mSig = ctx.CanonicalizeMethod(
-                    m.ClrName,
-                    m.Parameters.Select(p => GetTypeFullName(p.Type)).ToList(),
-                    GetTypeFullName(m.ReturnType));
-                return mSig == sig;
-            });
+            var exists = type.Members.Methods.Any(m => m.StableId.Equals(method.StableId));
 
             if (!exists)
             {
@@ -169,24 +236,10 @@ public static class ExplicitImplSynthesizer
         }
 
         // Check each required property
+        // FIX: Compare by StableId directly instead of re-canonicalizing signatures
         foreach (var (iface, property) in required.Properties)
         {
-            var indexParams = property.IndexParameters.Select(p => GetTypeFullName(p.Type)).ToList();
-
-            var sig = ctx.CanonicalizeProperty(
-                property.ClrName,
-                indexParams,
-                GetTypeFullName(property.PropertyType));
-
-            var exists = type.Members.Properties.Any(p =>
-            {
-                var pIndexParams = p.IndexParameters.Select(param => GetTypeFullName(param.Type)).ToList();
-                var pSig = ctx.CanonicalizeProperty(
-                    p.ClrName,
-                    pIndexParams,
-                    GetTypeFullName(p.PropertyType));
-                return pSig == sig;
-            });
+            var exists = type.Members.Properties.Any(p => p.StableId.Equals(property.StableId));
 
             if (!exists)
             {

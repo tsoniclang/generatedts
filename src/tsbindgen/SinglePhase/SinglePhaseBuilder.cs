@@ -140,6 +140,27 @@ public static class SinglePhaseBuilder
         // The shaping passes will be applied in sequence
         // Each pass may consult or update the Renamer
 
+        // DEBUG: Check for duplicates IMMEDIATELY after loading, before any Shape passes
+        ctx.Log("SinglePhaseBuilder", "Checking for duplicates immediately after load...");
+        var allTypes = graph.Namespaces.SelectMany(ns => ns.Types).ToList();
+        foreach (var type in allTypes)
+        {
+            var methodDuplicates = type.Members.Methods
+                .GroupBy(m => m.StableId)
+                .Where(g => g.Count() > 1)
+                .ToList();
+
+            if (methodDuplicates.Any())
+            {
+                var details = string.Join("\n", methodDuplicates.Select(g => $"  Method {g.Key}: {g.Count()} duplicates"));
+                ctx.Log("SinglePhaseBuilder", $"ERROR: Type {type.ClrFullName} ALREADY has duplicates IMMEDIATELY AFTER LOAD:\n{details}");
+                throw new InvalidOperationException(
+                    $"SinglePhaseBuilder: Type {type.ClrFullName} has duplicate members immediately after loading from reflection:\n{details}\n" +
+                    $"This indicates a bug in the ReflectionReader.");
+            }
+        }
+        ctx.Log("SinglePhaseBuilder", "No duplicates found after load - data is clean");
+
         // 1. Build interface indices BEFORE flattening (need original hierarchy)
         GlobalInterfaceIndex.Build(ctx, graph);
         InterfaceDeclIndex.Build(ctx, graph);

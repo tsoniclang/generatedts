@@ -19,6 +19,22 @@ public static class BaseOverloadAdder
     {
         ctx.Log("BaseOverloadAdder", "Adding base class overloads...");
 
+        // DEBUG: Check for duplicates BEFORE we do anything
+        var allTypes = graph.Namespaces.SelectMany(ns => ns.Types).ToList();
+        foreach (var type in allTypes)
+        {
+            var methodDuplicates = type.Members.Methods
+                .GroupBy(m => m.StableId)
+                .Where(g => g.Count() > 1)
+                .ToList();
+
+            if (methodDuplicates.Any())
+            {
+                var details = string.Join("\n", methodDuplicates.Select(g => $"  Method {g.Key}: {g.Count()} duplicates"));
+                ctx.Log("BaseOverloadAdder", $"WARNING: Type {type.ClrFullName} ALREADY has duplicates at entry:\n{details}");
+            }
+        }
+
         var classes = graph.Namespaces
             .SelectMany(ns => ns.Types)
             .Where(t => t.Kind == TypeKind.Class && t.BaseType != null)
@@ -40,6 +56,9 @@ public static class BaseOverloadAdder
 
     private static (SymbolGraph UpdatedGraph, int AddedCount) AddOverloadsForClass(BuildContext ctx, SymbolGraph graph, TypeSymbol derivedClass)
     {
+        // DEBUG: Log which type we're processing
+        ctx.Log("BaseOverloadAdder", $"Processing {derivedClass.ClrFullName} (Kind: {derivedClass.Kind})");
+
         // Find the base class
         var baseClass = FindBaseClass(graph, derivedClass);
         if (baseClass == null)
@@ -69,27 +88,33 @@ public static class BaseOverloadAdder
             }
 
             // Check each base method to see if derived has the same signature
+            // FIX: Compare by StableId instead of re-canonicalizing (same fix as ExplicitImplSynthesizer)
             foreach (var baseMethod in baseMethods)
             {
-                var baseSig = ctx.CanonicalizeMethod(
-                    baseMethod.ClrName,
-                    baseMethod.Parameters.Select(p => GetTypeFullName(p.Type)).ToList(),
-                    GetTypeFullName(baseMethod.ReturnType));
-
-                var derivedHasSig = derivedMethods.Any(dm =>
+                // Build the StableId that the derived method would have if it existed
+                var expectedStableId = new MemberStableId
                 {
-                    var dSig = ctx.CanonicalizeMethod(
-                        dm.ClrName,
-                        dm.Parameters.Select(p => GetTypeFullName(p.Type)).ToList(),
-                        GetTypeFullName(dm.ReturnType));
-                    return dSig == baseSig;
-                });
+                    AssemblyName = derivedClass.StableId.AssemblyName,
+                    DeclaringClrFullName = derivedClass.ClrFullName,
+                    MemberName = baseMethod.ClrName,
+                    CanonicalSignature = ctx.CanonicalizeMethod(
+                        baseMethod.ClrName,
+                        baseMethod.Parameters.Select(p => GetTypeFullName(p.Type)).ToList(),
+                        GetTypeFullName(baseMethod.ReturnType))
+                };
 
-                if (!derivedHasSig)
+                var derivedHas = derivedMethods.Any(dm => dm.StableId.Equals(expectedStableId));
+
+                if (!derivedHas)
                 {
                     // Derived doesn't have this base overload - add it
+                    ctx.Log("BaseOverloadAdder", $"Adding base overload to {derivedClass.ClrFullName}: {baseMethod.ClrName} -> StableId: {expectedStableId}");
                     var addedMethod = CreateBaseOverloadMethod(ctx, derivedClass, baseMethod);
                     addedMethods.Add(addedMethod);
+                }
+                else
+                {
+                    ctx.Log("BaseOverloadAdder", $"Derived already has: {baseMethod.ClrName} -> StableId: {expectedStableId}");
                 }
             }
         }
@@ -97,7 +122,42 @@ public static class BaseOverloadAdder
         if (addedMethods.Count == 0)
             return (graph, 0);
 
+        // DEDUPLICATION: If base hierarchy has same method at multiple levels, deduplicate by StableId
+        var uniqueMethods = addedMethods.GroupBy(m => m.StableId).Select(g => g.First()).ToList();
+
+        if (addedMethods.Count != uniqueMethods.Count)
+        {
+            ctx.Log("BaseOverloadAdder",
+                $"Deduplicated {addedMethods.Count - uniqueMethods.Count} duplicate base overloads " +
+                $"(method appears at multiple hierarchy levels)");
+        }
+
+        addedMethods = uniqueMethods;
+
         ctx.Log("BaseOverloadAdder", $"Adding {addedMethods.Count} base overloads to {derivedClass.ClrFullName}");
+
+        // VALIDATION: Check for duplicates WITHIN the added list (should be none after deduplication)
+        var internalDuplicates = addedMethods.GroupBy(m => m.StableId).Where(g => g.Count() > 1).ToList();
+        if (internalDuplicates.Any())
+        {
+            var details = string.Join("\n", internalDuplicates.Select(g => $"  {g.Key} ({g.Count()} copies)"));
+            throw new InvalidOperationException(
+                $"BaseOverloadAdder: Added list contains INTERNAL duplicates for {derivedClass.ClrFullName}:\n{details}\n" +
+                $"This indicates base overload logic added the same method multiple times.");
+        }
+
+        // VALIDATION: Check if adding these methods would create duplicates with existing
+        var existingStableIds = derivedClass.Members.Methods.Select(m => m.StableId).ToHashSet();
+        var addedStableIds = addedMethods.Select(m => m.StableId).ToList();
+        var duplicates = addedStableIds.Where(id => existingStableIds.Contains(id)).ToList();
+
+        if (duplicates.Any())
+        {
+            var details = string.Join("\n", duplicates.Select(id => $"  {id}"));
+            throw new InvalidOperationException(
+                $"BaseOverloadAdder: Attempting to add duplicate methods to {derivedClass.ClrFullName}:\n{details}\n" +
+                $"This would create duplicates with existing. Check comparison logic.");
+        }
 
         // Add to derived class (immutably)
         var updatedGraph = graph.WithUpdatedType(derivedClass.StableId.ToString(), t => t with

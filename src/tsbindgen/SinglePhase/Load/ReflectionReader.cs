@@ -167,12 +167,33 @@ public sealed class ReflectionReader
         const BindingFlags publicStatic = BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly;
 
         // Read methods
+        var seenMethods = new HashSet<string>();
         foreach (var method in type.GetMethods(publicInstance | publicStatic))
         {
             // Skip property/event accessors and special methods
             if (method.IsSpecialName) continue;
 
-            methods.Add(ReadMethod(method, type));
+            // DEBUG: Track method tokens to detect duplicates from reflection
+            var methodKey = $"{method.Name}|{method.MetadataToken}";
+            if (seenMethods.Contains(methodKey))
+            {
+                _ctx.Log("ReflectionReader", $"WARNING: GetMethods returned duplicate method: {type.FullName}::{method.Name} (token: {method.MetadataToken})");
+                continue; // Skip duplicate
+            }
+            seenMethods.Add(methodKey);
+
+            var methodSymbol = ReadMethod(method, type);
+
+            // DEBUG: Log if we're about to add a duplicate StableId
+            if (methods.Any(m => m.StableId.Equals(methodSymbol.StableId)))
+            {
+                _ctx.Log("ReflectionReader", $"ERROR: About to add duplicate StableId: {methodSymbol.StableId}");
+                _ctx.Log("ReflectionReader", $"  Method name: {method.Name}, MetadataToken: {method.MetadataToken}");
+                _ctx.Log("ReflectionReader", $"  Type: {type.FullName}");
+                continue; // Skip to prevent duplicate
+            }
+
+            methods.Add(methodSymbol);
         }
 
         // Read properties

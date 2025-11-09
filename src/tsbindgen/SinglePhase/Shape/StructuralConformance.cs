@@ -195,6 +195,39 @@ public static class StructuralConformance
         if (viewOnlyMethods.Count == 0 && viewOnlyProperties.Count == 0)
             return (type, 0);
 
+        // VALIDATION: Check for duplicates WITHIN the synthesized list
+        var methodStableIdGroups = viewOnlyMethods.GroupBy(m => m.StableId).Where(g => g.Count() > 1).ToList();
+        var propertyStableIdGroups = viewOnlyProperties.GroupBy(p => p.StableId).Where(g => g.Count() > 1).ToList();
+
+        if (methodStableIdGroups.Any() || propertyStableIdGroups.Any())
+        {
+            var details = string.Join("\n",
+                methodStableIdGroups.Select(g => $"  Method: {g.Key} ({g.Count()} copies)")
+                .Concat(propertyStableIdGroups.Select(g => $"  Property: {g.Key} ({g.Count()} copies)")));
+
+            throw new InvalidOperationException(
+                $"StructuralConformance: Synthesized list contains INTERNAL duplicates for {type.ClrFullName}:\n{details}\n" +
+                $"This indicates synthesis logic created the same member multiple times.");
+        }
+
+        // VALIDATION: Check if adding these ViewOnly members would create duplicates with existing
+        var existingMethodStableIds = type.Members.Methods.Select(m => m.StableId).ToHashSet();
+        var existingPropertyStableIds = type.Members.Properties.Select(p => p.StableId).ToHashSet();
+
+        var duplicateMethodsToAdd = viewOnlyMethods.Where(m => existingMethodStableIds.Contains(m.StableId)).ToList();
+        var duplicatePropertiesToAdd = viewOnlyProperties.Where(p => existingPropertyStableIds.Contains(p.StableId)).ToList();
+
+        if (duplicateMethodsToAdd.Any() || duplicatePropertiesToAdd.Any())
+        {
+            var details = string.Join("\n",
+                duplicateMethodsToAdd.Select(m => $"  Method: {m.StableId}")
+                .Concat(duplicatePropertiesToAdd.Select(p => $"  Property: {p.StableId}")));
+
+            throw new InvalidOperationException(
+                $"StructuralConformance: Attempting to add duplicate ViewOnly members to {type.ClrFullName}:\n{details}\n" +
+                $"This would create duplicates with existing members.");
+        }
+
         // Add ViewOnly members to type immutably
         var updatedType = type
             .WithAddedMethods(viewOnlyMethods)
