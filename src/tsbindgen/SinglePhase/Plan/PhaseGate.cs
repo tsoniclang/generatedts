@@ -1058,19 +1058,12 @@ public static class PhaseGate
         {
             var typeNamesInNamespace = new HashSet<string>();
 
-            var namespaceScope = new SinglePhase.Renaming.NamespaceScope
-            {
-                Namespace = ns.Name,
-                IsInternal = true,
-                ScopeKey = ns.Name
-            };
-
             foreach (var type in ns.Types)
             {
                 totalTypes++;
 
                 // Get final name from Renamer
-                var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, namespaceScope);
+                var finalName = ctx.Renamer.GetFinalTypeName(type);
 
                 if (string.IsNullOrWhiteSpace(finalName))
                 {
@@ -1101,19 +1094,13 @@ public static class PhaseGate
                 var instanceMemberNames = new HashSet<string>();
                 var staticMemberNames = new HashSet<string>();
 
-                var typeScope = new SinglePhase.Renaming.TypeScope
-                {
-                    TypeFullName = type.ClrFullName,
-                    IsStatic = false, // Will be overridden per member
-                    ScopeKey = type.ClrFullName
-                };
-
                 // Validate method names (ClassSurface only - ViewOnly members may have duplicate names in different views)
                 foreach (var method in type.Members.Methods.Where(m => m.EmitScope == EmitScope.ClassSurface))
                 {
                     totalMembers++;
 
-                    var finalName = ctx.Renamer.GetFinalMemberName(method.StableId, typeScope, method.IsStatic);
+                    var methodScope = ScopeFactory.ClassSurface(type, method.IsStatic);
+                    var finalName = ctx.Renamer.GetFinalMemberName(method.StableId, methodScope);
 
                     if (string.IsNullOrWhiteSpace(finalName))
                     {
@@ -1146,7 +1133,8 @@ public static class PhaseGate
                 {
                     totalMembers++;
 
-                    var finalName = ctx.Renamer.GetFinalMemberName(property.StableId, typeScope, property.IsStatic);
+                    var propertyScope = ScopeFactory.ClassSurface(type, property.IsStatic);
+                    var finalName = ctx.Renamer.GetFinalMemberName(property.StableId, propertyScope);
 
                     if (string.IsNullOrWhiteSpace(finalName))
                     {
@@ -1176,7 +1164,8 @@ public static class PhaseGate
                 {
                     totalMembers++;
 
-                    var finalName = ctx.Renamer.GetFinalMemberName(field.StableId, typeScope, field.IsStatic);
+                    var fieldScope = ScopeFactory.ClassSurface(type, field.IsStatic);
+                    var finalName = ctx.Renamer.GetFinalMemberName(field.StableId, fieldScope);
 
                     if (string.IsNullOrWhiteSpace(finalName))
                     {
@@ -1274,7 +1263,7 @@ public static class PhaseGate
             {
                 foreach (var localType in localNamespace.Types)
                 {
-                    var localTypeName = ctx.Renamer.GetFinalTypeName(localType.StableId, namespaceScope);
+                    var localTypeName = ctx.Renamer.GetFinalTypeName(localType);
 
                     if (typeNamesInScope.Contains(localTypeName))
                     {
@@ -1319,14 +1308,7 @@ public static class PhaseGate
             foreach (var type in ns.Types)
             {
                 // Get the final emitted name from Renamer
-                var namespaceScope = new SinglePhase.Renaming.NamespaceScope
-                {
-                    Namespace = ns.Name,
-                    IsInternal = true,
-                    ScopeKey = ns.Name
-                };
-
-                var emittedTypeName = ctx.Renamer.GetFinalTypeName(type.StableId, namespaceScope);
+                var emittedTypeName = ctx.Renamer.GetFinalTypeName(type);
 
                 // Check type name
                 totalIdentifiersChecked++;
@@ -1341,22 +1323,19 @@ public static class PhaseGate
                     CheckIdentifier(ctx, validationCtx, "type parameter", $"{type.ClrFullName}.{tp.Name}", type.StableId.ToString(), sanitizedTpName, ref unsanitizedCount);
                 }
 
-                // Create type scope for member name lookups
-                var typeScope = new SinglePhase.Renaming.TypeScope
-                {
-                    TypeFullName = type.ClrFullName,
-                    IsStatic = false, // Will be overridden per member
-                    ScopeKey = type.ClrFullName
-                };
-
-                // Check methods
+                // Check methods (ClassSurface only - ViewOnly members checked in view loop below)
                 foreach (var method in type.Members.Methods)
                 {
                     // Skip private/internal members that won't be emitted
                     if (method.Visibility != Visibility.Public)
                         continue;
 
-                    var emittedMethodName = ctx.Renamer.GetFinalMemberName(method.StableId, typeScope, method.IsStatic);
+                    // Skip ViewOnly members - they're checked in the view members loop below
+                    if (method.EmitScope == EmitScope.ViewOnly)
+                        continue;
+
+                    var methodScope = ScopeFactory.ClassSurface(type, method.IsStatic);
+                    var emittedMethodName = ctx.Renamer.GetFinalMemberName(method.StableId, methodScope);
 
                     totalIdentifiersChecked++;
                     CheckIdentifier(ctx, validationCtx, "method", $"{type.ClrFullName}::{method.ClrName}", method.StableId.ToString(), emittedMethodName, ref unsanitizedCount);
@@ -1381,13 +1360,18 @@ public static class PhaseGate
                     }
                 }
 
-                // Check properties
+                // Check properties (ClassSurface only - ViewOnly members checked in view loop below)
                 foreach (var property in type.Members.Properties)
                 {
                     if (property.Visibility != Visibility.Public)
                         continue;
 
-                    var emittedPropertyName = ctx.Renamer.GetFinalMemberName(property.StableId, typeScope, property.IsStatic);
+                    // Skip ViewOnly members - they're checked in the view members loop below
+                    if (property.EmitScope == EmitScope.ViewOnly)
+                        continue;
+
+                    var propertyScope = ScopeFactory.ClassSurface(type, property.IsStatic);
+                    var emittedPropertyName = ctx.Renamer.GetFinalMemberName(property.StableId, propertyScope);
 
                     totalIdentifiersChecked++;
                     CheckIdentifier(ctx, validationCtx, "property", $"{type.ClrFullName}::{property.ClrName}", property.StableId.ToString(), emittedPropertyName, ref unsanitizedCount);
@@ -1409,7 +1393,9 @@ public static class PhaseGate
                     if (field.Visibility != Visibility.Public)
                         continue;
 
-                    var emittedFieldName = ctx.Renamer.GetFinalMemberName(field.StableId, typeScope, field.IsStatic);
+                    // Fields are always ClassSurface (no ViewOnly fields)
+                    var fieldScope = ScopeFactory.ClassSurface(type, field.IsStatic);
+                    var emittedFieldName = ctx.Renamer.GetFinalMemberName(field.StableId, fieldScope);
 
                     totalIdentifiersChecked++;
                     CheckIdentifier(ctx, validationCtx, "field", $"{type.ClrFullName}::{field.ClrName}", field.StableId.ToString(), emittedFieldName, ref unsanitizedCount);
@@ -1421,7 +1407,9 @@ public static class PhaseGate
                     if (evt.Visibility != Visibility.Public)
                         continue;
 
-                    var emittedEventName = ctx.Renamer.GetFinalMemberName(evt.StableId, typeScope, evt.IsStatic);
+                    // Events are always ClassSurface (no ViewOnly events)
+                    var eventScope = ScopeFactory.ClassSurface(type, evt.IsStatic);
+                    var emittedEventName = ctx.Renamer.GetFinalMemberName(evt.StableId, eventScope);
 
                     totalIdentifiersChecked++;
                     CheckIdentifier(ctx, validationCtx, "event", $"{type.ClrFullName}::{evt.ClrName}", evt.StableId.ToString(), emittedEventName, ref unsanitizedCount);
@@ -1435,6 +1423,9 @@ public static class PhaseGate
                     CheckIdentifier(ctx, validationCtx, "view property", $"{type.ClrFullName}.{view.ViewPropertyName}", type.StableId.ToString(), view.ViewPropertyName, ref unsanitizedCount);
 
                     // Check each view member's emitted name (to catch mismatches or synthetic entries)
+                    // Get interface StableId for this view (needed for ViewSurface scope)
+                    var interfaceStableId = ScopeFactory.GetInterfaceStableId(view.InterfaceReference);
+
                     foreach (var viewMember in view.ViewMembers)
                     {
                         string emittedMemberName;
@@ -1446,7 +1437,8 @@ public static class PhaseGate
                                 var method = type.Members.Methods.FirstOrDefault(m => m.StableId.Equals(viewMember.StableId));
                                 if (method != null)
                                 {
-                                    emittedMemberName = ctx.Renamer.GetFinalMemberName(method.StableId, typeScope, method.IsStatic);
+                                    var methodScope = ScopeFactory.ViewSurface(type, interfaceStableId, method.IsStatic);
+                                    emittedMemberName = ctx.Renamer.GetFinalMemberName(method.StableId, methodScope);
                                     memberOwner = $"{type.ClrFullName}::{method.ClrName} (in view {view.ViewPropertyName})";
                                     totalIdentifiersChecked++;
                                     CheckIdentifier(ctx, validationCtx, "view method", memberOwner, method.StableId.ToString(), emittedMemberName, ref unsanitizedCount);
@@ -1457,7 +1449,8 @@ public static class PhaseGate
                                 var property = type.Members.Properties.FirstOrDefault(p => p.StableId.Equals(viewMember.StableId));
                                 if (property != null)
                                 {
-                                    emittedMemberName = ctx.Renamer.GetFinalMemberName(property.StableId, typeScope, property.IsStatic);
+                                    var propertyScope = ScopeFactory.ViewSurface(type, interfaceStableId, property.IsStatic);
+                                    emittedMemberName = ctx.Renamer.GetFinalMemberName(property.StableId, propertyScope);
                                     memberOwner = $"{type.ClrFullName}::{property.ClrName} (in view {view.ViewPropertyName})";
                                     totalIdentifiersChecked++;
                                     CheckIdentifier(ctx, validationCtx, "view property member", memberOwner, property.StableId.ToString(), emittedMemberName, ref unsanitizedCount);
@@ -1468,7 +1461,8 @@ public static class PhaseGate
                                 var evt = type.Members.Events.FirstOrDefault(e => e.StableId.Equals(viewMember.StableId));
                                 if (evt != null)
                                 {
-                                    emittedMemberName = ctx.Renamer.GetFinalMemberName(evt.StableId, typeScope, evt.IsStatic);
+                                    var eventScope = ScopeFactory.ViewSurface(type, interfaceStableId, evt.IsStatic);
+                                    emittedMemberName = ctx.Renamer.GetFinalMemberName(evt.StableId, eventScope);
                                     memberOwner = $"{type.ClrFullName}::{evt.ClrName} (in view {view.ViewPropertyName})";
                                     totalIdentifiersChecked++;
                                     CheckIdentifier(ctx, validationCtx, "view event", memberOwner, evt.StableId.ToString(), emittedMemberName, ref unsanitizedCount);
@@ -1519,16 +1513,9 @@ public static class PhaseGate
         {
             foreach (var type in ns.Types)
             {
-                var typeScope = new SinglePhase.Renaming.TypeScope
-                {
-                    TypeFullName = type.ClrFullName,
-                    IsStatic = false,
-                    ScopeKey = type.ClrFullName
-                };
-
                 // Check class surface
                 totalSurfacesChecked++;
-                var classSurfaceCollisions = CheckSurfaceForCollisions(ctx, validationCtx, type, typeScope, "class surface",
+                var classSurfaceCollisions = CheckSurfaceForCollisions(ctx, validationCtx, type, "class surface",
                     type.Members.Methods.Where(m => m.EmitScope == EmitScope.ClassSurface && m.Visibility == Visibility.Public).ToList(),
                     type.Members.Properties.Where(p => p.EmitScope == EmitScope.ClassSurface && p.Visibility == Visibility.Public).ToList());
                 totalCollisions += classSurfaceCollisions;
@@ -1537,6 +1524,9 @@ public static class PhaseGate
                 foreach (var view in type.ExplicitViews)
                 {
                     totalSurfacesChecked++;
+
+                    // Get interface StableId for this view
+                    var interfaceStableId = ScopeFactory.GetInterfaceStableId(view.InterfaceReference);
 
                     // Collect ViewOnly members for this view
                     var viewMethods = view.ViewMembers
@@ -1553,8 +1543,8 @@ public static class PhaseGate
                         .Cast<PropertySymbol>()
                         .ToList();
 
-                    var viewSurfaceCollisions = CheckSurfaceForCollisions(ctx, validationCtx, type, typeScope,
-                        $"view {view.ViewPropertyName}", viewMethods, viewProperties);
+                    var viewSurfaceCollisions = CheckSurfaceForCollisions(ctx, validationCtx, type,
+                        $"view {view.ViewPropertyName}", viewMethods, viewProperties, interfaceStableId);
                     totalCollisions += viewSurfaceCollisions;
                 }
             }
@@ -1567,10 +1557,10 @@ public static class PhaseGate
         BuildContext ctx,
         ValidationContext validationCtx,
         TypeSymbol type,
-        SinglePhase.Renaming.TypeScope typeScope,
         string surfaceName,
         List<MethodSymbol> methods,
-        List<PropertySymbol> properties)
+        List<PropertySymbol> properties,
+        string? interfaceStableId = null)
     {
         int collisionCount = 0;
 
@@ -1579,7 +1569,10 @@ public static class PhaseGate
         var methodGroups = methods
             .GroupBy(m =>
             {
-                var finalName = ctx.Renamer.GetFinalMemberName(m.StableId, typeScope, m.IsStatic);
+                var methodScope = interfaceStableId != null
+                    ? ScopeFactory.ViewSurface(type, interfaceStableId, m.IsStatic)
+                    : ScopeFactory.ClassSurface(type, m.IsStatic);
+                var finalName = ctx.Renamer.GetFinalMemberName(m.StableId, methodScope);
                 var erasedParams = string.Join(", ", m.Parameters.Select(p => EraseTypeToString(p.Type)));
                 var erasedReturn = EraseTypeToString(m.ReturnType);
                 return (finalName, m.IsStatic, erasedParams, erasedReturn);
@@ -1616,7 +1609,10 @@ public static class PhaseGate
         var propertyGroups = properties
             .GroupBy(p =>
             {
-                var finalName = ctx.Renamer.GetFinalMemberName(p.StableId, typeScope, p.IsStatic);
+                var propertyScope = interfaceStableId != null
+                    ? ScopeFactory.ViewSurface(type, interfaceStableId, p.IsStatic)
+                    : ScopeFactory.ClassSurface(type, p.IsStatic);
+                var finalName = ctx.Renamer.GetFinalMemberName(p.StableId, propertyScope);
                 return (finalName, p.IsStatic);
             })
             .Where(g => g.Count() > 1)
@@ -1746,24 +1742,21 @@ public static class PhaseGate
 
                     // Rule 2: PG_VIEW_002 - Unique target (no two views for same interface)
                     // Use interface StableId for comparison
-                    var ifaceStableId = GetInterfaceStableId(graph, view.InterfaceReference);
-                    if (ifaceStableId != null)
+                    var ifaceStableId = ScopeFactory.GetInterfaceStableId(view.InterfaceReference);
+                    if (seenInterfaces.TryGetValue(ifaceStableId, out var existingViewName))
                     {
-                        if (seenInterfaces.TryGetValue(ifaceStableId, out var existingViewName))
-                        {
-                            duplicateViews++;
-                            validationCtx.RecordDiagnostic(
-                                Core.Diagnostics.DiagnosticCodes.PG_VIEW_002,
-                                "ERROR",
-                                $"Duplicate view for interface on type\n" +
-                                $"  type:      {type.ClrFullName}\n" +
-                                $"  interface: {GetTypeReferenceName(view.InterfaceReference)}\n" +
-                                $"  views:     {existingViewName}, {view.ViewPropertyName}");
-                        }
-                        else
-                        {
-                            seenInterfaces[ifaceStableId] = view.ViewPropertyName;
-                        }
+                        duplicateViews++;
+                        validationCtx.RecordDiagnostic(
+                            Core.Diagnostics.DiagnosticCodes.PG_VIEW_002,
+                            "ERROR",
+                            $"Duplicate view for interface on type\n" +
+                            $"  type:      {type.ClrFullName}\n" +
+                            $"  interface: {GetTypeReferenceName(view.InterfaceReference)}\n" +
+                            $"  views:     {existingViewName}, {view.ViewPropertyName}");
+                    }
+                    else
+                    {
+                        seenInterfaces[ifaceStableId] = view.ViewPropertyName;
                     }
 
                     // Rule 3: PG_VIEW_003 - Valid/sanitized view property name
@@ -1802,16 +1795,6 @@ public static class PhaseGate
         ctx.Log("[PG]", $"M3: Validated {totalViews} views - {emptyViews} empty, {duplicateViews} duplicates, {invalidViewNames} invalid names");
     }
 
-    private static string? GetInterfaceStableId(SymbolGraph graph, TypeReference ifaceRef)
-    {
-        var fullName = GetTypeReferenceName(ifaceRef);
-
-        var iface = graph.Namespaces
-            .SelectMany(ns => ns.Types)
-            .FirstOrDefault(t => t.ClrFullName == fullName && t.Kind == TypeKind.Interface);
-
-        return iface?.StableId.ToString();
-    }
 
     private static string GetTypeReferenceName(TypeReference typeRef)
     {
@@ -2088,48 +2071,39 @@ public static class PhaseGate
                 if (type.ExplicitViews.Length == 0)
                     continue;
 
-                // Get class surface scope for collision detection
-                // NOTE: Using ClassBase because GetFinalMemberName still takes isStatic parameter
-                // TODO: Change to ClassSurface when isStatic removed from GetFinalMemberName
-                var classSurfaceScope = ScopeFactory.ClassBase(type);
-
                 // Collect class surface member names for PG_NAME_004 checks
                 var classSurfaceNames = new HashSet<string>();
                 foreach (var method in type.Members.Methods.Where(m => m.EmitScope == EmitScope.ClassSurface))
                 {
-                    var name = ctx.Renamer.GetFinalMemberName(method.StableId, classSurfaceScope, method.IsStatic);
+                    var scope = ScopeFactory.ClassSurface(type, method.IsStatic);
+                    var name = ctx.Renamer.GetFinalMemberName(method.StableId, scope);
                     classSurfaceNames.Add(name);
                 }
                 foreach (var prop in type.Members.Properties.Where(p => p.EmitScope == EmitScope.ClassSurface))
                 {
-                    var name = ctx.Renamer.GetFinalMemberName(prop.StableId, classSurfaceScope, prop.IsStatic);
+                    var scope = ScopeFactory.ClassSurface(type, prop.IsStatic);
+                    var name = ctx.Renamer.GetFinalMemberName(prop.StableId, scope);
                     classSurfaceNames.Add(name);
                 }
                 foreach (var field in type.Members.Fields.Where(f => f.EmitScope == EmitScope.ClassSurface))
                 {
-                    var name = ctx.Renamer.GetFinalMemberName(field.StableId, classSurfaceScope, field.IsStatic);
+                    var scope = ScopeFactory.ClassSurface(type, field.IsStatic);
+                    var name = ctx.Renamer.GetFinalMemberName(field.StableId, scope);
                     classSurfaceNames.Add(name);
                 }
                 foreach (var evt in type.Members.Events.Where(e => e.EmitScope == EmitScope.ClassSurface))
                 {
-                    var name = ctx.Renamer.GetFinalMemberName(evt.StableId, classSurfaceScope, evt.IsStatic);
+                    var scope = ScopeFactory.ClassSurface(type, evt.IsStatic);
+                    var name = ctx.Renamer.GetFinalMemberName(evt.StableId, scope);
                     classSurfaceNames.Add(name);
                 }
 
                 // Check each view
                 foreach (var view in type.ExplicitViews)
                 {
-                    // Resolve interface StableId (same as NameReservation)
-                    var interfaceStableId = GetInterfaceStableId(graph, view.InterfaceReference);
-                    if (interfaceStableId == null)
-                    {
-                        continue; // Skip if interface not found
-                    }
-
+                    // Get interface StableId from TypeReference (no graph lookup, same as NameReservation)
+                    var interfaceStableId = ScopeFactory.GetInterfaceStableId(view.InterfaceReference);
                     var interfaceTypeName = GetTypeReferenceName(view.InterfaceReference);
-                    // NOTE: Using ViewBase because GetFinalMemberName still takes isStatic parameter
-                    // TODO: Change to ViewSurface when isStatic removed from GetFinalMemberName
-                    var viewScope = ScopeFactory.ViewBase(type, interfaceStableId);
 
                     // PG_NAME_003: Check for collisions within this view
                     var viewMemberNames = new Dictionary<string, string>(); // emittedName -> first member description
@@ -2139,23 +2113,26 @@ public static class PhaseGate
                         string emittedName;
                         bool isStatic = FindMemberIsStatic(type, viewMember);
 
-                        // Get emitted name based on member kind
+                        // Get emitted name based on member kind - use ViewSurface for each member
                         switch (viewMember.Kind)
                         {
                             case Shape.ViewPlanner.ViewMemberKind.Method:
                                 var method = type.Members.Methods.FirstOrDefault(m => m.StableId.Equals(viewMember.StableId));
                                 if (method == null) continue;
-                                emittedName = ctx.Renamer.GetFinalMemberName(method.StableId, viewScope, isStatic);
+                                var methodScope = ScopeFactory.ViewSurface(type, interfaceStableId, method.IsStatic);
+                                emittedName = ctx.Renamer.GetFinalMemberName(method.StableId, methodScope);
                                 break;
                             case Shape.ViewPlanner.ViewMemberKind.Property:
                                 var prop = type.Members.Properties.FirstOrDefault(p => p.StableId.Equals(viewMember.StableId));
                                 if (prop == null) continue;
-                                emittedName = ctx.Renamer.GetFinalMemberName(prop.StableId, viewScope, isStatic);
+                                var propScope = ScopeFactory.ViewSurface(type, interfaceStableId, prop.IsStatic);
+                                emittedName = ctx.Renamer.GetFinalMemberName(prop.StableId, propScope);
                                 break;
                             case Shape.ViewPlanner.ViewMemberKind.Event:
                                 var evt = type.Members.Events.FirstOrDefault(e => e.StableId.Equals(viewMember.StableId));
                                 if (evt == null) continue;
-                                emittedName = ctx.Renamer.GetFinalMemberName(evt.StableId, viewScope, isStatic);
+                                var evtScope = ScopeFactory.ViewSurface(type, interfaceStableId, evt.IsStatic);
+                                emittedName = ctx.Renamer.GetFinalMemberName(evt.StableId, evtScope);
                                 break;
                             default:
                                 continue;

@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using tsbindgen.SinglePhase.Model.Symbols;
+
 namespace tsbindgen.SinglePhase.Renaming;
 
 /// <summary>
@@ -130,10 +133,23 @@ public sealed class SymbolRenamer
     }
 
     /// <summary>
-    /// Get the final TypeScript name for a type.
+    /// Get the final TypeScript name for a type (SAFE API - use this).
+    /// Automatically derives the correct namespace scope from the type.
     /// </summary>
-    public string GetFinalTypeName(StableId stableId, RenameScope scope)
+    public string GetFinalTypeName(TypeSymbol type, NamespaceArea area = NamespaceArea.Internal)
     {
+        var nsScope = ScopeFactory.Namespace(type.Namespace, area);
+        return GetFinalTypeNameCore(type.StableId, nsScope);
+    }
+
+    /// <summary>
+    /// Get the final TypeScript name for a type (INTERNAL CORE - do not call directly).
+    /// Callers should use GetFinalTypeName(TypeSymbol, NamespaceArea) instead.
+    /// </summary>
+    internal string GetFinalTypeNameCore(StableId stableId, NamespaceScope scope)
+    {
+        AssertNamespaceScope(scope);
+
         // M5 FIX: Look up by (StableId, ScopeKey) tuple
         if (_decisions.TryGetValue((stableId, scope.ScopeKey), out var decision))
             return decision.Final;
@@ -146,26 +162,61 @@ public sealed class SymbolRenamer
     /// <summary>
     /// Get the final TypeScript name for a member.
     /// M5 FIX: Now scope-aware - different scopes (class vs view) return different names.
+    /// CRITICAL: Scope must be a SURFACE scope (with #static or #instance suffix).
+    /// Use ScopeFactory.ClassSurface/ViewSurface for lookups.
     /// </summary>
-    public string GetFinalMemberName(StableId stableId, RenameScope scope, bool isStatic)
+    public string GetFinalMemberName(StableId stableId, RenameScope scope)
     {
+        // Step 6: Validate scope format - must be a surface scope with #static or #instance
+        if (scope is TypeScope typeScope)
+        {
+            AssertMemberScope(typeScope);
+
+#if DEBUG
+            // Step 6: Additional DEBUG validation - ensure view scopes match view members
+            // For view scopes, the caller MUST be looking up a ViewOnly member
+            if (typeScope.ScopeKey.StartsWith("view:", StringComparison.Ordinal))
+            {
+                // This is a view scope lookup - verify it's intentional
+                // Note: We can't check EmitScope here since we only have StableId
+                // The PhaseGate validation (PG_SCOPE_004) will catch scope/EmitScope mismatches
+            }
+#endif
+        }
+
         // M5 FIX: Members may be reserved in multiple scopes (class + view)
-        // NOTE: Caller must pass the correct scope with #static or #instance suffix already applied
         if (_decisions.TryGetValue((stableId, scope.ScopeKey), out var decision))
             return decision.Final;
 
+        // Debug: Find all scopes where this StableId was reserved
+        var availableScopes = _decisions.Keys
+            .Where(k => k.Id.Equals(stableId))
+            .Select(k => k.ScopeKey)
+            .ToList();
+
+        var scopeInfo = availableScopes.Count > 0
+            ? $"Available scopes for this StableId: [{string.Join(", ", availableScopes)}]"
+            : "This StableId was not reserved in any scope.";
+
         throw new InvalidOperationException(
-            $"No rename decision found for {stableId} ({(isStatic ? "static" : "instance")}) " +
-            $"in scope {scope.ScopeKey}. Did you forget to reserve this name?");
+            $"No rename decision found for {stableId} in scope {scope.ScopeKey}. " +
+            $"Did you forget to reserve this name? Check that you're using the correct scope (class vs view). " +
+            $"{scopeInfo}");
     }
 
     /// <summary>
     /// Try to get the rename decision for a StableId in a specific scope.
     /// M5 FIX: Now requires scope parameter since members can be reserved in multiple scopes.
+    /// CRITICAL: Scope must be a SURFACE scope (with #static or #instance suffix).
     /// </summary>
-    public bool TryGetDecision(StableId stableId, RenameScope scope, bool isStatic, out RenameDecision? decision)
+    public bool TryGetDecision(StableId stableId, RenameScope scope, out RenameDecision? decision)
     {
-        // M5 FIX: Caller must pass the correct scope with #static or #instance suffix already applied
+        // Validate scope format - must be a surface scope
+        if (scope is TypeScope typeScope)
+        {
+            AssertMemberScope(typeScope);
+        }
+
         return _decisions.TryGetValue((stableId, scope.ScopeKey), out decision);
     }
 
@@ -359,5 +410,26 @@ public sealed class SymbolRenamer
             return requested[..(lastNonDigit + 1)];
 
         return requested;
+    }
+
+    // ============================================================================
+    // SCOPE VALIDATION (catch scope misuse immediately - always enabled)
+    // ============================================================================
+
+    private static void AssertNamespaceScope(NamespaceScope scope)
+    {
+        if (string.IsNullOrWhiteSpace(scope.ScopeKey) || !scope.ScopeKey.StartsWith("ns:", StringComparison.Ordinal))
+            throw new InvalidOperationException($"Invalid NamespaceScope '{scope.ScopeKey}' - must start with 'ns:'");
+    }
+
+    private static void AssertMemberScope(TypeScope scope)
+    {
+        var s = scope.ScopeKey;
+        var ok = s.StartsWith("type:", StringComparison.Ordinal) || s.StartsWith("view:", StringComparison.Ordinal);
+        var hasSide = s.EndsWith("#instance", StringComparison.Ordinal) || s.EndsWith("#static", StringComparison.Ordinal);
+
+        if (!ok || !hasSide)
+            throw new InvalidOperationException(
+                $"Invalid member scope '{s}' - must be 'type:...' or 'view:...' and end with '#instance' or '#static'");
     }
 }

@@ -48,8 +48,7 @@ public static class ClassPrinter
         var sb = new StringBuilder();
 
         // Get final TypeScript name from Renamer
-        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
-        var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+        var finalName = ctx.Renamer.GetFinalTypeName(type);
 
         // Add $instance suffix if requested (for companion views pattern)
         if (instanceSuffix)
@@ -104,8 +103,7 @@ public static class ClassPrinter
         // Structs emit as classes in TypeScript (with metadata noting value semantics)
         var sb = new StringBuilder();
 
-        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
-        var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+        var finalName = ctx.Renamer.GetFinalTypeName(type);
 
         // Add $instance suffix if requested (for companion views pattern)
         if (instanceSuffix)
@@ -144,8 +142,7 @@ public static class ClassPrinter
         // Static classes emit as abstract classes with static members in TypeScript
         var sb = new StringBuilder();
 
-        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
-        var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+        var finalName = ctx.Renamer.GetFinalTypeName(type);
 
         sb.Append("abstract class ");
         sb.Append(finalName);
@@ -163,8 +160,7 @@ public static class ClassPrinter
     {
         var sb = new StringBuilder();
 
-        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
-        var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+        var finalName = ctx.Renamer.GetFinalTypeName(type);
 
         sb.Append("enum ");
         sb.Append(finalName);
@@ -178,7 +174,7 @@ public static class ClassPrinter
         for (int i = 0; i < fields.Count; i++)
         {
             var field = fields[i];
-            var memberFinalName = ctx.Renamer.GetFinalMemberName(field.StableId, typeScope, isStatic: true);
+            var memberFinalName = ctx.Renamer.GetFinalMemberName(field.StableId, typeScope);
             sb.Append("    ");
             sb.Append(memberFinalName);
 
@@ -204,8 +200,7 @@ public static class ClassPrinter
         // Delegates emit as type aliases to function signatures
         var sb = new StringBuilder();
 
-        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
-        var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+        var finalName = ctx.Renamer.GetFinalTypeName(type);
 
         sb.Append("type ");
         sb.Append(finalName);
@@ -244,8 +239,7 @@ public static class ClassPrinter
     {
         var sb = new StringBuilder();
 
-        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
-        var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+        var finalName = ctx.Renamer.GetFinalTypeName(type);
 
         sb.Append("interface ");
         sb.Append(finalName);
@@ -290,10 +284,10 @@ public static class ClassPrinter
             sb.AppendLine(");");
         }
 
-        // Fields
-        foreach (var field in members.Fields.Where(f => !f.IsStatic))
+        // Fields - only emit ClassSurface members
+        foreach (var field in members.Fields.Where(f => !f.IsStatic && f.EmitScope == EmitScope.ClassSurface))
         {
-            var finalName = ctx.Renamer.GetFinalMemberName(field.StableId, typeScope, isStatic: false);
+            var finalName = ctx.Renamer.GetFinalMemberName(field.StableId, typeScope);
             sb.Append("    ");
             if (field.IsReadOnly)
                 sb.Append("readonly ");
@@ -303,10 +297,10 @@ public static class ClassPrinter
             sb.AppendLine(";");
         }
 
-        // Properties
-        foreach (var prop in members.Properties.Where(p => !p.IsStatic))
+        // Properties - only emit ClassSurface members
+        foreach (var prop in members.Properties.Where(p => !p.IsStatic && p.EmitScope == EmitScope.ClassSurface))
         {
-            var finalName = ctx.Renamer.GetFinalMemberName(prop.StableId, typeScope, isStatic: false);
+            var finalName = ctx.Renamer.GetFinalMemberName(prop.StableId, typeScope);
             sb.Append("    ");
             if (!prop.HasSetter)
                 sb.Append("readonly ");
@@ -316,8 +310,8 @@ public static class ClassPrinter
             sb.AppendLine(";");
         }
 
-        // Methods
-        foreach (var method in members.Methods.Where(m => !m.IsStatic))
+        // Methods - only emit ClassSurface members
+        foreach (var method in members.Methods.Where(m => !m.IsStatic && m.EmitScope == EmitScope.ClassSurface))
         {
             sb.Append("    ");
             sb.Append(MethodPrinter.Print(method, type, ctx));
@@ -335,10 +329,11 @@ public static class ClassPrinter
         // Create type scope for static member name resolution
         var staticTypeScope = ScopeFactory.ClassStatic(type); // Static members
 
-        // Static fields
-        foreach (var field in members.Fields.Where(f => f.IsStatic && !f.IsConst))
+        // Static fields - only emit ClassSurface or StaticSurface members
+        foreach (var field in members.Fields.Where(f => f.IsStatic && !f.IsConst &&
+            (f.EmitScope == EmitScope.ClassSurface || f.EmitScope == EmitScope.StaticSurface)))
         {
-            var finalName = ctx.Renamer.GetFinalMemberName(field.StableId, staticTypeScope, isStatic: true);
+            var finalName = ctx.Renamer.GetFinalMemberName(field.StableId, staticTypeScope);
             sb.Append("    static ");
             if (field.IsReadOnly)
                 sb.Append("readonly ");
@@ -348,10 +343,11 @@ public static class ClassPrinter
             sb.AppendLine(";");
         }
 
-        // Const fields (as static readonly)
-        foreach (var field in members.Fields.Where(f => f.IsConst))
+        // Const fields (as static readonly) - only emit ClassSurface or StaticSurface members
+        foreach (var field in members.Fields.Where(f => f.IsConst &&
+            (f.EmitScope == EmitScope.ClassSurface || f.EmitScope == EmitScope.StaticSurface)))
         {
-            var finalName = ctx.Renamer.GetFinalMemberName(field.StableId, staticTypeScope, isStatic: true);
+            var finalName = ctx.Renamer.GetFinalMemberName(field.StableId, staticTypeScope);
             sb.Append("    static readonly ");
             sb.Append(finalName);
             sb.Append(": ");
@@ -359,10 +355,11 @@ public static class ClassPrinter
             sb.AppendLine(";");
         }
 
-        // Static properties
-        foreach (var prop in members.Properties.Where(p => p.IsStatic))
+        // Static properties - only emit ClassSurface or StaticSurface members
+        foreach (var prop in members.Properties.Where(p => p.IsStatic &&
+            (p.EmitScope == EmitScope.ClassSurface || p.EmitScope == EmitScope.StaticSurface)))
         {
-            var finalName = ctx.Renamer.GetFinalMemberName(prop.StableId, staticTypeScope, isStatic: true);
+            var finalName = ctx.Renamer.GetFinalMemberName(prop.StableId, staticTypeScope);
             sb.Append("    static ");
             if (!prop.HasSetter)
                 sb.Append("readonly ");
@@ -372,8 +369,9 @@ public static class ClassPrinter
             sb.AppendLine(";");
         }
 
-        // Static methods
-        foreach (var method in members.Methods.Where(m => m.IsStatic))
+        // Static methods - only emit ClassSurface or StaticSurface members
+        foreach (var method in members.Methods.Where(m => m.IsStatic &&
+            (m.EmitScope == EmitScope.ClassSurface || m.EmitScope == EmitScope.StaticSurface)))
         {
             sb.Append("    ");
             sb.Append(MethodPrinter.Print(method, type, ctx));
@@ -385,13 +383,11 @@ public static class ClassPrinter
     {
         var members = type.Members;
 
-        // Create type scope for member name resolution (interfaces don't have static members)
-        var typeScope = ScopeFactory.ClassInstance(type);
-
-        // Properties
-        foreach (var prop in members.Properties)
+        // Properties - only emit ClassSurface members
+        foreach (var prop in members.Properties.Where(p => p.EmitScope == EmitScope.ClassSurface))
         {
-            var finalName = ctx.Renamer.GetFinalMemberName(prop.StableId, typeScope, isStatic: false);
+            var propScope = ScopeFactory.ClassSurface(type, prop.IsStatic);
+            var finalName = ctx.Renamer.GetFinalMemberName(prop.StableId, propScope);
             sb.Append("    ");
             if (!prop.HasSetter)
                 sb.Append("readonly ");
@@ -401,8 +397,8 @@ public static class ClassPrinter
             sb.AppendLine(";");
         }
 
-        // Methods
-        foreach (var method in members.Methods)
+        // Methods - only emit ClassSurface members
+        foreach (var method in members.Methods.Where(m => m.EmitScope == EmitScope.ClassSurface))
         {
             sb.Append("    ");
             sb.Append(MethodPrinter.Print(method, type, ctx));

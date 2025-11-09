@@ -71,8 +71,7 @@ public static class BindingEmitter
     private static TypeBinding GenerateTypeBinding(TypeSymbol type, BuildContext ctx)
     {
         // Get final TypeScript name from Renamer
-        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
-        var tsEmitName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+        var tsEmitName = ctx.Renamer.GetFinalTypeName(type);
 
         return new TypeBinding
         {
@@ -102,13 +101,13 @@ public static class BindingEmitter
             // ViewOnly member - use view scope
             var interfaceStableId = ScopeFactory.GetInterfaceStableId(method.SourceInterface);
             var viewScope = ScopeFactory.ViewSurface(declaringType, interfaceStableId, method.IsStatic);
-            tsEmitName = ctx.Renamer.GetFinalMemberName(method.StableId, viewScope, method.IsStatic);
+            tsEmitName = ctx.Renamer.GetFinalMemberName(method.StableId, viewScope);
         }
         else
         {
             // Class surface member - use class scope
             var classScope = ScopeFactory.ClassSurface(declaringType, method.IsStatic);
-            tsEmitName = ctx.Renamer.GetFinalMemberName(method.StableId, classScope, method.IsStatic);
+            tsEmitName = ctx.Renamer.GetFinalMemberName(method.StableId, classScope);
         }
 
         // Generate normalized signature for universal matching
@@ -136,13 +135,13 @@ public static class BindingEmitter
             // ViewOnly member - use view scope
             var interfaceStableId = ScopeFactory.GetInterfaceStableId(property.SourceInterface);
             var viewScope = ScopeFactory.ViewSurface(declaringType, interfaceStableId, property.IsStatic);
-            tsEmitName = ctx.Renamer.GetFinalMemberName(property.StableId, viewScope, property.IsStatic);
+            tsEmitName = ctx.Renamer.GetFinalMemberName(property.StableId, viewScope);
         }
         else
         {
             // Class surface member - use class scope
             var classScope = ScopeFactory.ClassSurface(declaringType, property.IsStatic);
-            tsEmitName = ctx.Renamer.GetFinalMemberName(property.StableId, classScope, property.IsStatic);
+            tsEmitName = ctx.Renamer.GetFinalMemberName(property.StableId, classScope);
         }
 
         // Generate normalized signature for universal matching
@@ -166,7 +165,7 @@ public static class BindingEmitter
     {
         // Fields are always ClassSurface, use class scope
         var classScope = ScopeFactory.ClassSurface(declaringType, field.IsStatic);
-        var tsEmitName = ctx.Renamer.GetFinalMemberName(field.StableId, classScope, field.IsStatic);
+        var tsEmitName = ctx.Renamer.GetFinalMemberName(field.StableId, classScope);
 
         // Generate normalized signature for universal matching
         var normalizedSignature = SignatureNormalization.NormalizeField(field);
@@ -186,7 +185,7 @@ public static class BindingEmitter
     {
         // Events are always ClassSurface, use class scope
         var classScope = ScopeFactory.ClassSurface(declaringType, evt.IsStatic);
-        var tsEmitName = ctx.Renamer.GetFinalMemberName(evt.StableId, classScope, evt.IsStatic);
+        var tsEmitName = ctx.Renamer.GetFinalMemberName(evt.StableId, classScope);
 
         // Generate normalized signature for universal matching
         var normalizedSignature = SignatureNormalization.NormalizeEvent(evt);

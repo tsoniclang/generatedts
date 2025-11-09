@@ -130,8 +130,7 @@ public static class InternalIndexEmitter
         var sb = new StringBuilder();
 
         // Get final type name
-        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
-        var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+        var finalName = ctx.Renamer.GetFinalTypeName(type);
 
         // Companion interface: __TypeName$views<...>
         sb.Append($"interface __{finalName}$views");
@@ -166,8 +165,7 @@ public static class InternalIndexEmitter
         var sb = new StringBuilder();
 
         // Get final type name
-        var nsScope = ScopeFactory.NamespaceInternal(type.Namespace);
-        var finalName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+        var finalName = ctx.Renamer.GetFinalTypeName(type);
 
         // Type alias: export type TypeName<...> = TypeName$instance<...> & __TypeName$views<...>
         sb.Append("export type ");

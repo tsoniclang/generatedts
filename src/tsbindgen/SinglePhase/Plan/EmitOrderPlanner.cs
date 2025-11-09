@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Linq;
 using tsbindgen.SinglePhase.Model;
 using tsbindgen.SinglePhase.Model.Symbols;
+using tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
 using tsbindgen.SinglePhase.Renaming;
 
 namespace tsbindgen.SinglePhase.Plan;
@@ -53,11 +54,8 @@ public sealed class EmitOrderPlanner
         // 2. Final TS name from Renamer (for stable diffs when names change)
         // 3. Arity (for overloaded generic types)
 
-        // Get namespace scope for name resolution (assuming all types in same namespace)
-        var nsScope = types.Count > 0 ? ScopeFactory.NamespaceInternal(types[0].Namespace) : null;
-
         var sorted = types.OrderBy(t => GetKindSortOrder(t.Kind))
-                          .ThenBy(t => nsScope != null ? _ctx.Renamer.GetFinalTypeName(t.StableId, nsScope) : t.ClrName)
+                          .ThenBy(t => _ctx.Renamer.GetFinalTypeName(t))
                           .ThenBy(t => t.Arity)
                           .ToList();
 
@@ -96,35 +94,39 @@ public sealed class EmitOrderPlanner
             .ToList();
 
         var orderedFields = type.Members.Fields
+            .Where(f => f.EmitScope == EmitScope.ClassSurface || f.EmitScope == EmitScope.StaticSurface)
             .OrderBy(f => f.IsStatic)
             .ThenBy(f => {
                 var scope = ScopeFactory.ClassSurface(type, f.IsStatic);
-                return _ctx.Renamer.GetFinalMemberName(f.StableId, scope, f.IsStatic);
+                return _ctx.Renamer.GetFinalMemberName(f.StableId, scope);
             })
             .ToList();
 
         var orderedProperties = type.Members.Properties
+            .Where(p => p.EmitScope == EmitScope.ClassSurface || p.EmitScope == EmitScope.StaticSurface)
             .OrderBy(p => p.IsStatic)
             .ThenBy(p => {
                 var scope = ScopeFactory.ClassSurface(type, p.IsStatic);
-                return _ctx.Renamer.GetFinalMemberName(p.StableId, scope, p.IsStatic);
+                return _ctx.Renamer.GetFinalMemberName(p.StableId, scope);
             })
             .ThenBy(p => p.StableId.CanonicalSignature)
             .ToList();
 
         var orderedEvents = type.Members.Events
+            .Where(e => e.EmitScope == EmitScope.ClassSurface || e.EmitScope == EmitScope.StaticSurface)
             .OrderBy(e => e.IsStatic)
             .ThenBy(e => {
                 var scope = ScopeFactory.ClassSurface(type, e.IsStatic);
-                return _ctx.Renamer.GetFinalMemberName(e.StableId, scope, e.IsStatic);
+                return _ctx.Renamer.GetFinalMemberName(e.StableId, scope);
             })
             .ToList();
 
         var orderedMethods = type.Members.Methods
+            .Where(m => m.EmitScope == EmitScope.ClassSurface || m.EmitScope == EmitScope.StaticSurface)
             .OrderBy(m => m.IsStatic)
             .ThenBy(m => {
                 var scope = ScopeFactory.ClassSurface(type, m.IsStatic);
-                return _ctx.Renamer.GetFinalMemberName(m.StableId, scope, m.IsStatic);
+                return _ctx.Renamer.GetFinalMemberName(m.StableId, scope);
             })
             .ThenBy(m => m.Arity)
             .ThenBy(m => m.StableId.CanonicalSignature)

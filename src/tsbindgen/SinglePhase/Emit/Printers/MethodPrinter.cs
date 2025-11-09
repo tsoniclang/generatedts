@@ -21,7 +21,7 @@ public static class MethodPrinter
 
         // Get the final TS name from Renamer using correct scope
         var scope = ScopeFactory.ClassSurface(declaringType, method.IsStatic);
-        var finalName = ctx.Renamer.GetFinalMemberName(method.StableId, scope, method.IsStatic);
+        var finalName = ctx.Renamer.GetFinalMemberName(method.StableId, scope);
 
         // Modifiers
         if (method.IsStatic)
@@ -132,7 +132,7 @@ public static class MethodPrinter
 
         // Get final name using correct scope
         var scope = ScopeFactory.ClassSurface(declaringType, method.IsStatic);
-        var finalName = ctx.Renamer.GetFinalMemberName(method.StableId, scope, method.IsStatic);
+        var finalName = ctx.Renamer.GetFinalMemberName(method.StableId, scope);
 
         // Modifiers
         if (method.IsStatic)

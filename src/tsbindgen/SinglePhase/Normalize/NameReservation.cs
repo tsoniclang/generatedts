@@ -40,7 +40,7 @@ public static class NameReservation
         // Phase 1: Reserve all names in Renamer (populates internal dictionaries)
         foreach (var ns in graph.Namespaces.OrderBy(n => n.Name))
         {
-            var nsScope = ScopeFactory.NamespaceInternal(ns.Name);
+            var nsScope = ScopeFactory.Namespace(ns.Name, NamespaceArea.Internal);
 
             foreach (var type in ns.Types.OrderBy(t => t.ClrFullName))
             {
@@ -78,7 +78,7 @@ public static class NameReservation
                     var shouldLog = allowedForLog.Contains(method.ClrName);
                     var methodScope = ScopeFactory.ClassSurface(type, method.IsStatic);
 
-                    if (ctx.Renamer.TryGetDecision(method.StableId, methodScope, method.IsStatic, out var decision))
+                    if (ctx.Renamer.TryGetDecision(method.StableId, methodScope, out var decision))
                     {
                         if (shouldLog)
                         {
@@ -101,7 +101,7 @@ public static class NameReservation
                 foreach (var property in type.Members.Properties.Where(p => p.EmitScope == EmitScope.ClassSurface))
                 {
                     var propertyScope = ScopeFactory.ClassSurface(type, property.IsStatic);
-                    if (ctx.Renamer.TryGetDecision(property.StableId, propertyScope, property.IsStatic, out var decision))
+                    if (ctx.Renamer.TryGetDecision(property.StableId, propertyScope, out var decision))
                     {
                         if (property.IsStatic)
                             classStaticNames.Add(decision.Final);
@@ -113,7 +113,7 @@ public static class NameReservation
                 foreach (var field in type.Members.Fields.Where(f => f.EmitScope == EmitScope.ClassSurface))
                 {
                     var fieldScope = ScopeFactory.ClassSurface(type, field.IsStatic);
-                    if (ctx.Renamer.TryGetDecision(field.StableId, fieldScope, field.IsStatic, out var decision))
+                    if (ctx.Renamer.TryGetDecision(field.StableId, fieldScope, out var decision))
                     {
                         if (field.IsStatic)
                             classStaticNames.Add(decision.Final);
@@ -125,7 +125,7 @@ public static class NameReservation
                 foreach (var ev in type.Members.Events.Where(e => e.EmitScope == EmitScope.ClassSurface))
                 {
                     var eventScope = ScopeFactory.ClassSurface(type, ev.IsStatic);
-                    if (ctx.Renamer.TryGetDecision(ev.StableId, eventScope, ev.IsStatic, out var decision))
+                    if (ctx.Renamer.TryGetDecision(ev.StableId, eventScope, out var decision))
                     {
                         if (ev.IsStatic)
                             classStaticNames.Add(decision.Final);
@@ -155,7 +155,7 @@ public static class NameReservation
                     foreach (var method in type.Members.Methods.Where(m => m.EmitScope == EmitScope.ClassSurface && canaryNames.Contains(m.ClrName)))
                     {
                         var traceMethodScope = ScopeFactory.ClassSurface(type, method.IsStatic);
-                        var hasDec = ctx.Renamer.TryGetDecision(method.StableId, traceMethodScope, method.IsStatic, out var decision);
+                        var hasDec = ctx.Renamer.TryGetDecision(method.StableId, traceMethodScope, out var decision);
                         var final = hasDec ? decision.Final : "NA";
                         ctx.Log("trace:resv:class",
                             $"[trace:resv:class] {type.StableId}::{Plan.PhaseGate.FormatMemberStableId(method.StableId)} isStatic={method.IsStatic} TryGetDecision={hasDec} final={final} EmitScope={method.EmitScope}");
@@ -164,7 +164,7 @@ public static class NameReservation
                     foreach (var prop in type.Members.Properties.Where(p => p.EmitScope == EmitScope.ClassSurface && canaryNames.Contains(p.ClrName)))
                     {
                         var tracePropScope = ScopeFactory.ClassSurface(type, prop.IsStatic);
-                        var hasDec = ctx.Renamer.TryGetDecision(prop.StableId, tracePropScope, prop.IsStatic, out var decision);
+                        var hasDec = ctx.Renamer.TryGetDecision(prop.StableId, tracePropScope, out var decision);
                         var final = hasDec ? decision.Final : "NA";
                         ctx.Log("trace:resv:class",
                             $"[trace:resv:class] {type.StableId}::{Plan.PhaseGate.FormatMemberStableId(prop.StableId)} isStatic={prop.IsStatic} TryGetDecision={hasDec} final={final} EmitScope={prop.EmitScope}");
@@ -208,9 +208,198 @@ public static class NameReservation
             ctx.Log("NameReservation", $"Skipped {skippedCompilerGenerated} compiler-generated types");
         }
 
+        // Step 5: Post-reservation audit (fail fast)
+        // Verify every emitted member has a rename decision in its correct scope
+        AuditReservationCompleteness(ctx, graph);
+
         // Phase 2: Apply names to graph (pure transformation)
         var updatedGraph = ApplyNamesToGraph(ctx, graph);
         return updatedGraph;
+    }
+
+    /// <summary>
+    /// Step 5: Post-reservation audit (fail fast).
+    /// Verifies every emitted member has a rename decision in its correct scope.
+    /// Throws immediately if any member is missing a decision, preventing silent failures downstream.
+    /// </summary>
+    private static void AuditReservationCompleteness(BuildContext ctx, SymbolGraph graph)
+    {
+        ctx.Log("NameReservation", "Running post-reservation audit...");
+
+        int typesChecked = 0;
+        int membersChecked = 0;
+        var errors = new List<string>();
+
+        foreach (var ns in graph.Namespaces)
+        {
+            var nsScope = ScopeFactory.Namespace(ns.Name, NamespaceArea.Internal);
+
+            foreach (var type in ns.Types)
+            {
+                if (IsCompilerGenerated(type.ClrName))
+                    continue;
+
+                // Verify type name is reserved
+                if (!ctx.Renamer.TryGetDecision(type.StableId, nsScope, out _))
+                {
+                    errors.Add($"PG_FIN_003: Type missing rename decision\n" +
+                              $"  Type: {type.ClrFullName}\n" +
+                              $"  StableId: {type.StableId}\n" +
+                              $"  Expected scope: {nsScope.ScopeKey}");
+                }
+                typesChecked++;
+
+                // Verify class-surface members
+                AuditClassSurfaceMembers(ctx, type, errors, ref membersChecked);
+
+                // Verify view-surface members
+                AuditViewSurfaceMembers(ctx, type, errors, ref membersChecked);
+            }
+        }
+
+        ctx.Log("NameReservation", $"Audit complete: checked {typesChecked} types, {membersChecked} members");
+
+        if (errors.Count > 0)
+        {
+            var errorReport = string.Join("\n\n", errors.Take(10)); // Show first 10 errors
+            var summary = errors.Count > 10
+                ? $"\n\n... and {errors.Count - 10} more errors"
+                : "";
+
+            throw new InvalidOperationException(
+                $"Post-reservation audit failed with {errors.Count} error(s):\n\n{errorReport}{summary}");
+        }
+
+        ctx.Log("NameReservation", "✓ Post-reservation audit passed");
+    }
+
+    /// <summary>
+    /// Audit all ClassSurface members have decisions in class scope.
+    /// </summary>
+    private static void AuditClassSurfaceMembers(BuildContext ctx, TypeSymbol type, List<string> errors, ref int membersChecked)
+    {
+        // Check methods
+        foreach (var method in type.Members.Methods.Where(m => m.EmitScope == EmitScope.ClassSurface))
+        {
+            var scope = ScopeFactory.ClassSurface(type, method.IsStatic);
+            if (!ctx.Renamer.TryGetDecision(method.StableId, scope, out _))
+            {
+                errors.Add($"PG_FIN_003: ClassSurface method missing rename decision\n" +
+                          $"  Type: {type.ClrFullName}\n" +
+                          $"  Member: {method.ClrName}\n" +
+                          $"  StableId: {method.StableId}\n" +
+                          $"  EmitScope: {method.EmitScope}\n" +
+                          $"  IsStatic: {method.IsStatic}\n" +
+                          $"  Expected scope: {scope.ScopeKey}");
+            }
+            membersChecked++;
+        }
+
+        // Check properties
+        foreach (var property in type.Members.Properties.Where(p => p.EmitScope == EmitScope.ClassSurface))
+        {
+            var scope = ScopeFactory.ClassSurface(type, property.IsStatic);
+            if (!ctx.Renamer.TryGetDecision(property.StableId, scope, out _))
+            {
+                errors.Add($"PG_FIN_003: ClassSurface property missing rename decision\n" +
+                          $"  Type: {type.ClrFullName}\n" +
+                          $"  Member: {property.ClrName}\n" +
+                          $"  StableId: {property.StableId}\n" +
+                          $"  EmitScope: {property.EmitScope}\n" +
+                          $"  IsStatic: {property.IsStatic}\n" +
+                          $"  Expected scope: {scope.ScopeKey}");
+            }
+            membersChecked++;
+        }
+
+        // Check fields
+        foreach (var field in type.Members.Fields.Where(f => f.EmitScope == EmitScope.ClassSurface))
+        {
+            var scope = ScopeFactory.ClassSurface(type, field.IsStatic);
+            if (!ctx.Renamer.TryGetDecision(field.StableId, scope, out _))
+            {
+                errors.Add($"PG_FIN_003: ClassSurface field missing rename decision\n" +
+                          $"  Type: {type.ClrFullName}\n" +
+                          $"  Member: {field.ClrName}\n" +
+                          $"  StableId: {field.StableId}\n" +
+                          $"  EmitScope: {field.EmitScope}\n" +
+                          $"  IsStatic: {field.IsStatic}\n" +
+                          $"  Expected scope: {scope.ScopeKey}");
+            }
+            membersChecked++;
+        }
+
+        // Check events
+        foreach (var ev in type.Members.Events.Where(e => e.EmitScope == EmitScope.ClassSurface))
+        {
+            var scope = ScopeFactory.ClassSurface(type, ev.IsStatic);
+            if (!ctx.Renamer.TryGetDecision(ev.StableId, scope, out _))
+            {
+                errors.Add($"PG_FIN_003: ClassSurface event missing rename decision\n" +
+                          $"  Type: {type.ClrFullName}\n" +
+                          $"  Member: {ev.ClrName}\n" +
+                          $"  StableId: {ev.StableId}\n" +
+                          $"  EmitScope: {ev.EmitScope}\n" +
+                          $"  IsStatic: {ev.IsStatic}\n" +
+                          $"  Expected scope: {scope.ScopeKey}");
+            }
+            membersChecked++;
+        }
+    }
+
+    /// <summary>
+    /// Audit all ViewOnly members have decisions in view scope.
+    /// </summary>
+    private static void AuditViewSurfaceMembers(BuildContext ctx, TypeSymbol type, List<string> errors, ref int membersChecked)
+    {
+        foreach (var view in type.ExplicitViews)
+        {
+            var interfaceStableId = ScopeFactory.GetInterfaceStableId(view.InterfaceReference);
+
+            foreach (var viewMember in view.ViewMembers)
+            {
+                // Determine if this is actually a ViewOnly member
+                bool isViewOnly = false;
+                bool isStatic = false;
+
+                switch (viewMember.Kind)
+                {
+                    case Shape.ViewPlanner.ViewMemberKind.Method:
+                        var method = type.Members.Methods.FirstOrDefault(m => m.StableId.Equals(viewMember.StableId));
+                        isViewOnly = method?.EmitScope == EmitScope.ViewOnly;
+                        isStatic = method?.IsStatic ?? false;
+                        break;
+                    case Shape.ViewPlanner.ViewMemberKind.Property:
+                        var property = type.Members.Properties.FirstOrDefault(p => p.StableId.Equals(viewMember.StableId));
+                        isViewOnly = property?.EmitScope == EmitScope.ViewOnly;
+                        isStatic = property?.IsStatic ?? false;
+                        break;
+                    case Shape.ViewPlanner.ViewMemberKind.Event:
+                        var ev = type.Members.Events.FirstOrDefault(e => e.StableId.Equals(viewMember.StableId));
+                        isViewOnly = ev?.EmitScope == EmitScope.ViewOnly;
+                        isStatic = ev?.IsStatic ?? false;
+                        break;
+                }
+
+                if (!isViewOnly)
+                    continue; // Not a ViewOnly member - was checked in class surface audit
+
+                var scope = ScopeFactory.ViewSurface(type, interfaceStableId, isStatic);
+                if (!ctx.Renamer.TryGetDecision(viewMember.StableId, scope, out _))
+                {
+                    errors.Add($"PG_FIN_003: ViewOnly member missing rename decision\n" +
+                              $"  Type: {type.ClrFullName}\n" +
+                              $"  View: {view.ViewPropertyName}\n" +
+                              $"  Interface: {interfaceStableId}\n" +
+                              $"  Member: {viewMember.ClrName}\n" +
+                              $"  StableId: {viewMember.StableId}\n" +
+                              $"  MemberKind: {viewMember.Kind}\n" +
+                              $"  IsStatic: {isStatic}\n" +
+                              $"  Expected scope: {scope.ScopeKey}");
+                }
+                membersChecked++;
+            }
+        }
     }
 
     /// <summary>
@@ -350,7 +539,7 @@ public static class NameReservation
             // Check if already renamed by earlier pass (e.g., HiddenMemberPlanner, IndexerPlanner)
             // M5 FIX: Pass class scope and isStatic to TryGetDecision
             var methodCheckScope = ScopeFactory.ClassSurface(type, method.IsStatic);
-            if (ctx.Renamer.TryGetDecision(method.StableId, methodCheckScope, method.IsStatic, out var existingDecision))
+            if (ctx.Renamer.TryGetDecision(method.StableId, methodCheckScope, out var existingDecision))
             {
                 if (isDecimalToMethod)
                     ctx.Log("name-resv-debug", $"Skip existing: {method.ClrName} (from {existingDecision.DecisionSource}, final={existingDecision.Final})");
@@ -385,7 +574,7 @@ public static class NameReservation
             // Check if already renamed (e.g., IndexerPlanner)
             // M5 FIX: Pass class scope and isStatic to TryGetDecision
             var propertyCheckScope = ScopeFactory.ClassSurface(type, property.IsStatic);
-            if (ctx.Renamer.TryGetDecision(property.StableId, propertyCheckScope, property.IsStatic, out var existingDecision))
+            if (ctx.Renamer.TryGetDecision(property.StableId, propertyCheckScope, out var existingDecision))
             {
                 skipped++;
                 continue;
@@ -402,7 +591,7 @@ public static class NameReservation
             // Check if already renamed
             // M5 FIX: Pass class scope and isStatic to TryGetDecision
             var fieldCheckScope = ScopeFactory.ClassSurface(type, field.IsStatic);
-            if (ctx.Renamer.TryGetDecision(field.StableId, fieldCheckScope, field.IsStatic, out var existingDecision))
+            if (ctx.Renamer.TryGetDecision(field.StableId, fieldCheckScope, out var existingDecision))
             {
                 skipped++;
                 continue;
@@ -419,7 +608,7 @@ public static class NameReservation
             // Check if already renamed
             // M5 FIX: Pass class scope and isStatic to TryGetDecision
             var eventCheckScope = ScopeFactory.ClassSurface(type, ev.IsStatic);
-            if (ctx.Renamer.TryGetDecision(ev.StableId, eventCheckScope, ev.IsStatic, out var existingDecision))
+            if (ctx.Renamer.TryGetDecision(ev.StableId, eventCheckScope, out var existingDecision))
             {
                 skipped++;
                 continue;
@@ -435,7 +624,7 @@ public static class NameReservation
             // Check if already renamed
             // M5 FIX: Pass class scope and isStatic to TryGetDecision
             var ctorCheckScope = ScopeFactory.ClassSurface(type, ctor.IsStatic);
-            if (ctx.Renamer.TryGetDecision(ctor.StableId, ctorCheckScope, ctor.IsStatic, out var existingDecision))
+            if (ctx.Renamer.TryGetDecision(ctor.StableId, ctorCheckScope, out var existingDecision))
             {
                 skipped++;
                 continue;
@@ -480,21 +669,12 @@ public static class NameReservation
 
         // For each view, create a separate scope and reserve names (deterministic order)
         // Sort views by interface StableId for consistent ordering
-        var sortedViews = type.ExplicitViews.OrderBy(v =>
-        {
-            var stableId = ResolveInterfaceStableId(graph, v.InterfaceReference);
-            return stableId ?? "zzz"; // Put unresolved at end
-        });
+        var sortedViews = type.ExplicitViews.OrderBy(v => ScopeFactory.GetInterfaceStableId(v.InterfaceReference));
 
         foreach (var view in sortedViews)
         {
-            // Resolve interface StableId (assembly-qualified)
-            var interfaceStableId = ResolveInterfaceStableId(graph, view.InterfaceReference);
-            if (interfaceStableId == null)
-            {
-                ctx.Log("NameReservation", $"WARNING: Could not resolve interface StableId for view {view.ViewPropertyName} on {type.ClrFullName}");
-                continue;
-            }
+            // Get interface StableId from TypeReference (no graph lookup)
+            var interfaceStableId = ScopeFactory.GetInterfaceStableId(view.InterfaceReference);
 
             // Create view-specific BASE scope (ReserveMemberName will add #instance/#static)
             var viewScope = ScopeFactory.ViewBase(type, interfaceStableId);
@@ -663,20 +843,6 @@ public static class NameReservation
         };
     }
 
-    /// <summary>
-    /// Resolve the StableId of an interface TypeReference by looking it up in the graph.
-    /// Returns null if the interface is not found in the graph.
-    /// </summary>
-    private static string? ResolveInterfaceStableId(SymbolGraph graph, Model.Types.TypeReference ifaceRef)
-    {
-        var fullName = GetTypeReferenceName(ifaceRef);
-
-        var iface = graph.Namespaces
-            .SelectMany(ns => ns.Types)
-            .FirstOrDefault(t => t.ClrFullName == fullName && t.Kind == TypeKind.Interface);
-
-        return iface?.StableId.ToString();
-    }
 
     /// <summary>
     /// Apply reserved names to graph (Phase 2 - pure transformation).
@@ -689,7 +855,7 @@ public static class NameReservation
 
     private static NamespaceSymbol ApplyNamesToNamespace(BuildContext ctx, NamespaceSymbol ns)
     {
-        var nsScope = ScopeFactory.NamespaceInternal(ns.Name);
+        var nsScope = ScopeFactory.Namespace(ns.Name, NamespaceArea.Internal);
 
         var updatedTypes = ns.Types.Select(t =>
         {
@@ -708,7 +874,7 @@ public static class NameReservation
         var typeScope = ScopeFactory.ClassBase(type);
 
         // Get TsEmitName from Renamer
-        var tsEmitName = ctx.Renamer.GetFinalTypeName(type.StableId, nsScope);
+        var tsEmitName = ctx.Renamer.GetFinalTypeName(type);
 
         // Update members
         // M5 FIX: Pass declaringType so ViewOnly members can use view scopes
@@ -732,12 +898,12 @@ public static class NameReservation
             {
                 var interfaceStableId = ScopeFactory.GetInterfaceStableId(m.SourceInterface);
                 var viewScope = ScopeFactory.ViewSurface(declaringType, interfaceStableId, m.IsStatic);
-                tsEmitName = ctx.Renamer.GetFinalMemberName(m.StableId, viewScope, m.IsStatic);
+                tsEmitName = ctx.Renamer.GetFinalMemberName(m.StableId, viewScope);
             }
             else
             {
                 var classScope = ScopeFactory.ClassSurface(declaringType, m.IsStatic);
-                tsEmitName = ctx.Renamer.GetFinalMemberName(m.StableId, classScope, m.IsStatic);
+                tsEmitName = ctx.Renamer.GetFinalMemberName(m.StableId, classScope);
             }
             return m with { TsEmitName = tsEmitName };
         }).ToImmutableArray();
@@ -749,12 +915,12 @@ public static class NameReservation
             {
                 var interfaceStableId = ScopeFactory.GetInterfaceStableId(p.SourceInterface);
                 var viewScope = ScopeFactory.ViewSurface(declaringType, interfaceStableId, p.IsStatic);
-                tsEmitName = ctx.Renamer.GetFinalMemberName(p.StableId, viewScope, p.IsStatic);
+                tsEmitName = ctx.Renamer.GetFinalMemberName(p.StableId, viewScope);
             }
             else
             {
                 var classScope = ScopeFactory.ClassSurface(declaringType, p.IsStatic);
-                tsEmitName = ctx.Renamer.GetFinalMemberName(p.StableId, classScope, p.IsStatic);
+                tsEmitName = ctx.Renamer.GetFinalMemberName(p.StableId, classScope);
             }
             return p with { TsEmitName = tsEmitName };
         }).ToImmutableArray();
@@ -763,7 +929,7 @@ public static class NameReservation
         var updatedFields = members.Fields.Select(f =>
         {
             var fieldScope = ScopeFactory.ClassSurface(declaringType, f.IsStatic);
-            var tsEmitName = ctx.Renamer.GetFinalMemberName(f.StableId, fieldScope, f.IsStatic);
+            var tsEmitName = ctx.Renamer.GetFinalMemberName(f.StableId, fieldScope);
             return f with { TsEmitName = tsEmitName };
         }).ToImmutableArray();
 
@@ -771,7 +937,7 @@ public static class NameReservation
         var updatedEvents = members.Events.Select(e =>
         {
             var eventScope = ScopeFactory.ClassSurface(declaringType, e.IsStatic);
-            var tsEmitName = ctx.Renamer.GetFinalMemberName(e.StableId, eventScope, e.IsStatic);
+            var tsEmitName = ctx.Renamer.GetFinalMemberName(e.StableId, eventScope);
             return e with { TsEmitName = tsEmitName };
         }).ToImmutableArray();
 

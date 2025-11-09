@@ -4,6 +4,17 @@ using tsbindgen.SinglePhase.Model.Types;
 namespace tsbindgen.SinglePhase.Renaming;
 
 /// <summary>
+/// Namespace area for type name resolution.
+/// </summary>
+public enum NamespaceArea
+{
+    /// <summary>Public facade scope.</summary>
+    Public,
+    /// <summary>Internal artifact scope (default for all generations).</summary>
+    Internal
+}
+
+/// <summary>
 /// Centralized scope construction for SymbolRenamer.
 /// NO MANUAL SCOPE STRINGS - all scopes must be created through these helpers.
 ///
@@ -21,37 +32,31 @@ namespace tsbindgen.SinglePhase.Renaming;
 /// </summary>
 public static class ScopeFactory
 {
-    // ============================================================================
-    // NAMESPACE SCOPES (full only - no base/full distinction)
-    // ============================================================================
-
     /// <summary>
-    /// Creates namespace scope for public type names.
-    /// Format: "ns:{Namespace}:public"
+    /// Canonical global namespace identifier (for types with null/empty namespace).
     /// </summary>
-    public static NamespaceScope NamespacePublic(string ns)
-    {
-        return new NamespaceScope
-        {
-            Namespace = ns,
-            IsInternal = false,
-            ScopeKey = $"ns:{ns}:public"
-        };
-    }
+    public const string GlobalNamespace = "(global)";
+
+    // ============================================================================
+    // NAMESPACE SCOPES (single entry point)
+    // ============================================================================
 
     /// <summary>
-    /// Creates namespace scope for internal type names.
-    /// Format: "ns:{Namespace}:internal"
+    /// Creates namespace scope for type name resolution.
+    /// Format: "ns:{Namespace}:public" or "ns:{Namespace}:internal"
     ///
-    /// Use for: Current internal artifacts (all namespace emissions)
+    /// Handles null/empty namespaces by normalizing to "(global)".
     /// </summary>
-    public static NamespaceScope NamespaceInternal(string ns)
+    public static NamespaceScope Namespace(string? ns, NamespaceArea area)
     {
+        var normalized = string.IsNullOrWhiteSpace(ns) ? GlobalNamespace : ns;
+        var isInternal = (area == NamespaceArea.Internal);
+
         return new NamespaceScope
         {
-            Namespace = ns,
-            IsInternal = true,
-            ScopeKey = $"ns:{ns}:internal"
+            Namespace = normalized,
+            IsInternal = isInternal,
+            ScopeKey = $"ns:{normalized}:{(isInternal ? "internal" : "public")}"
         };
     }
 

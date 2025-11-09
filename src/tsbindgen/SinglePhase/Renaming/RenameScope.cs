@@ -27,6 +27,11 @@ public sealed record NamespaceScope : RenameScope
     /// Internal and facade are treated as separate scopes to allow clean facade names.
     /// </summary>
     public required bool IsInternal { get; init; }
+
+    /// <summary>
+    /// Internal constructor - use ScopeFactory.NamespacePublic/Internal instead.
+    /// </summary>
+    internal NamespaceScope() { }
 }
 
 /// <summary>
@@ -45,6 +50,11 @@ public sealed record TypeScope : RenameScope
     /// Separating these prevents false collision detection between static and instance members.
     /// </summary>
     public required bool IsStatic { get; init; }
+
+    /// <summary>
+    /// Internal constructor - use ScopeFactory.ClassBase/ClassSurface/ViewBase/ViewSurface instead.
+    /// </summary>
+    internal TypeScope() { }
 }
 
 /// <summary>
@@ -56,11 +66,17 @@ public sealed record ImportAliasScope : RenameScope
     /// Target namespace being imported.
     /// </summary>
     public required string TargetNamespace { get; init; }
+
+    /// <summary>
+    /// Internal constructor - add factory method to ScopeFactory if needed.
+    /// </summary>
+    internal ImportAliasScope() { }
 }
 
 /// <summary>
 /// Scope for explicit interface view members (ViewOnly members).
 /// M5 CRITICAL: View members get separate scopes to avoid colliding with class surface.
+/// NOTE: This type is deprecated - use TypeScope with view: prefix instead (created via ScopeFactory.ViewSurface).
 /// </summary>
 public sealed record ViewScope : RenameScope
 {
@@ -80,4 +96,9 @@ public sealed record ViewScope : RenameScope
     /// True for static member sub-scope, false for instance member sub-scope.
     /// </summary>
     public required bool IsStatic { get; init; }
+
+    /// <summary>
+    /// Internal constructor - deprecated, use ScopeFactory.ViewSurface which returns TypeScope.
+    /// </summary>
+    internal ViewScope() { }
 }
