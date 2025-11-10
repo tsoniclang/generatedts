@@ -127,11 +127,14 @@ public sealed class AssemblyLoader
         var resolvedPaths = ResolveClosure(seedPaths, candidateMap, strictVersions);
         _ctx.Log("AssemblyLoader", $"Total assemblies in closure: {resolvedPaths.Count}");
 
-        // Phase 3: Find core library
+        // Phase 3: Validate assembly identity (PG_LOAD_002/003/004)
+        ValidateAssemblyIdentity(resolvedPaths, strictVersions);
+
+        // Phase 4: Find core library
         var coreLibPath = FindCoreLibrary(resolvedPaths);
         _ctx.Log("AssemblyLoader", $"Core library: {Path.GetFileName(coreLibPath)}");
 
-        // Phase 4: Create MetadataLoadContext
+        // Phase 5: Create MetadataLoadContext
         var resolver = new PathAssemblyResolver(resolvedPaths.Values.ToArray());
         var loadContext = new MetadataLoadContext(resolver, "System.Private.CoreLib");
         _ctx.Log("AssemblyLoader", "MetadataLoadContext created with transitive closure");
@@ -283,6 +286,65 @@ public sealed class AssemblyLoader
         }
 
         return resolved;
+    }
+
+    /// <summary>
+    /// Validate assembly identity consistency in resolved closure.
+    /// Guards: PG_LOAD_002 (mixed PKT), PG_LOAD_003 (version drift), PG_LOAD_004 (retargetable/content type)
+    /// </summary>
+    private void ValidateAssemblyIdentity(
+        Dictionary<AssemblyKey, string> resolvedPaths,
+        bool strictVersions)
+    {
+        // Group assemblies by name
+        var byName = resolvedPaths.GroupBy(kvp => kvp.Key.Name);
+
+        foreach (var group in byName)
+        {
+            var assemblies = group.ToList();
+            var assemblyName = group.Key;
+
+            // PG_LOAD_002: Check for mixed PublicKeyToken
+            var distinctTokens = assemblies.Select(kvp => kvp.Key.PublicKeyToken).Distinct().ToList();
+            if (distinctTokens.Count > 1)
+            {
+                var tokenList = string.Join(", ", distinctTokens.Select(t => $"'{t}'"));
+                _ctx.Diagnostics.Error(
+                    Core.Diagnostics.DiagnosticCodes.PG_LOAD_002,
+                    $"Assembly '{assemblyName}' referenced with multiple PublicKeyTokens: {tokenList}");
+            }
+
+            // PG_LOAD_003: Check for major version drift
+            if (assemblies.Count > 1)
+            {
+                var versions = assemblies.Select(kvp => Version.Parse(kvp.Key.Version)).ToList();
+                var maxMajor = versions.Max(v => v.Major);
+                var minMajor = versions.Min(v => v.Major);
+
+                if (maxMajor != minMajor)
+                {
+                    var versionList = string.Join(", ", versions.Select(v => v.ToString()));
+                    var severity = strictVersions ? "ERROR" : "WARNING";
+
+                    if (strictVersions)
+                    {
+                        _ctx.Diagnostics.Error(
+                            Core.Diagnostics.DiagnosticCodes.PG_LOAD_003,
+                            $"Assembly '{assemblyName}' has major version drift: {versionList}");
+                    }
+                    else
+                    {
+                        _ctx.Diagnostics.Warning(
+                            Core.Diagnostics.DiagnosticCodes.PG_LOAD_003,
+                            $"Assembly '{assemblyName}' has major version drift: {versionList}");
+                    }
+                }
+            }
+
+            // PG_LOAD_004: Check for retargetable/ContentType
+            // TODO: Requires extending AssemblyKey to track these flags
+            // For now, this is a placeholder for future implementation
+        }
     }
 
     /// <summary>
