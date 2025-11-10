@@ -7,24 +7,26 @@ namespace tsbindgen.SinglePhase.Emit.Printers;
 /// <summary>
 /// Prints TypeScript type references from TypeReference model.
 /// Handles all type constructs: named, generic parameters, arrays, pointers, byrefs, nested.
+/// CRITICAL: Uses TypeNameResolver to ensure printed names match imports (single source of truth).
 /// </summary>
 public static class TypeRefPrinter
 {
     /// <summary>
     /// Print a TypeReference to TypeScript syntax.
+    /// CRITICAL: Always pass TypeNameResolver - never use CLR names directly.
     /// </summary>
-    public static string Print(TypeReference typeRef, BuildContext ctx)
+    public static string Print(TypeReference typeRef, TypeNameResolver resolver, BuildContext ctx)
     {
         return typeRef switch
         {
             // Defensive guard: Placeholders should never reach output after ConstraintCloser
             PlaceholderTypeReference placeholder => PrintPlaceholder(placeholder, ctx),
-            NamedTypeReference named => PrintNamed(named, ctx),
+            NamedTypeReference named => PrintNamed(named, resolver, ctx),
             GenericParameterReference gp => PrintGenericParameter(gp),
-            ArrayTypeReference arr => PrintArray(arr, ctx),
-            PointerTypeReference ptr => PrintPointer(ptr, ctx),
-            ByRefTypeReference byref => PrintByRef(byref, ctx),
-            NestedTypeReference nested => PrintNested(nested, ctx),
+            ArrayTypeReference arr => PrintArray(arr, resolver, ctx),
+            PointerTypeReference ptr => PrintPointer(ptr, resolver, ctx),
+            ByRefTypeReference byref => PrintByRef(byref, resolver, ctx),
+            NestedTypeReference nested => PrintNested(nested, resolver, ctx),
             _ => "any" // Fallback for unknown types
         };
     }
@@ -41,60 +43,22 @@ public static class TypeRefPrinter
         return "any";
     }
 
-    /// <summary>
-    /// Map CLR primitive types to TypeScript types.
-    /// Returns null if not a primitive type.
-    /// </summary>
-    private static string? MapPrimitiveType(string fullName)
+    private static string PrintNamed(NamedTypeReference named, TypeNameResolver resolver, BuildContext ctx)
     {
-        return fullName switch
+        // Map CLR primitive types to TypeScript built-in types (short-circuit)
+        var primitiveType = TypeNameResolver.TryMapPrimitive(named.FullName);
+        if (primitiveType != null)
         {
-            // Boolean
-            "System.Boolean" => "boolean",
-
-            // Numeric types → branded types (defined in each namespace)
-            "System.SByte" => "sbyte",
-            "System.Byte" => "byte",
-            "System.Int16" => "short",
-            "System.UInt16" => "ushort",
-            "System.Int32" => "int",
-            "System.UInt32" => "uint",
-            "System.Int64" => "long",
-            "System.UInt64" => "ulong",
-            "System.Single" => "float",
-            "System.Double" => "double",
-            "System.Decimal" => "decimal",
-            "System.IntPtr" => "nint",
-            "System.UIntPtr" => "nuint",
-
-            // String
-            "System.String" => "string",
-
-            // Void
-            "System.Void" => "void",
-
-            // Object
-            "System.Object" => "any",
-
-            _ => null
-        };
-    }
-
-    private static string PrintNamed(NamedTypeReference named, BuildContext ctx)
-    {
-        // Map CLR primitive types to TypeScript branded types or built-in types
-        // This ensures cross-namespace references work correctly
-        var mappedType = MapPrimitiveType(named.FullName);
-        if (mappedType != null)
-        {
-            return mappedType;
+            return primitiveType;
         }
 
-        // Use simple name and sanitize for TypeScript
-        var baseName = SanitizeClrName(named.Name);
+        // CRITICAL: Get final TypeScript name from Renamer via resolver
+        // This ensures printed names match import statements (single source of truth)
+        // For types in graph: uses Renamer final name (may have suffix)
+        // For external types: uses sanitized CLR simple name
+        var baseName = resolver.ResolveTypeName(named);
 
         // HARDENING: Guarantee non-empty type names (defensive check)
-        // This should never happen after TypeReferenceFactory hardening, but fail-safe
         if (string.IsNullOrWhiteSpace(baseName))
         {
             ctx.Diagnostics.Warning(
@@ -109,8 +73,8 @@ public static class TypeRefPrinter
             return baseName;
 
         // Print generic type with arguments: Foo<T, U>
-        // HARDENING: Only print <...> if args is non-empty
-        var argParts = named.TypeArguments.Select(arg => Print(arg, ctx)).ToList();
+        // CRITICAL: Recursively print type arguments using resolver
+        var argParts = named.TypeArguments.Select(arg => Print(arg, resolver, ctx)).ToList();
         var nonEmptyArgs = argParts.Where(a => !string.IsNullOrWhiteSpace(a)).ToList();
 
         if (nonEmptyArgs.Count == 0)
@@ -132,9 +96,9 @@ public static class TypeRefPrinter
         return gp.Name;
     }
 
-    private static string PrintArray(ArrayTypeReference arr, BuildContext ctx)
+    private static string PrintArray(ArrayTypeReference arr, TypeNameResolver resolver, BuildContext ctx)
     {
-        var elementType = Print(arr.ElementType, ctx);
+        var elementType = Print(arr.ElementType, resolver, ctx);
 
         // Multi-dimensional arrays: T[][], T[][][]
         if (arr.Rank == 1)
@@ -149,27 +113,27 @@ public static class TypeRefPrinter
         return result;
     }
 
-    private static string PrintPointer(PointerTypeReference ptr, BuildContext ctx)
+    private static string PrintPointer(PointerTypeReference ptr, TypeNameResolver resolver, BuildContext ctx)
     {
         // TypeScript has no pointer types
         // Map to the underlying type (pointer semantics lost)
         // This is tracked in metadata as a limitation
         ctx.Log("TypeRefPrinter", "Warning - Pointer type mapped to underlying type");
-        return Print(ptr.PointeeType, ctx);
+        return Print(ptr.PointeeType, resolver, ctx);
     }
 
-    private static string PrintByRef(ByRefTypeReference byref, BuildContext ctx)
+    private static string PrintByRef(ByRefTypeReference byref, TypeNameResolver resolver, BuildContext ctx)
     {
         // TypeScript has no ref types
         // Map to the underlying type (ref semantics tracked in metadata)
-        return Print(byref.ReferencedType, ctx);
+        return Print(byref.ReferencedType, resolver, ctx);
     }
 
-    private static string PrintNested(NestedTypeReference nested, BuildContext ctx)
+    private static string PrintNested(NestedTypeReference nested, TypeNameResolver resolver, BuildContext ctx)
     {
-        // Nested types: Use the full reference which has complete CLR name
-        // We flatten nested types in TypeScript: Outer_Inner
-        return SanitizeClrName(nested.FullReference.Name);
+        // CRITICAL: Nested types use resolver just like named types
+        // The FullReference is a NamedTypeReference that the resolver will handle correctly
+        return PrintNamed(nested.FullReference, resolver, ctx);
     }
 
     /// <summary>
@@ -195,18 +159,18 @@ public static class TypeRefPrinter
     /// Print a list of type references separated by commas.
     /// Used for generic parameter lists, method parameters, etc.
     /// </summary>
-    public static string PrintList(IEnumerable<TypeReference> typeRefs, BuildContext ctx)
+    public static string PrintList(IEnumerable<TypeReference> typeRefs, TypeNameResolver resolver, BuildContext ctx)
     {
-        return string.Join(", ", typeRefs.Select(t => Print(t, ctx)));
+        return string.Join(", ", typeRefs.Select(t => Print(t, resolver, ctx)));
     }
 
     /// <summary>
     /// Print a type reference with optional nullability.
     /// Used for nullable value types and reference types.
     /// </summary>
-    public static string PrintNullable(TypeReference typeRef, bool isNullable, BuildContext ctx)
+    public static string PrintNullable(TypeReference typeRef, bool isNullable, TypeNameResolver resolver, BuildContext ctx)
     {
-        var baseType = Print(typeRef, ctx);
+        var baseType = Print(typeRef, resolver, ctx);
         return isNullable ? $"{baseType} | null" : baseType;
     }
 
@@ -214,45 +178,45 @@ public static class TypeRefPrinter
     /// Print a readonly array type.
     /// Used for ReadonlyArray<T> mappings from IEnumerable<T>, etc.
     /// </summary>
-    public static string PrintReadonlyArray(TypeReference elementType, BuildContext ctx)
+    public static string PrintReadonlyArray(TypeReference elementType, TypeNameResolver resolver, BuildContext ctx)
     {
-        var element = Print(elementType, ctx);
+        var element = Print(elementType, resolver, ctx);
         return $"ReadonlyArray<{element}>";
     }
 
     /// <summary>
     /// Print a Promise type for Task<T> mappings.
     /// </summary>
-    public static string PrintPromise(TypeReference resultType, BuildContext ctx)
+    public static string PrintPromise(TypeReference resultType, TypeNameResolver resolver, BuildContext ctx)
     {
-        var result = Print(resultType, ctx);
+        var result = Print(resultType, resolver, ctx);
         return $"Promise<{result}>";
     }
 
     /// <summary>
     /// Print a tuple type for ValueTuple mappings.
     /// </summary>
-    public static string PrintTuple(IReadOnlyList<TypeReference> elementTypes, BuildContext ctx)
+    public static string PrintTuple(IReadOnlyList<TypeReference> elementTypes, TypeNameResolver resolver, BuildContext ctx)
     {
-        var elements = string.Join(", ", elementTypes.Select(t => Print(t, ctx)));
+        var elements = string.Join(", ", elementTypes.Select(t => Print(t, resolver, ctx)));
         return $"[{elements}]";
     }
 
     /// <summary>
     /// Print a union type for TypeScript union types.
     /// </summary>
-    public static string PrintUnion(IReadOnlyList<TypeReference> types, BuildContext ctx)
+    public static string PrintUnion(IReadOnlyList<TypeReference> types, TypeNameResolver resolver, BuildContext ctx)
     {
-        var parts = string.Join(" | ", types.Select(t => Print(t, ctx)));
+        var parts = string.Join(" | ", types.Select(t => Print(t, resolver, ctx)));
         return parts;
     }
 
     /// <summary>
     /// Print an intersection type for TypeScript intersection types.
     /// </summary>
-    public static string PrintIntersection(IReadOnlyList<TypeReference> types, BuildContext ctx)
+    public static string PrintIntersection(IReadOnlyList<TypeReference> types, TypeNameResolver resolver, BuildContext ctx)
     {
-        var parts = string.Join(" & ", types.Select(t => Print(t, ctx)));
+        var parts = string.Join(" & ", types.Select(t => Print(t, resolver, ctx)));
         return parts;
     }
 
@@ -260,9 +224,9 @@ public static class TypeRefPrinter
     /// Print a typeof expression for static class references.
     /// Used for: typeof ClassName → (typeof ClassName)
     /// </summary>
-    public static string PrintTypeof(TypeReference typeRef, BuildContext ctx)
+    public static string PrintTypeof(TypeReference typeRef, TypeNameResolver resolver, BuildContext ctx)
     {
-        var typeName = Print(typeRef, ctx);
+        var typeName = Print(typeRef, resolver, ctx);
         return $"typeof {typeName}";
     }
 }

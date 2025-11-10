@@ -28,7 +28,7 @@ public static class InternalIndexEmitter
             ctx.Log("InternalIndexEmitter", $"  Emitting namespace: {ns.Name}");
 
             // Generate .d.ts content
-            var content = GenerateNamespaceDeclaration(ctx, plan.Imports, nsOrder);
+            var content = GenerateNamespaceDeclaration(ctx, plan.Graph, plan.Imports, nsOrder);
 
             // Write to file: output/Namespace.Name/internal/index.d.ts (or _root for empty namespace)
             var namespacePath = Path.Combine(outputDirectory, ns.Name);
@@ -47,8 +47,11 @@ public static class InternalIndexEmitter
         ctx.Log("InternalIndexEmitter", $"Generated {emittedCount} declaration files");
     }
 
-    private static string GenerateNamespaceDeclaration(BuildContext ctx, ImportPlan importPlan, NamespaceEmitOrder nsOrder)
+    private static string GenerateNamespaceDeclaration(BuildContext ctx, SymbolGraph graph, ImportPlan importPlan, NamespaceEmitOrder nsOrder)
     {
+        // Create TypeNameResolver - single source of truth for type names
+        var resolver = new TypeNameResolver(ctx, graph);
+
         var sb = new StringBuilder();
 
         // File header
@@ -103,7 +106,7 @@ public static class InternalIndexEmitter
             if (hasViews)
             {
                 // Emit class with $instance suffix (non-exported in namespaces, exported in root)
-                var instanceClass = ClassPrinter.PrintInstance(typeOrder.Type, ctx);
+                var instanceClass = ClassPrinter.PrintInstance(typeOrder.Type, resolver, ctx);
                 var indentedInstance = Indent(instanceClass, indent);
 
                 // ROOT NAMESPACE FIX: Add export keyword for module-level declarations
@@ -114,7 +117,7 @@ public static class InternalIndexEmitter
                 sb.AppendLine();
 
                 // Emit companion views interface (non-exported in namespaces, exported in root)
-                var viewsInterface = EmitCompanionViewsInterface(typeOrder.Type, views, ctx);
+                var viewsInterface = EmitCompanionViewsInterface(typeOrder.Type, views, resolver, ctx);
                 var indentedViews = Indent(viewsInterface, indent);
 
                 // ROOT NAMESPACE FIX: Add export keyword for module-level declarations
@@ -125,7 +128,7 @@ public static class InternalIndexEmitter
                 sb.AppendLine();
 
                 // Emit intersection type alias (always exported)
-                var typeAlias = EmitIntersectionTypeAlias(typeOrder.Type, ctx);
+                var typeAlias = EmitIntersectionTypeAlias(typeOrder.Type, resolver, ctx);
                 var indentedAlias = Indent(typeAlias, indent);
 
                 // ROOT NAMESPACE FIX: Add export keyword if not already present
@@ -138,7 +141,7 @@ public static class InternalIndexEmitter
             else
             {
                 // Normal emission (no views)
-                var typeDecl = ClassPrinter.Print(typeOrder.Type, ctx);
+                var typeDecl = ClassPrinter.Print(typeOrder.Type, resolver, ctx);
                 var indented = Indent(typeDecl, indent);
 
                 // ROOT NAMESPACE FIX: Add export keyword for module-level declarations
@@ -178,7 +181,7 @@ public static class InternalIndexEmitter
         sb.AppendLine();
     }
 
-    private static string EmitCompanionViewsInterface(TypeSymbol type, ImmutableArray<Shape.ViewPlanner.ExplicitView> views, BuildContext ctx)
+    private static string EmitCompanionViewsInterface(TypeSymbol type, ImmutableArray<Shape.ViewPlanner.ExplicitView> views, TypeNameResolver resolver, BuildContext ctx)
     {
         var sb = new StringBuilder();
 
@@ -204,7 +207,7 @@ public static class InternalIndexEmitter
             sb.Append("    readonly ");
             sb.Append(view.ViewPropertyName);
             sb.Append(": ");
-            sb.Append(Printers.TypeRefPrinter.Print(view.InterfaceReference, ctx));
+            sb.Append(Printers.TypeRefPrinter.Print(view.InterfaceReference, resolver, ctx));
             sb.AppendLine(";");
         }
 
@@ -213,7 +216,7 @@ public static class InternalIndexEmitter
         return sb.ToString();
     }
 
-    private static string EmitIntersectionTypeAlias(TypeSymbol type, BuildContext ctx)
+    private static string EmitIntersectionTypeAlias(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
     {
         var sb = new StringBuilder();
 

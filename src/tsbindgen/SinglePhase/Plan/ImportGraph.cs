@@ -67,53 +67,68 @@ public static class ImportGraph
 
         foreach (var type in ns.Types)
         {
-            // Analyze base class
+            // Analyze base class - collect ALL referenced types recursively
             if (type.BaseType != null)
             {
-                var baseNs = FindNamespaceForType(graph, graphData, type.BaseType);
-                if (baseNs != null && baseNs != ns.Name)
+                var baseTypeRefs = new HashSet<(string FullName, string? Namespace)>();
+                CollectTypeReferences(type.BaseType, graph, graphData, baseTypeRefs);
+
+                foreach (var (fullName, targetNs) in baseTypeRefs)
                 {
-                    dependencies.Add(baseNs);
-                    graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
-                        SourceNamespace: ns.Name,
-                        SourceType: type.ClrFullName,
-                        TargetNamespace: baseNs,
-                        TargetType: GetTypeFullName(type.BaseType),
-                        ReferenceKind: ReferenceKind.BaseClass));
+                    if (targetNs != null && targetNs != ns.Name)
+                    {
+                        dependencies.Add(targetNs);
+                        graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
+                            SourceNamespace: ns.Name,
+                            SourceType: type.ClrFullName,
+                            TargetNamespace: targetNs,
+                            TargetType: fullName,
+                            ReferenceKind: ReferenceKind.BaseClass));
+                    }
                 }
             }
 
-            // Analyze interfaces
+            // Analyze interfaces - collect ALL referenced types recursively
             foreach (var ifaceRef in type.Interfaces)
             {
-                var ifaceNs = FindNamespaceForType(graph, graphData, ifaceRef);
-                if (ifaceNs != null && ifaceNs != ns.Name)
+                var ifaceTypeRefs = new HashSet<(string FullName, string? Namespace)>();
+                CollectTypeReferences(ifaceRef, graph, graphData, ifaceTypeRefs);
+
+                foreach (var (fullName, targetNs) in ifaceTypeRefs)
                 {
-                    dependencies.Add(ifaceNs);
-                    graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
-                        SourceNamespace: ns.Name,
-                        SourceType: type.ClrFullName,
-                        TargetNamespace: ifaceNs,
-                        TargetType: GetTypeFullName(ifaceRef),
-                        ReferenceKind: ReferenceKind.Interface));
+                    if (targetNs != null && targetNs != ns.Name)
+                    {
+                        dependencies.Add(targetNs);
+                        graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
+                            SourceNamespace: ns.Name,
+                            SourceType: type.ClrFullName,
+                            TargetNamespace: targetNs,
+                            TargetType: fullName,
+                            ReferenceKind: ReferenceKind.Interface));
+                    }
                 }
             }
 
-            // Analyze generic parameters constraints
+            // Analyze generic parameters constraints - collect ALL referenced types recursively
             foreach (var gp in type.GenericParameters)
             {
                 foreach (var constraint in gp.Constraints)
                 {
-                    var constraintNs = FindNamespaceForType(graph, graphData, constraint);
-                    if (constraintNs != null && constraintNs != ns.Name)
+                    var constraintTypeRefs = new HashSet<(string FullName, string? Namespace)>();
+                    CollectTypeReferences(constraint, graph, graphData, constraintTypeRefs);
+
+                    foreach (var (fullName, targetNs) in constraintTypeRefs)
                     {
-                        dependencies.Add(constraintNs);
-                        graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
-                            SourceNamespace: ns.Name,
-                            SourceType: type.ClrFullName,
-                            TargetNamespace: constraintNs,
-                            TargetType: GetTypeFullName(constraint),
-                            ReferenceKind: ReferenceKind.GenericConstraint));
+                        if (targetNs != null && targetNs != ns.Name)
+                        {
+                            dependencies.Add(targetNs);
+                            graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
+                                SourceNamespace: ns.Name,
+                                SourceType: type.ClrFullName,
+                                TargetNamespace: targetNs,
+                                TargetType: fullName,
+                                ReferenceKind: ReferenceKind.GenericConstraint));
+                        }
                     }
                 }
             }
@@ -140,104 +155,145 @@ public static class ImportGraph
         // Analyze methods
         foreach (var method in type.Members.Methods)
         {
-            // Return type
-            var returnNs = FindNamespaceForType(graph, graphData, method.ReturnType);
-            if (returnNs != null && returnNs != ns.Name)
-            {
-                dependencies.Add(returnNs);
-                graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
-                    SourceNamespace: ns.Name,
-                    SourceType: type.ClrFullName,
-                    TargetNamespace: returnNs,
-                    TargetType: GetTypeFullName(method.ReturnType),
-                    ReferenceKind: ReferenceKind.MethodReturn));
-            }
+            // Return type - collect ALL referenced types recursively
+            var returnTypeRefs = new HashSet<(string FullName, string? Namespace)>();
+            CollectTypeReferences(method.ReturnType, graph, graphData, returnTypeRefs);
 
-            // Parameters
-            foreach (var param in method.Parameters)
+            foreach (var (fullName, targetNs) in returnTypeRefs)
             {
-                var paramNs = FindNamespaceForType(graph, graphData, param.Type);
-                if (paramNs != null && paramNs != ns.Name)
+                if (targetNs != null && targetNs != ns.Name)
                 {
-                    dependencies.Add(paramNs);
+                    dependencies.Add(targetNs);
                     graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
                         SourceNamespace: ns.Name,
                         SourceType: type.ClrFullName,
-                        TargetNamespace: paramNs,
-                        TargetType: GetTypeFullName(param.Type),
-                        ReferenceKind: ReferenceKind.MethodParameter));
+                        TargetNamespace: targetNs,
+                        TargetType: fullName,
+                        ReferenceKind: ReferenceKind.MethodReturn));
                 }
             }
 
-            // Generic parameters constraints
+            // Parameters - collect ALL referenced types recursively
+            foreach (var param in method.Parameters)
+            {
+                var paramTypeRefs = new HashSet<(string FullName, string? Namespace)>();
+                CollectTypeReferences(param.Type, graph, graphData, paramTypeRefs);
+
+                foreach (var (fullName, targetNs) in paramTypeRefs)
+                {
+                    if (targetNs != null && targetNs != ns.Name)
+                    {
+                        dependencies.Add(targetNs);
+                        graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
+                            SourceNamespace: ns.Name,
+                            SourceType: type.ClrFullName,
+                            TargetNamespace: targetNs,
+                            TargetType: fullName,
+                            ReferenceKind: ReferenceKind.MethodParameter));
+                    }
+                }
+            }
+
+            // Generic parameters constraints - collect recursively
             foreach (var gp in method.GenericParameters)
             {
                 foreach (var constraint in gp.Constraints)
                 {
-                    var constraintNs = FindNamespaceForType(graph, graphData, constraint);
-                    if (constraintNs != null && constraintNs != ns.Name)
+                    var constraintTypeRefs = new HashSet<(string FullName, string? Namespace)>();
+                    CollectTypeReferences(constraint, graph, graphData, constraintTypeRefs);
+
+                    foreach (var (fullName, targetNs) in constraintTypeRefs)
                     {
-                        dependencies.Add(constraintNs);
+                        if (targetNs != null && targetNs != ns.Name)
+                        {
+                            dependencies.Add(targetNs);
+                            graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
+                                SourceNamespace: ns.Name,
+                                SourceType: type.ClrFullName,
+                                TargetNamespace: targetNs,
+                                TargetType: fullName,
+                                ReferenceKind: ReferenceKind.GenericConstraint));
+                        }
                     }
                 }
             }
         }
 
-        // Analyze properties
+        // Analyze properties - collect ALL referenced types recursively
         foreach (var property in type.Members.Properties)
         {
-            var propNs = FindNamespaceForType(graph, graphData, property.PropertyType);
-            if (propNs != null && propNs != ns.Name)
+            var propTypeRefs = new HashSet<(string FullName, string? Namespace)>();
+            CollectTypeReferences(property.PropertyType, graph, graphData, propTypeRefs);
+
+            foreach (var (fullName, targetNs) in propTypeRefs)
             {
-                dependencies.Add(propNs);
-                graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
-                    SourceNamespace: ns.Name,
-                    SourceType: type.ClrFullName,
-                    TargetNamespace: propNs,
-                    TargetType: GetTypeFullName(property.PropertyType),
-                    ReferenceKind: ReferenceKind.PropertyType));
+                if (targetNs != null && targetNs != ns.Name)
+                {
+                    dependencies.Add(targetNs);
+                    graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
+                        SourceNamespace: ns.Name,
+                        SourceType: type.ClrFullName,
+                        TargetNamespace: targetNs,
+                        TargetType: fullName,
+                        ReferenceKind: ReferenceKind.PropertyType));
+                }
             }
 
-            // Index parameters
+            // Index parameters - collect recursively
             foreach (var indexParam in property.IndexParameters)
             {
-                var indexNs = FindNamespaceForType(graph, graphData, indexParam.Type);
-                if (indexNs != null && indexNs != ns.Name)
+                var indexTypeRefs = new HashSet<(string FullName, string? Namespace)>();
+                CollectTypeReferences(indexParam.Type, graph, graphData, indexTypeRefs);
+
+                foreach (var (fullName, targetNs) in indexTypeRefs)
                 {
-                    dependencies.Add(indexNs);
+                    if (targetNs != null && targetNs != ns.Name)
+                    {
+                        dependencies.Add(targetNs);
+                    }
                 }
             }
         }
 
-        // Analyze fields
+        // Analyze fields - collect ALL referenced types recursively
         foreach (var field in type.Members.Fields)
         {
-            var fieldNs = FindNamespaceForType(graph, graphData, field.FieldType);
-            if (fieldNs != null && fieldNs != ns.Name)
+            var fieldTypeRefs = new HashSet<(string FullName, string? Namespace)>();
+            CollectTypeReferences(field.FieldType, graph, graphData, fieldTypeRefs);
+
+            foreach (var (fullName, targetNs) in fieldTypeRefs)
             {
-                dependencies.Add(fieldNs);
-                graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
-                    SourceNamespace: ns.Name,
-                    SourceType: type.ClrFullName,
-                    TargetNamespace: fieldNs,
-                    TargetType: GetTypeFullName(field.FieldType),
-                    ReferenceKind: ReferenceKind.FieldType));
+                if (targetNs != null && targetNs != ns.Name)
+                {
+                    dependencies.Add(targetNs);
+                    graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
+                        SourceNamespace: ns.Name,
+                        SourceType: type.ClrFullName,
+                        TargetNamespace: targetNs,
+                        TargetType: fullName,
+                        ReferenceKind: ReferenceKind.FieldType));
+                }
             }
         }
 
-        // Analyze events
+        // Analyze events - collect ALL referenced types recursively
         foreach (var evt in type.Members.Events)
         {
-            var eventNs = FindNamespaceForType(graph, graphData, evt.EventHandlerType);
-            if (eventNs != null && eventNs != ns.Name)
+            var eventTypeRefs = new HashSet<(string FullName, string? Namespace)>();
+            CollectTypeReferences(evt.EventHandlerType, graph, graphData, eventTypeRefs);
+
+            foreach (var (fullName, targetNs) in eventTypeRefs)
             {
-                dependencies.Add(eventNs);
-                graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
-                    SourceNamespace: ns.Name,
-                    SourceType: type.ClrFullName,
-                    TargetNamespace: eventNs,
-                    TargetType: GetTypeFullName(evt.EventHandlerType),
-                    ReferenceKind: ReferenceKind.EventType));
+                if (targetNs != null && targetNs != ns.Name)
+                {
+                    dependencies.Add(targetNs);
+                    graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
+                        SourceNamespace: ns.Name,
+                        SourceType: type.ClrFullName,
+                        TargetNamespace: targetNs,
+                        TargetType: fullName,
+                        ReferenceKind: ReferenceKind.EventType));
+                }
             }
         }
     }
@@ -272,6 +328,65 @@ public static class ImportGraph
             ByRefTypeReference byref => GetTypeFullName(byref.ReferencedType),
             _ => typeRef.ToString() ?? "Unknown"
         };
+    }
+
+    /// <summary>
+    /// Recursively collect all named type references from a TypeReference tree.
+    /// This includes generic type arguments, array element types, etc.
+    /// Returns set of (FullName, Namespace) pairs for all referenced named types.
+    /// </summary>
+    private static void CollectTypeReferences(
+        TypeReference? typeRef,
+        SymbolGraph graph,
+        ImportGraphData graphData,
+        HashSet<(string FullName, string? Namespace)> collected)
+    {
+        if (typeRef == null) return;
+
+        switch (typeRef)
+        {
+            case NamedTypeReference named:
+                var ns = FindNamespaceForType(graph, graphData, named);
+                collected.Add((named.FullName, ns));
+
+                // Recurse into type arguments
+                foreach (var arg in named.TypeArguments)
+                {
+                    CollectTypeReferences(arg, graph, graphData, collected);
+                }
+                break;
+
+            case NestedTypeReference nested:
+                var nestedNs = FindNamespaceForType(graph, graphData, nested);
+                collected.Add((nested.FullReference.FullName, nestedNs));
+
+                // Recurse into type arguments of nested type
+                foreach (var arg in nested.FullReference.TypeArguments)
+                {
+                    CollectTypeReferences(arg, graph, graphData, collected);
+                }
+                break;
+
+            case ArrayTypeReference arr:
+                CollectTypeReferences(arr.ElementType, graph, graphData, collected);
+                break;
+
+            case PointerTypeReference ptr:
+                CollectTypeReferences(ptr.PointeeType, graph, graphData, collected);
+                break;
+
+            case ByRefTypeReference byref:
+                CollectTypeReferences(byref.ReferencedType, graph, graphData, collected);
+                break;
+
+            case GenericParameterReference:
+                // Generic parameters don't need imports - they're declared locally
+                break;
+
+            default:
+                // Unknown type reference - skip
+                break;
+        }
     }
 }
 

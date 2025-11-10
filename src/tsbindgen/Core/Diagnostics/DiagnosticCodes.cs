@@ -93,4 +93,13 @@ public static class DiagnosticCodes
     // PhaseGate hardening - Scope validation (Step 6)
     public const string PG_SCOPE_003 = "PG_SCOPE_003"; // Empty/malformed scope key
     public const string PG_SCOPE_004 = "PG_SCOPE_004"; // Scope kind doesn't match EmitScope
+
+    // PhaseGate hardening - Printer name consistency (TypeRefPrinter→TypeNameResolver)
+    public const string PG_PRINT_001 = "PG_PRINT_001"; // Type name would print differently than Renamer final name
+
+    // PhaseGate hardening - Import completeness (every foreign type has import)
+    public const string PG_IMPORT_001 = "PG_IMPORT_001"; // Type used in signature but not imported
+
+    // PhaseGate hardening - Export validation (imported types are actually exported)
+    public const string PG_EXPORT_001 = "PG_EXPORT_001"; // Import targets type not exported by source namespace
 }

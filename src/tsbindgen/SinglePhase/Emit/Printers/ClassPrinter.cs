@@ -15,16 +15,16 @@ public static class ClassPrinter
     /// <summary>
     /// Print a complete class declaration.
     /// </summary>
-    public static string Print(TypeSymbol type, BuildContext ctx)
+    public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
     {
         return type.Kind switch
         {
-            TypeKind.Class => PrintClass(type, ctx),
-            TypeKind.Struct => PrintStruct(type, ctx),
-            TypeKind.StaticNamespace => PrintStaticClass(type, ctx),
+            TypeKind.Class => PrintClass(type, resolver, ctx),
+            TypeKind.Struct => PrintStruct(type, resolver, ctx),
+            TypeKind.StaticNamespace => PrintStaticClass(type, resolver, ctx),
             TypeKind.Enum => PrintEnum(type, ctx),
-            TypeKind.Delegate => PrintDelegate(type, ctx),
-            TypeKind.Interface => PrintInterface(type, ctx),
+            TypeKind.Delegate => PrintDelegate(type, resolver, ctx),
+            TypeKind.Interface => PrintInterface(type, resolver, ctx),
             _ => $"// Unknown type kind: {type.Kind}"
         };
     }
@@ -33,17 +33,17 @@ public static class ClassPrinter
     /// Print class/struct with $instance suffix (for companion views pattern).
     /// Used when type has explicit interface views that will be in separate companion interface.
     /// </summary>
-    public static string PrintInstance(TypeSymbol type, BuildContext ctx)
+    public static string PrintInstance(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
     {
         return type.Kind switch
         {
-            TypeKind.Class => PrintClass(type, ctx, instanceSuffix: true),
-            TypeKind.Struct => PrintStruct(type, ctx, instanceSuffix: true),
-            _ => Print(type, ctx) // Fallback
+            TypeKind.Class => PrintClass(type, resolver, ctx, instanceSuffix: true),
+            TypeKind.Struct => PrintStruct(type, resolver, ctx, instanceSuffix: true),
+            _ => Print(type, resolver, ctx) // Fallback
         };
     }
 
-    private static string PrintClass(TypeSymbol type, BuildContext ctx, bool instanceSuffix = false)
+    private static string PrintClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, bool instanceSuffix = false)
     {
         var sb = new StringBuilder();
 
@@ -65,14 +65,14 @@ public static class ClassPrinter
         if (type.GenericParameters.Length > 0)
         {
             sb.Append('<');
-            sb.Append(string.Join(", ", type.GenericParameters.Select(gp => PrintGenericParameter(gp, ctx))));
+            sb.Append(string.Join(", ", type.GenericParameters.Select(gp => PrintGenericParameter(gp, resolver, ctx))));
             sb.Append('>');
         }
 
         // Base class: extends BaseClass
         if (type.BaseType != null)
         {
-            var baseTypeName = TypeRefPrinter.Print(type.BaseType, ctx);
+            var baseTypeName = TypeRefPrinter.Print(type.BaseType, resolver, ctx);
             // Skip System.Object and System.ValueType
             if (baseTypeName != "Object" && baseTypeName != "ValueType")
             {
@@ -85,20 +85,20 @@ public static class ClassPrinter
         if (type.Interfaces.Length > 0)
         {
             sb.Append(" implements ");
-            sb.Append(string.Join(", ", type.Interfaces.Select(i => TypeRefPrinter.Print(i, ctx))));
+            sb.Append(string.Join(", ", type.Interfaces.Select(i => TypeRefPrinter.Print(i, resolver, ctx))));
         }
 
         sb.AppendLine(" {");
 
         // Emit members
-        EmitMembers(sb, type, ctx);
+        EmitMembers(sb, type, resolver, ctx);
 
         sb.AppendLine("}");
 
         return sb.ToString();
     }
 
-    private static string PrintStruct(TypeSymbol type, BuildContext ctx, bool instanceSuffix = false)
+    private static string PrintStruct(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, bool instanceSuffix = false)
     {
         // Structs emit as classes in TypeScript (with metadata noting value semantics)
         var sb = new StringBuilder();
@@ -116,7 +116,7 @@ public static class ClassPrinter
         if (type.GenericParameters.Length > 0)
         {
             sb.Append('<');
-            sb.Append(string.Join(", ", type.GenericParameters.Select(gp => PrintGenericParameter(gp, ctx))));
+            sb.Append(string.Join(", ", type.GenericParameters.Select(gp => PrintGenericParameter(gp, resolver, ctx))));
             sb.Append('>');
         }
 
@@ -124,20 +124,20 @@ public static class ClassPrinter
         if (type.Interfaces.Length > 0)
         {
             sb.Append(" implements ");
-            sb.Append(string.Join(", ", type.Interfaces.Select(i => TypeRefPrinter.Print(i, ctx))));
+            sb.Append(string.Join(", ", type.Interfaces.Select(i => TypeRefPrinter.Print(i, resolver, ctx))));
         }
 
         sb.AppendLine(" {");
 
         // Emit members
-        EmitMembers(sb, type, ctx);
+        EmitMembers(sb, type, resolver, ctx);
 
         sb.AppendLine("}");
 
         return sb.ToString();
     }
 
-    private static string PrintStaticClass(TypeSymbol type, BuildContext ctx)
+    private static string PrintStaticClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
     {
         // Static classes emit as abstract classes with static members in TypeScript
         var sb = new StringBuilder();
@@ -149,7 +149,7 @@ public static class ClassPrinter
         sb.AppendLine(" {");
 
         // Emit static members only
-        EmitStaticMembers(sb, type, ctx);
+        EmitStaticMembers(sb, type, resolver, ctx);
 
         sb.AppendLine("}");
 
@@ -195,7 +195,7 @@ public static class ClassPrinter
         return sb.ToString();
     }
 
-    private static string PrintDelegate(TypeSymbol type, BuildContext ctx)
+    private static string PrintDelegate(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
     {
         // Delegates emit as type aliases to function signatures
         var sb = new StringBuilder();
@@ -209,7 +209,7 @@ public static class ClassPrinter
         if (type.GenericParameters.Length > 0)
         {
             sb.Append('<');
-            sb.Append(string.Join(", ", type.GenericParameters.Select(gp => PrintGenericParameter(gp, ctx))));
+            sb.Append(string.Join(", ", type.GenericParameters.Select(gp => PrintGenericParameter(gp, resolver, ctx))));
             sb.Append('>');
         }
 
@@ -221,9 +221,9 @@ public static class ClassPrinter
         {
             // Emit function signature: (a: int, b: string) => void
             sb.Append('(');
-            sb.Append(string.Join(", ", invokeMethod.Parameters.Select(p => $"{p.Name}: {TypeRefPrinter.Print(p.Type, ctx)}")));
+            sb.Append(string.Join(", ", invokeMethod.Parameters.Select(p => $"{p.Name}: {TypeRefPrinter.Print(p.Type, resolver, ctx)}")));
             sb.Append(") => ");
-            sb.Append(TypeRefPrinter.Print(invokeMethod.ReturnType, ctx));
+            sb.Append(TypeRefPrinter.Print(invokeMethod.ReturnType, resolver, ctx));
         }
         else
         {
@@ -235,7 +235,7 @@ public static class ClassPrinter
         return sb.ToString();
     }
 
-    private static string PrintInterface(TypeSymbol type, BuildContext ctx)
+    private static string PrintInterface(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
     {
         var sb = new StringBuilder();
 
@@ -248,7 +248,7 @@ public static class ClassPrinter
         if (type.GenericParameters.Length > 0)
         {
             sb.Append('<');
-            sb.Append(string.Join(", ", type.GenericParameters.Select(gp => PrintGenericParameter(gp, ctx))));
+            sb.Append(string.Join(", ", type.GenericParameters.Select(gp => PrintGenericParameter(gp, resolver, ctx))));
             sb.Append('>');
         }
 
@@ -256,20 +256,20 @@ public static class ClassPrinter
         if (type.Interfaces.Length > 0)
         {
             sb.Append(" extends ");
-            sb.Append(string.Join(", ", type.Interfaces.Select(i => TypeRefPrinter.Print(i, ctx))));
+            sb.Append(string.Join(", ", type.Interfaces.Select(i => TypeRefPrinter.Print(i, resolver, ctx))));
         }
 
         sb.AppendLine(" {");
 
         // Emit members (interfaces only have instance members)
-        EmitInterfaceMembers(sb, type, ctx);
+        EmitInterfaceMembers(sb, type, resolver, ctx);
 
         sb.AppendLine("}");
 
         return sb.ToString();
     }
 
-    private static void EmitMembers(StringBuilder sb, TypeSymbol type, BuildContext ctx)
+    private static void EmitMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
     {
         var members = type.Members;
 
@@ -280,7 +280,7 @@ public static class ClassPrinter
         foreach (var ctor in members.Constructors.Where(c => !c.IsStatic))
         {
             sb.Append("    constructor(");
-            sb.Append(string.Join(", ", ctor.Parameters.Select(p => $"{p.Name}: {TypeRefPrinter.Print(p.Type, ctx)}")));
+            sb.Append(string.Join(", ", ctor.Parameters.Select(p => $"{p.Name}: {TypeRefPrinter.Print(p.Type, resolver, ctx)}")));
             sb.AppendLine(");");
         }
 
@@ -293,7 +293,7 @@ public static class ClassPrinter
                 sb.Append("readonly ");
             sb.Append(finalName);
             sb.Append(": ");
-            sb.Append(TypeRefPrinter.Print(field.FieldType, ctx));
+            sb.Append(TypeRefPrinter.Print(field.FieldType, resolver, ctx));
             sb.AppendLine(";");
         }
 
@@ -306,7 +306,7 @@ public static class ClassPrinter
                 sb.Append("readonly ");
             sb.Append(finalName);
             sb.Append(": ");
-            sb.Append(TypeRefPrinter.Print(prop.PropertyType, ctx));
+            sb.Append(TypeRefPrinter.Print(prop.PropertyType, resolver, ctx));
             sb.AppendLine(";");
         }
 
@@ -314,15 +314,15 @@ public static class ClassPrinter
         foreach (var method in members.Methods.Where(m => !m.IsStatic && m.EmitScope == EmitScope.ClassSurface))
         {
             sb.Append("    ");
-            sb.Append(MethodPrinter.Print(method, type, ctx));
+            sb.Append(MethodPrinter.Print(method, type, resolver, ctx));
             sb.AppendLine(";");
         }
 
         // Static members
-        EmitStaticMembers(sb, type, ctx);
+        EmitStaticMembers(sb, type, resolver, ctx);
     }
 
-    private static void EmitStaticMembers(StringBuilder sb, TypeSymbol type, BuildContext ctx)
+    private static void EmitStaticMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
     {
         var members = type.Members;
 
@@ -339,7 +339,7 @@ public static class ClassPrinter
                 sb.Append("readonly ");
             sb.Append(finalName);
             sb.Append(": ");
-            sb.Append(TypeRefPrinter.Print(field.FieldType, ctx));
+            sb.Append(TypeRefPrinter.Print(field.FieldType, resolver, ctx));
             sb.AppendLine(";");
         }
 
@@ -351,7 +351,7 @@ public static class ClassPrinter
             sb.Append("    static readonly ");
             sb.Append(finalName);
             sb.Append(": ");
-            sb.Append(TypeRefPrinter.Print(field.FieldType, ctx));
+            sb.Append(TypeRefPrinter.Print(field.FieldType, resolver, ctx));
             sb.AppendLine(";");
         }
 
@@ -365,7 +365,7 @@ public static class ClassPrinter
                 sb.Append("readonly ");
             sb.Append(finalName);
             sb.Append(": ");
-            sb.Append(TypeRefPrinter.Print(prop.PropertyType, ctx));
+            sb.Append(TypeRefPrinter.Print(prop.PropertyType, resolver, ctx));
             sb.AppendLine(";");
         }
 
@@ -374,12 +374,12 @@ public static class ClassPrinter
             (m.EmitScope == EmitScope.ClassSurface || m.EmitScope == EmitScope.StaticSurface)))
         {
             sb.Append("    ");
-            sb.Append(MethodPrinter.Print(method, type, ctx));
+            sb.Append(MethodPrinter.Print(method, type, resolver, ctx));
             sb.AppendLine(";");
         }
     }
 
-    private static void EmitInterfaceMembers(StringBuilder sb, TypeSymbol type, BuildContext ctx)
+    private static void EmitInterfaceMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
     {
         var members = type.Members;
 
@@ -393,7 +393,7 @@ public static class ClassPrinter
                 sb.Append("readonly ");
             sb.Append(finalName);
             sb.Append(": ");
-            sb.Append(TypeRefPrinter.Print(prop.PropertyType, ctx));
+            sb.Append(TypeRefPrinter.Print(prop.PropertyType, resolver, ctx));
             sb.AppendLine(";");
         }
 
@@ -401,12 +401,12 @@ public static class ClassPrinter
         foreach (var method in members.Methods.Where(m => !m.IsStatic && m.EmitScope == EmitScope.ClassSurface))
         {
             sb.Append("    ");
-            sb.Append(MethodPrinter.Print(method, type, ctx));
+            sb.Append(MethodPrinter.Print(method, type, resolver, ctx));
             sb.AppendLine(";");
         }
     }
 
-    private static string PrintGenericParameter(GenericParameterSymbol gp, BuildContext ctx)
+    private static string PrintGenericParameter(GenericParameterSymbol gp, TypeNameResolver resolver, BuildContext ctx)
     {
         var sb = new StringBuilder();
         sb.Append(gp.Name);
@@ -418,12 +418,12 @@ public static class ClassPrinter
 
             if (gp.Constraints.Length == 1)
             {
-                sb.Append(TypeRefPrinter.Print(gp.Constraints[0], ctx));
+                sb.Append(TypeRefPrinter.Print(gp.Constraints[0], resolver, ctx));
             }
             else
             {
                 // Multiple constraints: T extends IFoo & IBar
-                var constraints = gp.Constraints.Select(c => TypeRefPrinter.Print(c, ctx));
+                var constraints = gp.Constraints.Select(c => TypeRefPrinter.Print(c, resolver, ctx));
                 sb.Append(string.Join(" & ", constraints));
             }
         }

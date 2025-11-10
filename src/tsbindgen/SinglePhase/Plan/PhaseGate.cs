@@ -74,6 +74,18 @@ public static class PhaseGate
         // This is the FINAL validation before emission - catches any symbol without proper finalization
         ValidateFinalization(ctx, graph, validationContext);
 
+        // PhaseGate Hardening - M7: Printer name consistency (PG_PRINT_001)
+        // Validates TypeRefPrinter→TypeNameResolver→Renamer chain integrity
+        ValidatePrinterNameConsistency(ctx, graph, validationContext);
+
+        // PhaseGate Hardening - M8: Import completeness (PG_IMPORT_001)
+        // Validates every foreign type used in signatures has a corresponding import
+        ValidateImportCompleteness(ctx, graph, imports, validationContext);
+
+        // PhaseGate Hardening - M9: Export completeness (PG_EXPORT_001)
+        // Validates imported types are actually exported by source namespaces
+        ValidateExportCompleteness(ctx, graph, imports, validationContext);
+
         // Report results
         ctx.Log("PhaseGate", $"Validation complete - {validationContext.ErrorCount} errors, {validationContext.WarningCount} warnings, {validationContext.InfoCount} info");
         ctx.Log("PhaseGate", $"Sanitized {validationContext.SanitizedNameCount} reserved word identifiers");
@@ -777,6 +789,9 @@ public static class PhaseGate
             Core.Diagnostics.DiagnosticCodes.PG_FIN_009 => "Unsanitized identifier post-sanitizer",
             Core.Diagnostics.DiagnosticCodes.PG_SCOPE_003 => "Empty/malformed scope key",
             Core.Diagnostics.DiagnosticCodes.PG_SCOPE_004 => "Scope kind doesn't match EmitScope",
+            Core.Diagnostics.DiagnosticCodes.PG_PRINT_001 => "Type name mismatch (Printer vs Renamer)",
+            Core.Diagnostics.DiagnosticCodes.PG_IMPORT_001 => "Type used but not imported",
+            Core.Diagnostics.DiagnosticCodes.PG_EXPORT_001 => "Import references unexported type",
             _ => "Unknown diagnostic"
         };
     }
@@ -2921,6 +2936,370 @@ public static class PhaseGate
         }
 
         ctx.Log("PhaseGate", "Finalization sweep complete");
+    }
+
+    /// <summary>
+    /// PG_PRINT_001: Validates that TypeNameResolver produces names matching Renamer final names.
+    /// Ensures no CLR names leak into TypeScript output through TypeRefPrinter.
+    /// This guard validates the TypeRefPrinter→TypeNameResolver→Renamer chain integrity.
+    /// Walks ALL type references in signatures (parameters, returns, base types, interfaces, etc.)
+    /// </summary>
+    private static void ValidatePrinterNameConsistency(BuildContext ctx, SymbolGraph graph, ValidationContext validationCtx)
+    {
+        ctx.Log("PhaseGate", "Validating printer name consistency (PG_PRINT_001)...");
+
+        var resolver = new Emit.TypeNameResolver(ctx, graph);
+        int checkedReferences = 0;
+
+        // Helper: Check a single NamedTypeReference
+        void CheckNamed(Model.Types.NamedTypeReference named, string owner, string where)
+        {
+            // Skip primitives - they intentionally print as built-ins
+            if (Emit.TypeNameResolver.IsPrimitive(named.FullName))
+                return;
+
+            // Try to resolve this NamedTypeReference to a TypeSymbol in the graph
+            var stableId = $"{named.AssemblyName}:{named.FullName}";
+            if (!graph.TypeIndex.TryGetValue(stableId, out var targetType))
+            {
+                // External assembly or out of graph - skip for this check
+                return;
+            }
+
+            // Compare what resolver produces vs what renamer says
+            var renamerName = ctx.Renamer.GetFinalTypeName(targetType);
+            var resolverName = resolver.For(named);
+
+            if (!string.Equals(renamerName, resolverName, StringComparison.Ordinal))
+            {
+                validationCtx.RecordDiagnostic(
+                    Core.Diagnostics.DiagnosticCodes.PG_PRINT_001,
+                    "ERROR",
+                    $"{owner}: type name mismatch in {where}. resolver='{resolverName}', renamer='{renamerName}'");
+            }
+
+            checkedReferences++;
+        }
+
+        // Helper: Walk TypeReference tree recursively
+        void Walk(string owner, string where, Model.Types.TypeReference? tr)
+        {
+            if (tr == null) return;
+
+            switch (tr)
+            {
+                case Model.Types.NamedTypeReference named:
+                    CheckNamed(named, owner, where);
+                    // Recurse into type arguments
+                    foreach (var arg in named.TypeArguments)
+                        Walk(owner, where, arg);
+                    break;
+
+                case Model.Types.ArrayTypeReference arr:
+                    Walk(owner, where, arr.ElementType);
+                    break;
+
+                case Model.Types.PointerTypeReference ptr:
+                    Walk(owner, where, ptr.PointeeType);
+                    break;
+
+                case Model.Types.ByRefTypeReference byref:
+                    Walk(owner, where, byref.ReferencedType);
+                    break;
+
+                case Model.Types.GenericParameterReference:
+                    // Generic parameters don't need validation - they're declared locally
+                    break;
+            }
+        }
+
+        // Walk all types and their signatures
+        foreach (var ns in graph.Namespaces)
+        {
+            foreach (var type in ns.Types)
+            {
+                var typeId = $"{ns.Name}.{type.ClrFullName}";
+
+                // 1. Validate the type identifier itself (quick sanity check)
+                var renamerName = ctx.Renamer.GetFinalTypeName(type);
+                var resolverName = resolver.For(type);
+                if (renamerName != resolverName)
+                {
+                    validationCtx.RecordDiagnostic(
+                        Core.Diagnostics.DiagnosticCodes.PG_PRINT_001,
+                        "ERROR",
+                        $"Type identifier mismatch for {type.ClrFullName}. resolver='{resolverName}', renamer='{renamerName}'");
+                }
+
+                // 2. Walk base type
+                if (type.BaseType != null)
+                    Walk(typeId, "base type", type.BaseType);
+
+                // 3. Walk interfaces
+                foreach (var iface in type.Interfaces)
+                    Walk(typeId, "interface", iface);
+
+                // 4. Walk method signatures
+                foreach (var method in type.Members.Methods)
+                {
+                    var methodId = $"{typeId}.{method.ClrName}";
+
+                    // Parameters
+                    foreach (var param in method.Parameters)
+                        Walk(methodId, "parameter", param.Type);
+
+                    // Return type
+                    Walk(methodId, "return", method.ReturnType);
+
+                    // Generic constraints
+                    foreach (var gp in method.GenericParameters)
+                    {
+                        foreach (var constraint in gp.Constraints)
+                            Walk(methodId, $"generic constraint {gp.Name}", constraint);
+                    }
+                }
+
+                // 5. Walk property signatures
+                foreach (var prop in type.Members.Properties)
+                {
+                    var propId = $"{typeId}.{prop.ClrName}";
+
+                    // Property type
+                    Walk(propId, "property type", prop.PropertyType);
+
+                    // Indexer parameters
+                    foreach (var param in prop.IndexParameters)
+                        Walk(propId, "indexer parameter", param.Type);
+                }
+
+                // 6. Walk field types
+                foreach (var field in type.Members.Fields)
+                {
+                    Walk($"{typeId}.{field.ClrName}", "field type", field.FieldType);
+                }
+
+                // 7. Walk event types
+                foreach (var evt in type.Members.Events)
+                {
+                    Walk($"{typeId}.{evt.ClrName}", "event handler type", evt.EventHandlerType);
+                }
+
+                // 8. Walk generic parameter constraints on the type itself
+                foreach (var gp in type.GenericParameters)
+                {
+                    foreach (var constraint in gp.Constraints)
+                        Walk(typeId, $"generic constraint {gp.Name}", constraint);
+                }
+            }
+        }
+
+        ctx.Log("PhaseGate", $"Validated printer consistency for {checkedReferences} type references");
+    }
+
+    /// <summary>
+    /// PG_IMPORT_001: Validates that every foreign type used in signatures has a corresponding import.
+    /// Walks all type references and ensures they're either:
+    /// - Declared in the current namespace
+    /// - Primitives (boolean, string, etc.)
+    /// - External types
+    /// - Imported from another namespace
+    /// </summary>
+    private static void ValidateImportCompleteness(BuildContext ctx, SymbolGraph graph, ImportPlan imports, ValidationContext validationCtx)
+    {
+        ctx.Log("PhaseGate", "Validating import completeness (PG_IMPORT_001)...");
+
+        int checkedNamespaces = 0;
+        int missingImports = 0;
+
+        // Helper: Check if type is imported
+        bool IsImported(string namespaceName, string tsTypeName)
+        {
+            if (!imports.NamespaceImports.TryGetValue(namespaceName, out var importStatements))
+                return false;
+
+            return importStatements.Any(stmt =>
+                stmt.TypeImports.Any(ti => ti.TypeName == tsTypeName || ti.Alias == tsTypeName));
+        }
+
+        // Helper: Check if type is declared locally
+        bool IsDeclaredLocally(NamespaceSymbol ns, string clrFullName)
+        {
+            return ns.Types.Any(t => t.ClrFullName == clrFullName);
+        }
+
+        // Helper: Walk type references and check imports
+        void CheckTypeReference(NamespaceSymbol ns, Model.Types.NamedTypeReference named, string owner, string where)
+        {
+            // Skip primitives
+            if (Emit.TypeNameResolver.IsPrimitive(named.FullName))
+                return;
+
+            // Check if it's declared in this namespace
+            if (IsDeclaredLocally(ns, named.FullName))
+                return;
+
+            // Check if it's in the graph
+            var stableId = $"{named.AssemblyName}:{named.FullName}";
+            if (!graph.TypeIndex.TryGetValue(stableId, out var targetType))
+            {
+                // External type - skip (handled by external imports)
+                return;
+            }
+
+            // It's a foreign type from another namespace in the graph
+            // Check if it's imported
+            var tsName = ctx.Renamer.GetFinalTypeName(targetType);
+            if (!IsImported(ns.Name, tsName))
+            {
+                validationCtx.RecordDiagnostic(
+                    Core.Diagnostics.DiagnosticCodes.PG_IMPORT_001,
+                    "ERROR",
+                    $"{owner}: type '{tsName}' used in {where} but not imported (from {targetType.Namespace})");
+                missingImports++;
+            }
+        }
+
+        // Helper: Walk TypeReference tree
+        void Walk(NamespaceSymbol ns, string owner, string where, Model.Types.TypeReference? tr)
+        {
+            if (tr == null) return;
+
+            switch (tr)
+            {
+                case Model.Types.NamedTypeReference named:
+                    CheckTypeReference(ns, named, owner, where);
+                    // Recurse into type arguments
+                    foreach (var arg in named.TypeArguments)
+                        Walk(ns, owner, where, arg);
+                    break;
+
+                case Model.Types.ArrayTypeReference arr:
+                    Walk(ns, owner, where, arr.ElementType);
+                    break;
+
+                case Model.Types.PointerTypeReference ptr:
+                    Walk(ns, owner, where, ptr.PointeeType);
+                    break;
+
+                case Model.Types.ByRefTypeReference byref:
+                    Walk(ns, owner, where, byref.ReferencedType);
+                    break;
+
+                case Model.Types.GenericParameterReference:
+                    // Generic parameters are declared locally
+                    break;
+            }
+        }
+
+        // Walk all namespaces and check type references
+        foreach (var ns in graph.Namespaces)
+        {
+            foreach (var type in ns.Types)
+            {
+                var typeId = $"{ns.Name}.{type.ClrFullName}";
+
+                // Walk base type
+                if (type.BaseType != null)
+                    Walk(ns, typeId, "base type", type.BaseType);
+
+                // Walk interfaces
+                foreach (var iface in type.Interfaces)
+                    Walk(ns, typeId, "interface", iface);
+
+                // Walk method signatures
+                foreach (var method in type.Members.Methods)
+                {
+                    var methodId = $"{typeId}.{method.ClrName}";
+                    foreach (var param in method.Parameters)
+                        Walk(ns, methodId, "parameter", param.Type);
+                    Walk(ns, methodId, "return", method.ReturnType);
+                    foreach (var gp in method.GenericParameters)
+                        foreach (var constraint in gp.Constraints)
+                            Walk(ns, methodId, $"generic constraint {gp.Name}", constraint);
+                }
+
+                // Walk property signatures
+                foreach (var prop in type.Members.Properties)
+                {
+                    var propId = $"{typeId}.{prop.ClrName}";
+                    Walk(ns, propId, "property type", prop.PropertyType);
+                    foreach (var param in prop.IndexParameters)
+                        Walk(ns, propId, "indexer parameter", param.Type);
+                }
+
+                // Walk field types
+                foreach (var field in type.Members.Fields)
+                    Walk(ns, $"{typeId}.{field.ClrName}", "field type", field.FieldType);
+
+                // Walk event types
+                foreach (var evt in type.Members.Events)
+                    Walk(ns, $"{typeId}.{evt.ClrName}", "event handler type", evt.EventHandlerType);
+
+                // Walk generic parameter constraints
+                foreach (var gp in type.GenericParameters)
+                    foreach (var constraint in gp.Constraints)
+                        Walk(ns, typeId, $"generic constraint {gp.Name}", constraint);
+            }
+
+            checkedNamespaces++;
+        }
+
+        ctx.Log("PhaseGate", $"Validated imports for {checkedNamespaces} namespaces. Missing imports: {missingImports}");
+    }
+
+    /// <summary>
+    /// PG_EXPORT_001: Validates that every imported type is actually exported by its source namespace.
+    /// Prevents TS2694 "Namespace has no exported member" errors.
+    /// </summary>
+    private static void ValidateExportCompleteness(BuildContext ctx, SymbolGraph graph, ImportPlan imports, ValidationContext validationCtx)
+    {
+        ctx.Log("PhaseGate", "Validating export completeness (PG_EXPORT_001)...");
+
+        int checkedImports = 0;
+        int missingExports = 0;
+
+        foreach (var (namespaceName, importStatements) in imports.NamespaceImports)
+        {
+            foreach (var importStmt in importStatements)
+            {
+                // Get the exports from the target namespace
+                if (!imports.NamespaceExports.TryGetValue(importStmt.TargetNamespace, out var exports))
+                {
+                    // Target namespace has no exports at all
+                    foreach (var typeImport in importStmt.TypeImports)
+                    {
+                        validationCtx.RecordDiagnostic(
+                            Core.Diagnostics.DiagnosticCodes.PG_EXPORT_001,
+                            "ERROR",
+                            $"{namespaceName}: imports '{typeImport.TypeName}' from {importStmt.TargetNamespace}, but target namespace has no exports");
+                        missingExports++;
+                    }
+                    continue;
+                }
+
+                // Check each imported type is actually exported
+                var exportedNames = new HashSet<string>(exports.Select(e => e.ExportName));
+
+                foreach (var typeImport in importStmt.TypeImports)
+                {
+                    var importedName = typeImport.TypeName;
+
+                    if (!exportedNames.Contains(importedName))
+                    {
+                        validationCtx.RecordDiagnostic(
+                            Core.Diagnostics.DiagnosticCodes.PG_EXPORT_001,
+                            "ERROR",
+                            $"{namespaceName}: imports '{importedName}' from {importStmt.TargetNamespace}, but it's not exported. " +
+                            $"Available exports: {string.Join(", ", exportedNames.Take(5))}{(exportedNames.Count > 5 ? "..." : "")}");
+                        missingExports++;
+                    }
+
+                    checkedImports++;
+                }
+            }
+        }
+
+        ctx.Log("PhaseGate", $"Validated {checkedImports} imports. Missing exports: {missingExports}");
     }
 }
 
