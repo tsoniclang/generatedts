@@ -37,7 +37,7 @@ internal static class Finalization
                 if (!ctx.Renamer.HasFinalTypeName(type.StableId, nsScope))
                 {
                     validationCtx.RecordDiagnostic(
-                        DiagnosticCodes.PG_FIN_004,
+                        DiagnosticCodes.EmittingTypeMissingFinalName,
                         "ERROR",
                         $"Type {type.ClrFullName} missing final name in namespace scope {nsScope.ScopeKey}");
                 }
@@ -81,7 +81,7 @@ internal static class Finalization
                     if (prop.EmitScope == EmitScope.Unspecified)
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_001,
+                            DiagnosticCodes.MissingEmitScopeOrIllegalCombo,
                             "ERROR",
                             $"Property {prop.ClrName} in {type.ClrFullName} has no EmitScope placement (still Unspecified)");
                     }
@@ -92,7 +92,7 @@ internal static class Finalization
                     if (method.EmitScope == EmitScope.Unspecified)
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_001,
+                            DiagnosticCodes.MissingEmitScopeOrIllegalCombo,
                             "ERROR",
                             $"Method {method.ClrName} in {type.ClrFullName} has no EmitScope placement (still Unspecified)");
                     }
@@ -103,7 +103,7 @@ internal static class Finalization
                     if (field.EmitScope == EmitScope.Unspecified)
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_001,
+                            DiagnosticCodes.MissingEmitScopeOrIllegalCombo,
                             "ERROR",
                             $"Field {field.ClrName} in {type.ClrFullName} has no EmitScope placement (still Unspecified)");
                     }
@@ -114,7 +114,7 @@ internal static class Finalization
                     if (evt.EmitScope == EmitScope.Unspecified)
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_001,
+                            DiagnosticCodes.MissingEmitScopeOrIllegalCombo,
                             "ERROR",
                             $"Event {evt.ClrName} in {type.ClrFullName} has no EmitScope placement (still Unspecified)");
                     }
@@ -125,7 +125,7 @@ internal static class Finalization
                 foreach (var stableId in dualRole)
                 {
                     validationCtx.RecordDiagnostic(
-                        DiagnosticCodes.PG_FIN_007,
+                        DiagnosticCodes.ClassViewDualRoleClash,
                         "ERROR",
                         $"Member {stableId} in {type.ClrFullName} appears in both ClassSurface and ViewOnly scopes");
                 }
@@ -137,7 +137,7 @@ internal static class Finalization
                     if (!ctx.Renamer.HasFinalMemberName(prop.StableId, scope))
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_003,
+                            DiagnosticCodes.EmittingMemberMissingFinalName,
                             "ERROR",
                             $"Property {prop.ClrName} (ClassSurface) in {type.ClrFullName} missing final name in scope {scope.ScopeKey}");
                     }
@@ -149,7 +149,7 @@ internal static class Finalization
                     if (!ctx.Renamer.HasFinalMemberName(method.StableId, scope))
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_003,
+                            DiagnosticCodes.EmittingMemberMissingFinalName,
                             "ERROR",
                             $"Method {method.ClrName} (ClassSurface) in {type.ClrFullName} missing final name in scope {scope.ScopeKey}");
                     }
@@ -161,7 +161,7 @@ internal static class Finalization
                     if (!ctx.Renamer.HasFinalMemberName(field.StableId, scope))
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_003,
+                            DiagnosticCodes.EmittingMemberMissingFinalName,
                             "ERROR",
                             $"Field {field.ClrName} (ClassSurface) in {type.ClrFullName} missing final name in scope {scope.ScopeKey}");
                     }
@@ -182,7 +182,7 @@ internal static class Finalization
                     if (prop.SourceInterface == null)
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_002,
+                            DiagnosticCodes.ViewOnlyWithoutExactlyOneExplicitView,
                             "ERROR",
                             $"ViewOnly property {prop.ClrName} in {type.ClrFullName} has no SourceInterface");
                         continue;
@@ -192,7 +192,7 @@ internal static class Finalization
                     if (!viewsByInterface.ContainsKey(propInterfaceStableId))
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_002,
+                            DiagnosticCodes.ViewOnlyWithoutExactlyOneExplicitView,
                             "ERROR",
                             $"ViewOnly property {prop.ClrName} in {type.ClrFullName} references interface {propInterfaceStableId} which has no ExplicitView");
                         continue;
@@ -203,7 +203,7 @@ internal static class Finalization
                     if (!ctx.Renamer.HasFinalViewMemberName(prop.StableId, viewScope))
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_003,
+                            DiagnosticCodes.EmittingMemberMissingFinalName,
                             "ERROR",
                             $"ViewOnly property {prop.ClrName} in {type.ClrFullName} missing final name in view scope {viewScope.ScopeKey}");
                     }
@@ -215,7 +215,7 @@ internal static class Finalization
                     if (method.SourceInterface == null)
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_002,
+                            DiagnosticCodes.ViewOnlyWithoutExactlyOneExplicitView,
                             "ERROR",
                             $"ViewOnly method {method.ClrName} in {type.ClrFullName} has no SourceInterface");
                         continue;
@@ -225,7 +225,7 @@ internal static class Finalization
                     if (!viewsByInterface.ContainsKey(methodInterfaceStableId))
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_002,
+                            DiagnosticCodes.ViewOnlyWithoutExactlyOneExplicitView,
                             "ERROR",
                             $"ViewOnly method {method.ClrName} in {type.ClrFullName} references interface {methodInterfaceStableId} which has no ExplicitView");
                         continue;
@@ -236,7 +236,7 @@ internal static class Finalization
                     if (!ctx.Renamer.HasFinalViewMemberName(method.StableId, viewScope))
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_003,
+                            DiagnosticCodes.EmittingMemberMissingFinalName,
                             "ERROR",
                             $"ViewOnly method {method.ClrName} in {type.ClrFullName} missing final name in view scope {viewScope.ScopeKey}");
                     }
@@ -249,7 +249,7 @@ internal static class Finalization
                     {
                         var ifaceStableId = ScopeFactory.GetInterfaceStableId(view.InterfaceReference);
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_005,
+                            DiagnosticCodes.InvalidOrEmptyViewMembership,
                             "ERROR",
                             $"ExplicitView for {ifaceStableId} in {type.ClrFullName} has zero members");
                     }
@@ -274,7 +274,7 @@ internal static class Finalization
                     if (views.Count > 1)
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_006,
+                            DiagnosticCodes.DuplicateViewMembership,
                             "ERROR",
                             $"Member {stableId} in {type.ClrFullName} appears in {views.Count} views: {string.Join(", ", views)}");
                     }
@@ -287,7 +287,7 @@ internal static class Finalization
                     if (sanitized.WasSanitized && sanitized.Sanitized != prop.TsEmitName)
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_009,
+                            DiagnosticCodes.PostSanitizerUnsanitizedIdentifier,
                             "ERROR",
                             $"Property {prop.ClrName} in {type.ClrFullName} has unsanitized TsEmitName '{prop.TsEmitName}' (reserved word)");
                     }
@@ -301,7 +301,7 @@ internal static class Finalization
                             if (paramSanitized.WasSanitized && paramSanitized.Sanitized != param.Name)
                             {
                                 validationCtx.RecordDiagnostic(
-                                    DiagnosticCodes.PG_FIN_009,
+                                    DiagnosticCodes.PostSanitizerUnsanitizedIdentifier,
                                     "ERROR",
                                     $"Property {prop.ClrName} parameter '{param.Name}' in {type.ClrFullName} is unsanitized (reserved word)");
                             }
@@ -315,7 +315,7 @@ internal static class Finalization
                     if (sanitized.WasSanitized && sanitized.Sanitized != method.TsEmitName)
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_009,
+                            DiagnosticCodes.PostSanitizerUnsanitizedIdentifier,
                             "ERROR",
                             $"Method {method.ClrName} in {type.ClrFullName} has unsanitized TsEmitName '{method.TsEmitName}' (reserved word)");
                     }
@@ -327,7 +327,7 @@ internal static class Finalization
                         if (paramSanitized.WasSanitized && paramSanitized.Sanitized != param.Name)
                         {
                             validationCtx.RecordDiagnostic(
-                                DiagnosticCodes.PG_FIN_009,
+                                DiagnosticCodes.PostSanitizerUnsanitizedIdentifier,
                                 "ERROR",
                                 $"Method {method.ClrName} parameter '{param.Name}' in {type.ClrFullName} is unsanitized (reserved word)");
                         }
@@ -340,7 +340,7 @@ internal static class Finalization
                         if (tpSanitized.WasSanitized && tpSanitized.Sanitized != tp.Name)
                         {
                             validationCtx.RecordDiagnostic(
-                                DiagnosticCodes.PG_FIN_009,
+                                DiagnosticCodes.PostSanitizerUnsanitizedIdentifier,
                                 "ERROR",
                                 $"Method {method.ClrName} type parameter '{tp.Name}' in {type.ClrFullName} is unsanitized (reserved word)");
                         }
@@ -353,7 +353,7 @@ internal static class Finalization
                     if (sanitized.WasSanitized && sanitized.Sanitized != field.TsEmitName)
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_009,
+                            DiagnosticCodes.PostSanitizerUnsanitizedIdentifier,
                             "ERROR",
                             $"Field {field.ClrName} in {type.ClrFullName} has unsanitized TsEmitName '{field.TsEmitName}' (reserved word)");
                     }
@@ -366,7 +366,7 @@ internal static class Finalization
                     if (tpSanitized.WasSanitized && tpSanitized.Sanitized != tp.Name)
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_009,
+                            DiagnosticCodes.PostSanitizerUnsanitizedIdentifier,
                             "ERROR",
                             $"Type {type.ClrFullName} type parameter '{tp.Name}' is unsanitized (reserved word)");
                     }
@@ -380,7 +380,7 @@ internal static class Finalization
                     {
                         var ifaceStableId = ScopeFactory.GetInterfaceStableId(view.InterfaceReference);
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_FIN_009,
+                            DiagnosticCodes.PostSanitizerUnsanitizedIdentifier,
                             "ERROR",
                             $"View property '{view.ViewPropertyName}' for {ifaceStableId} in {type.ClrFullName} is unsanitized (reserved word)");
                     }

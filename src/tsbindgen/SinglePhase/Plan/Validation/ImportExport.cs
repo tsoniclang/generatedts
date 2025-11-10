@@ -67,7 +67,7 @@ internal static class ImportExport
             {
                 var finalName = ctx.Renamer.GetFinalTypeName(referencedType);
                 validationCtx.RecordDiagnostic(
-                    DiagnosticCodes.PG_API_001,
+                    DiagnosticCodes.PublicApiReferencesNonEmittedType,
                     "ERROR",
                     $"{ownerType.Namespace}.{ownerType.ClrName} exposes non-emitted type '{finalName}' " +
                     $"at {location} (emitted={isEmitted}, exported={isExported}, " +
@@ -227,7 +227,7 @@ internal static class ImportExport
             if (!IsImported(ns.Name, tsName))
             {
                 validationCtx.RecordDiagnostic(
-                    DiagnosticCodes.PG_IMPORT_001,
+                    DiagnosticCodes.MissingImportForForeignType,
                     "ERROR",
                     $"{owner}: type '{tsName}' used in {where} but not imported (from {targetType.Namespace})");
                 missingImports++;
@@ -344,7 +344,7 @@ internal static class ImportExport
                     foreach (var typeImport in importStmt.TypeImports)
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_EXPORT_001,
+                            DiagnosticCodes.ImportedTypeNotExported,
                             "ERROR",
                             $"{namespaceName}: imports '{typeImport.TypeName}' from {importStmt.TargetNamespace}, but target namespace has no exports");
                         missingExports++;
@@ -362,7 +362,7 @@ internal static class ImportExport
                     if (!exportedNames.Contains(importedName))
                     {
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_EXPORT_001,
+                            DiagnosticCodes.ImportedTypeNotExported,
                             "ERROR",
                             $"{namespaceName}: imports '{importedName}' from {importStmt.TargetNamespace}, but it's not exported. " +
                             $"Available exports: {string.Join(", ", exportedNames.Take(5))}{(exportedNames.Count > 5 ? "..." : "")}");

@@ -59,7 +59,7 @@ internal static class Scopes
                     {
                         dualScopeErrors++;
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_INT_002,
+                            DiagnosticCodes.MemberInBothClassAndView,
                             "ERROR",
                             $"Member appears in both ClassSurface and ViewOnly\n" +
                             $"  type:   {type.ClrFullName}\n" +
@@ -73,7 +73,7 @@ internal static class Scopes
                 {
                     sourceInterfaceErrors++;
                     validationCtx.RecordDiagnostic(
-                        DiagnosticCodes.PG_INT_003,
+                        DiagnosticCodes.ClassSurfaceMemberHasSourceInterface,
                         "ERROR",
                         $"Class-surface member has SourceInterface set\n" +
                         $"  type:   {type.ClrFullName}\n" +
@@ -86,7 +86,7 @@ internal static class Scopes
                 {
                     sourceInterfaceErrors++;
                     validationCtx.RecordDiagnostic(
-                        DiagnosticCodes.PG_INT_003,
+                        DiagnosticCodes.ClassSurfaceMemberHasSourceInterface,
                         "ERROR",
                         $"Class-surface property has SourceInterface set\n" +
                         $"  type:     {type.ClrFullName}\n" +
@@ -127,7 +127,7 @@ internal static class Scopes
                     {
                         malformedScopeErrors++;
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_SCOPE_003,
+                            DiagnosticCodes.MalformedScopeKey,
                             "ERROR",
                             $"Malformed scope key for ClassSurface member\n" +
                             $"  type:     {type.ClrFullName}\n" +
@@ -143,7 +143,7 @@ internal static class Scopes
                         // If we get here, it means the audit has a gap
                         scopeEmitMismatchErrors++;
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_SCOPE_004,
+                            DiagnosticCodes.ScopeKindMismatchWithEmitScope,
                             "ERROR",
                             $"ClassSurface method missing decision in class scope\n" +
                             $"  type:       {type.ClrFullName}\n" +
@@ -163,7 +163,7 @@ internal static class Scopes
                     {
                         malformedScopeErrors++;
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_SCOPE_003,
+                            DiagnosticCodes.MalformedScopeKey,
                             "ERROR",
                             $"Malformed scope key for ClassSurface property\n" +
                             $"  type:     {type.ClrFullName}\n" +
@@ -223,7 +223,7 @@ internal static class Scopes
                         {
                             malformedScopeErrors++;
                             validationCtx.RecordDiagnostic(
-                                DiagnosticCodes.PG_SCOPE_003,
+                                DiagnosticCodes.MalformedScopeKey,
                                 "ERROR",
                                 $"Malformed scope key for ViewOnly member\n" +
                                 $"  type:      {type.ClrFullName}\n" +
@@ -238,7 +238,7 @@ internal static class Scopes
                         {
                             scopeEmitMismatchErrors++;
                             validationCtx.RecordDiagnostic(
-                                DiagnosticCodes.PG_SCOPE_004,
+                                DiagnosticCodes.ScopeKindMismatchWithEmitScope,
                                 "ERROR",
                                 $"ViewOnly member missing decision in view scope\n" +
                                 $"  type:       {type.ClrFullName}\n" +

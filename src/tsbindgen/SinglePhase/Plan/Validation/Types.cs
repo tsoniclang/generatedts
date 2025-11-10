@@ -51,7 +51,7 @@ internal static class Types
             if (!string.Equals(renamerName, resolverName, StringComparison.Ordinal))
             {
                 validationCtx.RecordDiagnostic(
-                    DiagnosticCodes.PG_PRINT_001,
+                    DiagnosticCodes.TypeNamePrinterRenamerMismatch,
                     "ERROR",
                     $"{owner}: type name mismatch in {where}. resolver='{resolverName}', renamer='{renamerName}'");
             }
@@ -104,7 +104,7 @@ internal static class Types
                 if (renamerName != resolverName)
                 {
                     validationCtx.RecordDiagnostic(
-                        DiagnosticCodes.PG_PRINT_001,
+                        DiagnosticCodes.TypeNamePrinterRenamerMismatch,
                         "ERROR",
                         $"Type identifier mismatch for {type.ClrFullName}. resolver='{resolverName}', renamer='{renamerName}'");
                 }
@@ -321,7 +321,7 @@ internal static class Types
                         {
                             // External type not in graph and not built-in - MISSING
                             validationCtx.RecordDiagnostic(
-                                DiagnosticCodes.PG_LOAD_001,
+                                DiagnosticCodes.UnresolvedExternalType,
                                 "ERROR",
                                 $"{ownerContext}: references external type '{named.FullName}' from assembly '{named.AssemblyName}', " +
                                 $"but it's not in TypeIndex and not a built-in type. Transitive closure loading failed to resolve this dependency.");

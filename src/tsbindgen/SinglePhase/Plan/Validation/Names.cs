@@ -543,7 +543,7 @@ internal static class Names
                     duplicates++;
                     var members = string.Join(", ", group.Select(p => p.ClrName));
                     validationCtx.RecordDiagnostic(
-                        DiagnosticCodes.PG_NAME_005,
+                        DiagnosticCodes.DuplicatePropertyNamePostDedup,
                         "ERROR",
                         $"Duplicate property name on class surface\n" +
                         $"  type:          {type.ClrFullName}\n" +
@@ -571,7 +571,7 @@ internal static class Names
         {
             unsanitizedCount++;
             validationCtx.RecordDiagnostic(
-                DiagnosticCodes.PG_ID_001,
+                DiagnosticCodes.PostSanitizerUnsanitizedReservedIdentifier,
                 "ERROR",
                 $"Reserved identifier not sanitized\n" +
                 $"  where:   {symbolKind}\n" +
@@ -621,7 +621,7 @@ internal static class Names
                 $"      clr:    {type.ClrFullName}::{m.ClrName}"));
 
             validationCtx.RecordDiagnostic(
-                DiagnosticCodes.PG_OV_001,
+                DiagnosticCodes.DuplicateErasedSurfaceSignature,
                 "ERROR",
                 $"Duplicate erased signature in {surfaceName}\n" +
                 $"  type:      {type.ClrFullName}\n" +
@@ -659,7 +659,7 @@ internal static class Names
                 $"      type:   {EraseTypeToString(p.PropertyType)}"));
 
             validationCtx.RecordDiagnostic(
-                DiagnosticCodes.PG_OV_001,
+                DiagnosticCodes.DuplicateErasedSurfaceSignature,
                 "ERROR",
                 $"Duplicate property name in {surfaceName}\n" +
                 $"  type:      {type.ClrFullName}\n" +

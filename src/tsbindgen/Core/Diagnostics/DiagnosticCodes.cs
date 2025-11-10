@@ -2,117 +2,98 @@ namespace tsbindgen.Core.Diagnostics;
 
 /// <summary>
 /// Well-known diagnostic codes for categorization and filtering.
+/// One scheme: TBG + 3 digits. Severity is not encoded in the code.
 /// </summary>
 public static class DiagnosticCodes
 {
-    // Resolution errors
-    public const string UnresolvedType = "TBG001";
-    public const string UnresolvedGenericParameter = "TBG002";
-    public const string UnresolvedConstraint = "TBG003";
+    // 0xx — Resolution / Binding
+    public const string UnresolvedType                 = "TBG001";
+    public const string UnresolvedGenericParameter     = "TBG002";
+    public const string UnresolvedConstraint           = "TBG003";
 
-    // Naming conflicts
-    public const string NameConflictUnresolved = "TBG100";
-    public const string AmbiguousOverload = "TBG101";
-    public const string DuplicateMember = "TBG102";
-    public const string ReservedWordUnsanitized = "TBG120"; // Reserved word not sanitized
+    // 1xx — Naming / Conflicts
+    public const string NameConflictUnresolved         = "TBG100";
+    public const string AmbiguousOverload              = "TBG101";
+    public const string DuplicateMember                = "TBG102";
+    public const string ViewMemberCollisionInViewScope = "TBG103"; // PG_NAME_003
+    public const string ViewMemberEqualsClassSurface   = "TBG104"; // PG_NAME_004
+    public const string DuplicatePropertyNamePostDedup = "TBG105"; // PG_NAME_005
+    public const string ReservedWordUnsanitized        = "TBG120";
 
-    // Overload unification
-    public const string OverloadUnified = "TBG211"; // Info-only, counted
-    public const string OverloadUnresolvable = "TBG212"; // Warning
+    // 2xx — Overload & Hierarchy
+    public const string DiamondInheritance             = "TBG200"; // single concept; use severity to distinguish "detected" vs "conflict"
+    public const string CircularInheritance            = "TBG201";
+    public const string InterfaceNotFound              = "TBG202";
+    public const string StructuralConformanceFailure   = "TBG203";
+    public const string StaticSideInheritanceIssue     = "TBG204";
+    public const string InterfaceMethodNotAssignable   = "TBG205"; // PG_IFC_001
+    public const string OverloadUnified                = "TBG211"; // info
+    public const string OverloadUnresolvable           = "TBG212"; // warn
+    public const string DuplicateErasedSurfaceSignature= "TBG213"; // PG_OV_001
 
-    // Interface/inheritance issues
-    public const string DiamondInheritanceDetected = "TBG200";
-    public const string DiamondInheritanceConflict = "TBG200"; // Alias for compatibility
-    public const string CircularInheritance = "TBG201";
-    public const string InterfaceNotFound = "TBG202";
-    public const string StructuralConformanceFailure = "TBG203";
-    public const string StaticSideInheritanceIssue = "TBG204";
+    // 3xx — TS Compatibility
+    public const string PropertyCovarianceUnsupported  = "TBG300";
+    public const string StaticSideVariance             = "TBG301";
+    public const string IndexerConflict                = "TBG302";
+    public const string CovarianceSummary              = "TBG310"; // info
 
-    // TypeScript compatibility
-    public const string PropertyCovarianceUnsupported = "TBG300";
-    public const string StaticSideVariance = "TBG301";
-    public const string IndexerConflict = "TBG302";
-    public const string CovarianceSummary = "TBG310"; // Info-only summary per type
+    // 4xx — Policy / Constraints
+    public const string PolicyViolation                = "TBG400";
+    public const string UnsatisfiableConstraint        = "TBG401";
+    public const string UnsupportedConstraintMerge     = "TBG402";
+    public const string IncompatibleConstraints        = "TBG403";
+    public const string UnrepresentableConstraint      = "TBG404";
+    public const string ValidationFailed               = "TBG405";
+    public const string NonBenignConstraintLoss        = "TBG406"; // PG_CT_001
+    public const string ConstructorConstraintLoss      = "TBG407"; // PG_CT_002 (often warn)
+    public const string ConstraintNarrowing            = "TBG410"; // warn
 
-    // Policy violations
-    public const string PolicyViolation = "TBG400";
-    public const string UnsatisfiableConstraint = "TBG401";
-    public const string UnsupportedConstraintMerge = "TBG402";
-    public const string IncompatibleConstraints = "TBG403";
-    public const string UnrepresentableConstraint = "TBG404";
-    public const string ValidationFailed = "TBG405";
-    public const string ConstraintNarrowing = "TBG410"; // Warning when constraints are narrowed
+    // 5xx — Renaming & Views
+    public const string RenameConflict                 = "TBG500";
+    public const string ExplicitOverrideNotApplied     = "TBG501";
+    public const string ViewCoverageMismatch           = "TBG510";
+    public const string EmptyView                      = "TBG511"; // PG_VIEW_001
+    public const string DuplicateViewForInterface      = "TBG512"; // PG_VIEW_002
+    public const string InvalidViewPropertyName        = "TBG513"; // PG_VIEW_003
+    public const string TypeNamePrinterRenamerMismatch = "TBG530"; // PG_PRINT_001
 
-    // Renaming issues
-    public const string RenameConflict = "TBG500";
-    public const string ExplicitOverrideNotApplied = "TBG501";
-    public const string ViewCoverageMismatch = "TBG510"; // Error: view planning mismatch
+    // 6xx — Metadata / Binding
+    public const string MissingMetadataToken           = "TBG600";
+    public const string BindingAmbiguity               = "TBG601";
 
-    // Metadata issues
-    public const string MissingMetadataToken = "TBG600";
-    public const string BindingAmbiguity = "TBG601";
+    // 7xx — PhaseGate Core (scopes/finalization/scope-keys)
+    public const string MemberInBothClassAndView       = "TBG702"; // PG_INT_002
+    public const string ClassSurfaceMemberHasSourceInterface = "TBG703"; // PG_INT_003
 
-    // PhaseGate hardening - Identifier validation
-    public const string PG_ID_001 = "PG_ID_001"; // Reserved identifier not sanitized
+    public const string MissingEmitScopeOrIllegalCombo = "TBG710"; // PG_FIN_001
+    public const string ViewOnlyWithoutExactlyOneExplicitView = "TBG711"; // PG_FIN_002
+    public const string EmittingMemberMissingFinalName = "TBG712"; // PG_FIN_003
+    public const string EmittingTypeMissingFinalName   = "TBG713"; // PG_FIN_004
+    public const string InvalidOrEmptyViewMembership   = "TBG714"; // PG_FIN_005
+    public const string DuplicateViewMembership        = "TBG715"; // PG_FIN_006
+    public const string ClassViewDualRoleClash         = "TBG716"; // PG_FIN_007
+    public const string RequiredViewMissingForInterface= "TBG717"; // PG_FIN_008
+    public const string PostSanitizerUnsanitizedIdentifier = "TBG718"; // PG_FIN_009
+    public const string PostSanitizerUnsanitizedReservedIdentifier = "TBG719"; // PG_ID_001
 
-    // PhaseGate hardening - Name collisions
-    public const string PG_NAME_003 = "PG_NAME_003"; // View member collision within view scope
-    public const string PG_NAME_004 = "PG_NAME_004"; // View member name equals class surface name
-    public const string PG_NAME_005 = "PG_NAME_005"; // Duplicate property name on class surface (post-deduplication)
+    public const string MalformedScopeKey              = "TBG720"; // PG_SCOPE_003
+    public const string ScopeKindMismatchWithEmitScope = "TBG721"; // PG_SCOPE_004
 
-    // PhaseGate hardening - Overload collisions
-    public const string PG_OV_001 = "PG_OV_001"; // Duplicate erased signature in surface
+    // 8xx — Emission / Modules / TypeMap
+    public const string MissingImportForForeignType    = "TBG850"; // PG_IMPORT_001
+    public const string ImportedTypeNotExported        = "TBG851"; // PG_EXPORT_001
+    public const string InvalidImportModulePath        = "TBG852"; // PG_MODULE_001
+    public const string FacadeImportsMustUseInternalIndex = "TBG853"; // PG_FACADE_001
 
-    // PhaseGate hardening - View integrity
-    public const string PG_VIEW_001 = "PG_VIEW_001"; // Empty view (no members)
-    public const string PG_VIEW_002 = "PG_VIEW_002"; // Duplicate view for same interface
-    public const string PG_VIEW_003 = "PG_VIEW_003"; // Invalid/unsanitized view property name
+    public const string PublicApiReferencesNonEmittedType = "TBG860"; // PG_API_001
+    public const string GenericConstraintReferencesNonEmittedType = "TBG861"; // PG_API_002
+    public const string PublicApiReferencesNonPublicType = "TBG862"; // (your PG_API_004 variant)
 
-    // PhaseGate hardening - Constraint mismatches
-    public const string PG_CT_001 = "PG_CT_001"; // Non-benign constraint loss (ERROR)
-    public const string PG_CT_002 = "PG_CT_002"; // Constructor constraint loss (WARNING with override flag)
+    public const string UnsupportedClrSpecialForm      = "TBG870"; // PG_TYPEMAP_001 (pointers/byref/function-pointer)
 
-    // PhaseGate hardening - Interface conformance
-    public const string PG_IFC_001 = "PG_IFC_001"; // Interface method not assignable (erased)
-
-    // PhaseGate hardening - EmitScope integrity
-    public const string PG_INT_002 = "PG_INT_002"; // Member appears in both ClassSurface and ViewOnly
-    public const string PG_INT_003 = "PG_INT_003"; // ClassSurface member has SourceInterface set
-
-    // PhaseGate hardening - Finalization sweep (comprehensive pre-emit validation)
-    public const string PG_FIN_001 = "PG_FIN_001"; // Member has no final placement (EmitScope null/unspecified) or illegal combo (ClassSurface + ViewOnly)
-    public const string PG_FIN_002 = "PG_FIN_002"; // Member marked ViewOnly but not found in exactly one ExplicitView
-    public const string PG_FIN_003 = "PG_FIN_003"; // Emitting member missing final name in the correct scope
-    public const string PG_FIN_004 = "PG_FIN_004"; // Emitting type missing final name in namespace scope
-    public const string PG_FIN_005 = "PG_FIN_005"; // Empty/invalid view (zero members, or members not belonging to this type)
-    public const string PG_FIN_006 = "PG_FIN_006"; // Duplicate membership (member appears in >1 view of the same type)
-    public const string PG_FIN_007 = "PG_FIN_007"; // Class/View dual-role clash (same StableId ends up on both surfaces)
-    public const string PG_FIN_008 = "PG_FIN_008"; // Interface requires a view (per conformance audit) but the type has no matching view
-    public const string PG_FIN_009 = "PG_FIN_009"; // Param/TypeParam/Property/View property still unsanitized (post-sanitizer audit)
-
-    // PhaseGate hardening - Scope validation (Step 6)
-    public const string PG_SCOPE_003 = "PG_SCOPE_003"; // Empty/malformed scope key
-    public const string PG_SCOPE_004 = "PG_SCOPE_004"; // Scope kind doesn't match EmitScope
-
-    // PhaseGate hardening - Printer name consistency (TypeRefPrinter→TypeNameResolver)
-    public const string PG_PRINT_001 = "PG_PRINT_001"; // Type name would print differently than Renamer final name
-
-    // PhaseGate hardening - Import completeness (every foreign type has import)
-    public const string PG_IMPORT_001 = "PG_IMPORT_001"; // Type used in signature but not imported
-
-    // PhaseGate hardening - Export validation (imported types are actually exported)
-    public const string PG_EXPORT_001 = "PG_EXPORT_001"; // Import targets type not exported by source namespace
-
-    // PhaseGate hardening - Public API surface validation (no internal type leaks)
-    public const string PG_API_001 = "PG_API_001"; // Public API references non-emitted/non-exported type
-    public const string PG_API_002 = "PG_API_002"; // Generic constraint references non-emitted type
-
-    // PhaseGate hardening - TypeMap validation (unsupported special forms)
-    public const string PG_TYPEMAP_001 = "PG_TYPEMAP_001"; // Unsupported special form (pointer, byref, function pointer)
-
-    // PhaseGate hardening - Assembly loading validation
-    public const string PG_LOAD_001 = "PG_LOAD_001"; // Unresolved external type reference (not in TypeIndex, not built-in)
-    public const string PG_LOAD_002 = "PG_LOAD_002"; // Mixed PublicKeyToken (same assembly name, different tokens)
-    public const string PG_LOAD_003 = "PG_LOAD_003"; // Version drift (same assembly, different versions)
-    public const string PG_LOAD_004 = "PG_LOAD_004"; // Retargetable/ContentType assembly reference
+    // 9xx — Assembly Load
+    public const string UnresolvedExternalType         = "TBG880"; // PG_LOAD_001
+    public const string MixedPublicKeyTokenForSameName = "TBG881"; // PG_LOAD_002
+    public const string VersionDriftForSameIdentity    = "TBG882"; // PG_LOAD_003
+    public const string RetargetableOrContentTypeAssemblyRef = "TBG883"; // PG_LOAD_004
 }

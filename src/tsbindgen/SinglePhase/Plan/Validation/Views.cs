@@ -205,7 +205,7 @@ internal static class Views
                     {
                         emptyViews++;
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_VIEW_001,
+                            DiagnosticCodes.EmptyView,
                             "ERROR",
                             $"Empty view (no members)\n" +
                             $"  type:     {type.ClrFullName}\n" +
@@ -220,7 +220,7 @@ internal static class Views
                     {
                         duplicateViews++;
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_VIEW_002,
+                            DiagnosticCodes.DuplicateViewForInterface,
                             "ERROR",
                             $"Duplicate view for interface on type\n" +
                             $"  type:      {type.ClrFullName}\n" +
@@ -240,7 +240,7 @@ internal static class Views
                     {
                         invalidViewNames++;
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_VIEW_003,
+                            DiagnosticCodes.InvalidViewPropertyName,
                             "ERROR",
                             $"Invalid/unsanitized view property name\n" +
                             $"  type:     {type.ClrFullName}\n" +
@@ -254,7 +254,7 @@ internal static class Views
                     {
                         invalidViewNames++;
                         validationCtx.RecordDiagnostic(
-                            DiagnosticCodes.PG_VIEW_003,
+                            DiagnosticCodes.InvalidViewPropertyName,
                             "ERROR",
                             $"Invalid view property name (contains invalid characters)\n" +
                             $"  type:     {type.ClrFullName}\n" +
@@ -354,7 +354,7 @@ internal static class Views
                         {
                             viewMemberCollisions++;
                             validationCtx.RecordDiagnostic(
-                                DiagnosticCodes.PG_NAME_003,
+                                DiagnosticCodes.ViewMemberCollisionInViewScope,
                                 "ERROR",
                                 $"View member collision within view scope\n" +
                                 $"  type:         {type.ClrFullName}\n" +
@@ -396,7 +396,7 @@ internal static class Views
 
                             classSurfaceCollisions++;
                             validationCtx.RecordDiagnostic(
-                                DiagnosticCodes.PG_NAME_004,
+                                DiagnosticCodes.ViewMemberEqualsClassSurface,
                                 "ERROR",
                                 $"View member name equals class surface name\n" +
                                 $"  type:         {type.ClrFullName}\n" +

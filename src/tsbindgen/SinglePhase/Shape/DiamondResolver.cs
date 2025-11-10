@@ -167,7 +167,7 @@ public static class DiamondResolver
                 if (signatureGroups.Count > 1)
                 {
                     ctx.Diagnostics.Warning(
-                        Core.Diagnostics.DiagnosticCodes.DiamondInheritanceConflict,
+                        Core.Diagnostics.DiagnosticCodes.DiamondInheritance,
                         $"Diamond inheritance conflict in {type.ClrFullName}.{group.Key} - {signatureGroups.Count} signatures");
                 }
             }

@@ -38,9 +38,9 @@ internal static class Constraints
                 {
                     // Strict mode: ERROR
                     validationCtx.RecordDiagnostic(
-                        DiagnosticCodes.PG_CT_001,
+                        DiagnosticCodes.NonBenignConstraintLoss,
                         "ERROR",
-                        $"PG_CT_001: Non-benign constraint loss on {finding.GenericParameterName} in {finding.TypeFullName}\n" +
+                        $"TBG406: Non-benign constraint loss on {finding.GenericParameterName} in {finding.TypeFullName}\n" +
                         $"  Type:      {finding.TypeFullName}\n" +
                         $"  Interface: {finding.InterfaceFullName}\n" +
                         $"  Reason:    TypeScript cannot represent parameterless constructor constraints; callers relying on `new {finding.GenericParameterName}()` would be unsound.");
@@ -50,9 +50,9 @@ internal static class Constraints
                 {
                     // Override mode: WARNING
                     validationCtx.RecordDiagnostic(
-                        DiagnosticCodes.PG_CT_002,
+                        DiagnosticCodes.ConstructorConstraintLoss,
                         "WARNING",
-                        $"[OVERRIDE] PG_CT_002: Constructor constraint loss on {finding.GenericParameterName} in {finding.TypeFullName}\n" +
+                        $"[OVERRIDE] TBG407: Constructor constraint loss on {finding.GenericParameterName} in {finding.TypeFullName}\n" +
                         $"  Type:      {finding.TypeFullName}\n" +
                         $"  Interface: {finding.InterfaceFullName}\n" +
                         $"  Reason:    TypeScript cannot represent parameterless constructor constraints; callers relying on `new {finding.GenericParameterName}()` would be unsound.\n" +

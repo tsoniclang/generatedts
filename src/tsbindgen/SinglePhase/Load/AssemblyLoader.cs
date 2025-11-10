@@ -310,7 +310,7 @@ public sealed class AssemblyLoader
             {
                 var tokenList = string.Join(", ", distinctTokens.Select(t => $"'{t}'"));
                 _ctx.Diagnostics.Error(
-                    Core.Diagnostics.DiagnosticCodes.PG_LOAD_002,
+                    Core.Diagnostics.DiagnosticCodes.MixedPublicKeyTokenForSameName,
                     $"Assembly '{assemblyName}' referenced with multiple PublicKeyTokens: {tokenList}");
             }
 
@@ -329,13 +329,13 @@ public sealed class AssemblyLoader
                     if (strictVersions)
                     {
                         _ctx.Diagnostics.Error(
-                            Core.Diagnostics.DiagnosticCodes.PG_LOAD_003,
+                            Core.Diagnostics.DiagnosticCodes.VersionDriftForSameIdentity,
                             $"Assembly '{assemblyName}' has major version drift: {versionList}");
                     }
                     else
                     {
                         _ctx.Diagnostics.Warning(
-                            Core.Diagnostics.DiagnosticCodes.PG_LOAD_003,
+                            Core.Diagnostics.DiagnosticCodes.VersionDriftForSameIdentity,
                             $"Assembly '{assemblyName}' has major version drift: {versionList}");
                     }
                 }
