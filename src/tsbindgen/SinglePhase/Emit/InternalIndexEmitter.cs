@@ -3,6 +3,7 @@ using System.Text;
 using tsbindgen.SinglePhase.Emit.Printers;
 using tsbindgen.SinglePhase.Model;
 using tsbindgen.SinglePhase.Model.Symbols;
+using tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
 using tsbindgen.SinglePhase.Plan;
 using tsbindgen.SinglePhase.Renaming;
 
@@ -73,8 +74,14 @@ public static class InternalIndexEmitter
         // Every namespace needs these to reference System types (Int32 → int, etc.)
         EmitBrandedPrimitives(sb);
 
-        // Unsafe type markers (for C# pointers and byrefs that have no TS equivalent)
-        EmitUnsafeTypeMarkers(sb);
+        // Check if namespace uses unsafe markers (pointers/byrefs) and emit support import if needed
+        var needsSupportTypes = NamespaceUsesSupportTypes(nsOrder.Namespace);
+        if (needsSupportTypes)
+        {
+            sb.AppendLine("// Import support types for unsafe CLR constructs");
+            sb.AppendLine("import type { TSUnsafePointer, TSByRef } from \"../_support/types\";");
+            sb.AppendLine();
+        }
 
         // Emit import statements for cross-namespace type references
         var imports = importPlan.GetImportsFor(nsOrder.Namespace.Name);
@@ -184,15 +191,6 @@ public static class InternalIndexEmitter
         sb.AppendLine();
     }
 
-    private static void EmitUnsafeTypeMarkers(StringBuilder sb)
-    {
-        sb.AppendLine("// Unsafe type markers for C# constructs with no TypeScript equivalent");
-        sb.AppendLine("// These force explicit handling and make unsafe usage searchable");
-        sb.AppendLine("export type TSUnsafePointer<T> = unknown;");
-        sb.AppendLine("export type TSByRef<T> = unknown;");
-        sb.AppendLine();
-    }
-
     private static string EmitCompanionViewsInterface(TypeSymbol type, ImmutableArray<Shape.ViewPlanner.ExplicitView> views, TypeNameResolver resolver, BuildContext ctx)
     {
         var sb = new StringBuilder();
@@ -281,5 +279,82 @@ public static class InternalIndexEmitter
     {
         var lines = text.Split('\n').Select(line => string.IsNullOrWhiteSpace(line) ? line : indentation + line);
         return string.Join("\n", lines);
+    }
+
+    /// <summary>
+    /// Check if namespace contains any pointer or byref types that require support type markers.
+    /// Scans all public types and their members for PointerTypeReference or ByRefTypeReference.
+    /// </summary>
+    private static bool NamespaceUsesSupportTypes(NamespaceSymbol ns)
+    {
+        foreach (var type in ns.Types.Where(t => t.Accessibility == Accessibility.Public))
+        {
+            // Check methods (only those actually emitted to class/static surface)
+            foreach (var method in type.Members.Methods)
+            {
+                // Only check methods on class/static surface (skip ViewOnly)
+                if (method.EmitScope != EmitScope.ClassSurface && method.EmitScope != EmitScope.StaticSurface)
+                    continue;
+
+                // Check return type
+                if (ContainsUnsafeType(method.ReturnType))
+                    return true;
+
+                // Check parameters
+                foreach (var param in method.Parameters)
+                {
+                    if (ContainsUnsafeType(param.Type))
+                        return true;
+                }
+            }
+
+            // Check properties (only those on class/static surface)
+            foreach (var prop in type.Members.Properties)
+            {
+                if (prop.EmitScope != EmitScope.ClassSurface && prop.EmitScope != EmitScope.StaticSurface)
+                    continue;
+
+                if (ContainsUnsafeType(prop.PropertyType))
+                    return true;
+            }
+
+            // Check fields (only those on class/static surface)
+            foreach (var field in type.Members.Fields)
+            {
+                if (field.EmitScope != EmitScope.ClassSurface && field.EmitScope != EmitScope.StaticSurface)
+                    continue;
+
+                if (ContainsUnsafeType(field.FieldType))
+                    return true;
+            }
+
+            // Check events (only those on class/static surface)
+            foreach (var evt in type.Members.Events)
+            {
+                if (evt.EmitScope != EmitScope.ClassSurface && evt.EmitScope != EmitScope.StaticSurface)
+                    continue;
+
+                if (ContainsUnsafeType(evt.EventHandlerType))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Recursively check if a type reference contains pointers or byrefs.
+    /// </summary>
+    private static bool ContainsUnsafeType(Model.Types.TypeReference typeRef)
+    {
+        return typeRef switch
+        {
+            Model.Types.PointerTypeReference => true,
+            Model.Types.ByRefTypeReference => true,
+            Model.Types.ArrayTypeReference arr => ContainsUnsafeType(arr.ElementType),
+            Model.Types.NamedTypeReference named => named.TypeArguments.Any(ContainsUnsafeType),
+            Model.Types.NestedTypeReference nested => ContainsUnsafeType(nested.FullReference),
+            _ => false
+        };
     }
 }

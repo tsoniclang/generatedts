@@ -284,6 +284,9 @@ public static class SinglePhaseBuilder
         EmissionPlan plan,
         string outputDirectory)
     {
+        // Emit _support/types.d.ts (centralized marker types - emitted once)
+        SupportTypesEmit.Emit(ctx, outputDirectory);
+
         // Emit internal/index.d.ts for each namespace
         InternalIndexEmitter.Emit(ctx, plan, outputDirectory);
 
