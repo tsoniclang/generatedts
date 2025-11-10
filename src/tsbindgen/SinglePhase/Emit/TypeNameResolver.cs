@@ -1,5 +1,6 @@
 using tsbindgen.SinglePhase.Model;
 using tsbindgen.SinglePhase.Model.Types;
+using tsbindgen.SinglePhase.Renaming;
 
 namespace tsbindgen.SinglePhase.Emit;
 
@@ -72,7 +73,13 @@ public sealed class TypeNameResolver
                 : fullName;
 
             // Sanitize the name for TypeScript (handle generic arity, nested types, etc.)
-            return SanitizeClrName(simpleName);
+            var sanitized = SanitizeClrName(simpleName);
+
+            // CRITICAL: Check if sanitized name is a TypeScript reserved word
+            // External types (not in current graph) still need reserved word handling
+            // Example: System.Type referenced from another namespace → Type_
+            var result = TypeScriptReservedWords.Sanitize(sanitized);
+            return result.Sanitized;
         }
 
         // 3. Get final TypeScript name from Renamer (single source of truth)
