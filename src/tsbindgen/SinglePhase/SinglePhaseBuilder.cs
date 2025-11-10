@@ -113,16 +113,40 @@ public static class SinglePhaseBuilder
 
     /// <summary>
     /// Phase 1: Load assemblies and build symbol graph.
+    /// Uses transitive closure loading to resolve all assembly dependencies.
     /// </summary>
     private static SymbolGraph LoadPhase(BuildContext ctx, IReadOnlyList<string> assemblyPaths)
     {
-        // Load assemblies using MetadataLoadContext
         var loader = new AssemblyLoader(ctx);
-        var loadContext = loader.CreateLoadContext(assemblyPaths);
+
+        // Build ref paths for dependency resolution
+        // Fallback: use directories containing seed assemblies if no explicit ref paths provided
+        var refPaths = assemblyPaths
+            .Select(Path.GetDirectoryName)
+            .Where(dir => dir != null)
+            .Cast<string>()
+            .Distinct()
+            .ToList();
+
+        ctx.Log("Load", $"Reference paths for dependency resolution: {refPaths.Count}");
+        foreach (var refPath in refPaths)
+        {
+            ctx.Log("Load", $"  - {refPath}");
+        }
+
+        // Load transitive closure of assemblies
+        var closureResult = loader.LoadClosure(assemblyPaths, refPaths, strictVersions: false);
+
+        ctx.Log("Load", $"Loaded {closureResult.Assemblies.Count} assemblies in transitive closure");
+        ctx.Log("Load", $"Resolved assemblies:");
+        foreach (var (key, path) in closureResult.ResolvedPaths)
+        {
+            ctx.Log("Load", $"  - {key.Name} v{key.Version}");
+        }
 
         // Read all types and members via reflection
         var reader = new ReflectionReader(ctx);
-        var graph = reader.ReadAssemblies(loadContext, assemblyPaths);
+        var graph = reader.ReadAssemblies(closureResult.LoadContext, assemblyPaths);
 
         // Substitute closed generic interface members
         InterfaceMemberSubstitution.SubstituteClosedInterfaces(ctx, graph);
