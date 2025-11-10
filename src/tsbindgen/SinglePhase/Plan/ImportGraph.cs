@@ -319,7 +319,7 @@ public static class ImportGraph
 
         // Fast O(1) lookup using CLR full name
         // CRITICAL: This now works for generic types because clrKey uses backtick form
-        // Example: IEnumerable_1<T> → "System.Collections.Generic.IEnumerable`1"
+        // Example: IEnumerable<T> → "System.Collections.Generic.IEnumerable`1"
         if (graphData.ClrFullNameToNamespace.TryGetValue(clrKey, out var ns))
             return ns;
 
@@ -329,27 +329,74 @@ public static class ImportGraph
 
     /// <summary>
     /// Get normalized CLR lookup key for a TypeReference.
-    /// Returns the generic definition name in CLR backtick format.
+    /// CRITICAL: Always returns the OPEN generic definition name (not constructed).
     /// This matches how TypeSymbol.ClrFullName is stored in the index.
     ///
     /// Examples:
-    ///   IEnumerable_1&lt;T&gt;  → "System.Collections.Generic.IEnumerable`1"
-    ///   Func_2&lt;T1,T2&gt;    → "System.Func`2"
-    ///   Exception       → "System.Exception"
+    ///   IEnumerable&lt;T&gt;       → "System.Collections.Generic.IEnumerable`1"
+    ///   Func&lt;T1,T2&gt;         → "System.Func`2"
+    ///   Exception            → "System.Exception"
+    ///
+    /// Why not use FullName directly?
+    ///   FullName may be constructed (with type args), but the index uses open generic keys.
     /// </summary>
     private static string? GetClrLookupKey(TypeReference typeRef)
     {
         return typeRef switch
         {
-            NamedTypeReference named => named.FullName, // Already in CLR backtick form
-            NestedTypeReference nested => nested.FullReference.FullName, // NamedTypeReference behind the scenes
-            ArrayTypeReference arr => GetClrLookupKey(arr.ElementType), // Recurse to element type
-            PointerTypeReference ptr => GetClrLookupKey(ptr.PointeeType), // Recurse to pointee type
-            ByRefTypeReference byref => GetClrLookupKey(byref.ReferencedType), // Recurse to referenced type
+            NamedTypeReference named => GetOpenGenericClrKey(named),
+            NestedTypeReference nested => GetClrLookupKey(nested.FullReference),
+            ArrayTypeReference arr => GetClrLookupKey(arr.ElementType),
+            PointerTypeReference ptr => GetClrLookupKey(ptr.PointeeType),
+            ByRefTypeReference byref => GetClrLookupKey(byref.ReferencedType),
             GenericParameterReference => null, // Type parameters are local, never imported
             PlaceholderTypeReference => null, // Placeholders are unknown, no import
-            _ => null // Unknown type reference
+            _ => null
         };
+    }
+
+    /// <summary>
+    /// Construct the open generic CLR key from NamedTypeReference.
+    /// Always uses the format: Namespace.NameWithoutArity`Arity (for generics)
+    /// or Namespace.Name (for non-generics).
+    ///
+    /// This avoids relying on FullName which may be constructed with type arguments.
+    /// </summary>
+    private static string GetOpenGenericClrKey(NamedTypeReference named)
+    {
+        var ns = named.Namespace;       // e.g., "System.Collections.Generic"
+        var name = named.Name;          // e.g., "IEnumerable`1" or "List`1"
+        var arity = named.Arity;        // e.g., 1 (0 for non-generic)
+
+        // HARDENING: Validate inputs - name/namespace should not contain assembly info
+        if (string.IsNullOrWhiteSpace(ns) || string.IsNullOrWhiteSpace(name))
+        {
+            // Fallback to FullName if namespace/name are empty
+            // This shouldn't happen but prevents garbage output
+            return named.FullName;
+        }
+
+        // Strip assembly qualification from name if present (defensive)
+        // Example: "IEnumerable, mscorlib, Version=..." → "IEnumerable"
+        if (name.Contains(','))
+        {
+            name = name.Substring(0, name.IndexOf(',')).Trim();
+        }
+
+        if (arity == 0)
+        {
+            // Non-generic type: just namespace + name
+            return $"{ns}.{name}";
+        }
+
+        // Generic type: strip backtick from name if present, then reconstruct
+        // Name might be "IEnumerable`1" or "IEnumerable" depending on source
+        var nameWithoutArity = name.Contains('`')
+            ? name.Substring(0, name.IndexOf('`'))
+            : name;
+
+        // Always use backtick arity form for consistency with index
+        return $"{ns}.{nameWithoutArity}`{arity}";
     }
 
     private static string GetTypeFullName(TypeReference typeRef)
@@ -383,7 +430,9 @@ public static class ImportGraph
         {
             case NamedTypeReference named:
                 var ns = FindNamespaceForType(graph, graphData, named);
-                collected.Add((named.FullName, ns));
+                // CRITICAL: Use open generic CLR key, not FullName which may be constructed
+                var clrKey = GetOpenGenericClrKey(named);
+                collected.Add((clrKey, ns));
 
                 // Recurse into type arguments
                 foreach (var arg in named.TypeArguments)
@@ -394,7 +443,9 @@ public static class ImportGraph
 
             case NestedTypeReference nested:
                 var nestedNs = FindNamespaceForType(graph, graphData, nested);
-                collected.Add((nested.FullReference.FullName, nestedNs));
+                // CRITICAL: Use open generic CLR key for nested type
+                var nestedClrKey = GetOpenGenericClrKey(nested.FullReference);
+                collected.Add((nestedClrKey, nestedNs));
 
                 // Recurse into type arguments of nested type
                 foreach (var arg in nested.FullReference.TypeArguments)
