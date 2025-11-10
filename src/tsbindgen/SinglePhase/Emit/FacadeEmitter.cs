@@ -65,7 +65,11 @@ public static class FacadeEmitter
                 sb.AppendLine("// Import dependencies");
                 foreach (var import in imports)
                 {
-                    sb.AppendLine($"import * as {GetImportAlias(import.TargetNamespace)} from '{import.ImportPath}';");
+                    // Facade files are one level shallower than internal files
+                    // Internal: Namespace/internal/index.d.ts uses ../../Target/internal/index
+                    // Facade: Namespace/index.d.ts needs ../Target/internal/index
+                    var facadePath = AdjustPathForFacade(import.ImportPath);
+                    sb.AppendLine($"import * as {GetImportAlias(import.TargetNamespace)} from '{facadePath}';");
                 }
                 sb.AppendLine();
             }
@@ -121,6 +125,26 @@ public static class FacadeEmitter
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Adjusts import path for facade files (one directory level shallower than internal files).
+    /// Converts "../../Target/internal/index" to "../Target/internal/index"
+    /// </summary>
+    private static string AdjustPathForFacade(string internalPath)
+    {
+        // Internal files are at: Namespace/internal/index.d.ts
+        // Facade files are at: Namespace/index.d.ts
+        // So facade files need one less "../" in relative paths
+
+        if (internalPath.StartsWith("../../"))
+        {
+            // Strip one "../" from the beginning
+            return "../" + internalPath.Substring(6); // Remove "../../", keep rest
+        }
+
+        // For paths that don't start with "../../" (shouldn't happen, but defensive)
+        return internalPath;
     }
 
     private static string GetImportAlias(string namespaceName)

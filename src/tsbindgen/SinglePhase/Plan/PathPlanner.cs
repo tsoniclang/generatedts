@@ -13,7 +13,7 @@ public static class PathPlanner
     /// </summary>
     /// <param name="sourceNamespace">The namespace doing the importing (empty string for root)</param>
     /// <param name="targetNamespace">The namespace being imported from (empty string for root)</param>
-    /// <returns>Relative module path (e.g., "../System/internal/index")</returns>
+    /// <returns>Relative module path (e.g., "../../System/internal/index")</returns>
     public static string GetSpecifier(string sourceNamespace, string targetNamespace)
     {
         var isSourceRoot = string.IsNullOrEmpty(sourceNamespace);
@@ -33,11 +33,12 @@ public static class PathPlanner
         }
         else
         {
-            // Non-root → Non-root: ../{targetNs}/internal/index
-            // Non-root → Root: ../_root/index
+            // Non-root → Non-root: ../../{targetNs}/internal/index
+            // Non-root → Root: ../../_root/index
+            // IMPORTANT: Two levels up because files are at Namespace/internal/index.d.ts
             return isTargetRoot
-                ? "../_root/index"
-                : $"../{targetNamespace}/internal/index";
+                ? "../../_root/index"
+                : $"../../{targetNamespace}/internal/index";
         }
     }
 

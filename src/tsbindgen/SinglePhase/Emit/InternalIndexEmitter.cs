@@ -79,7 +79,8 @@ public static class InternalIndexEmitter
         if (needsSupportTypes)
         {
             sb.AppendLine("// Import support types for unsafe CLR constructs");
-            sb.AppendLine("import type { TSUnsafePointer, TSByRef } from \"../_support/types\";");
+            // Internal files are at Namespace/internal/index.d.ts, _support is at root level
+            sb.AppendLine("import type { TSUnsafePointer, TSByRef } from \"../../_support/types\";");
             sb.AppendLine();
         }
 
