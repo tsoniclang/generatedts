@@ -13,6 +13,29 @@ Pure CLR reflection phase. No TypeScript concepts yet. Outputs `SymbolGraph` wit
 
 ---
 
+## File: DeclaringAssemblyResolver.cs (FIX E Phase 1 - jumanji7)
+
+**Purpose:** Resolves external type references to declaring assemblies using MetadataLoadContext. Foundation for cross-assembly type resolution and type-forwarding support.
+
+**Key Methods:**
+- `ResolveBatch(IReadOnlySet<string> clrKeys)` - Batch resolves CLR keys → assembly names
+- `ResolveToAssembly(string clrKey)` - Single type resolution
+- `GroupByAssembly(Dictionary)` - Groups types by assembly for diagnostics
+
+**Algorithm:**
+1. For CLR key (e.g., `"System.Runtime.Intrinsics.Vector128\`1"`):
+2. Call `LoadContext.LoadFromAssemblyName(key)` with placeholder AssemblyName
+3. MetadataLoadContext resolves via PathAssemblyResolver
+4. Extract `assembly.GetName().Name` as declaring assembly
+5. Return map: `clrKey → assemblyName`
+
+**Impact:**
+- Foundation for FIX E cross-assembly resolution
+- Enables future type-forwarding support (Phase 2)
+- Used in Plan phase by ImportGraph
+
+---
+
 ## AssemblyLoader.cs
 
 ### LoadClosureResult
@@ -221,14 +244,24 @@ Order: ByRef → Pointer → Array → GenericParameter → Named
 - Final element type via `Create()` recursion
 
 **CreateNamed(type)**
-1. Extract: assemblyName, fullName, namespace, name
-2. **HARDENING:** Guarantee non-empty Name:
+1. Extract assemblyName
+2. **CRITICAL - Open generic form fix (jumanji7):**
+   ```csharp
+   var fullName = type.IsGenericType && type.IsConstructedGenericType
+       ? type.GetGenericTypeDefinition().FullName  // "System.IEquatable`1"
+       : type.FullName;                            // NOT "System.IEquatable`1[[...]]]"
+   ```
+   - Prevents assembly-qualified type args in FullName
+   - Breaks StableId lookup if not fixed
+   - Related to ImportGraph.GetOpenGenericClrKey()
+3. Extract namespace, name
+4. **HARDENING:** Guarantee non-empty Name:
    - Fallback: Extract last segment after '.' or '+'
    - Last resort: `"UnknownType"` + log warning
-3. Generic types:
+5. Generic types:
    - Arity from `GetGenericArguments().Length`
    - If `IsConstructedGenericType`: Recursively `Create()` each arg
-4. **HARDENING:** Stamp `interfaceStableId` at load time:
+6. **HARDENING:** Stamp `interfaceStableId` at load time:
    - Format: `"{assemblyName}:{fullName}"`
    - Eliminates repeated computation in later phases
 
@@ -376,8 +409,11 @@ Recursive pattern matching:
 3. Extract types/members (reflection)
 4. Build type references (memoization + cycle detection)
 5. Build substitution maps (closed generic interfaces)
+6. **FIX E (jumanji7):** Return LoadContext for cross-assembly resolution
 
-**Output:** `SymbolGraph` with pure CLR metadata (no TypeScript concepts).
+**Output:**
+- `SymbolGraph` with pure CLR metadata (no TypeScript concepts)
+- `MetadataLoadContext` (jumanji7) - passed to Plan phase for DeclaringAssemblyResolver
 
 **Key design decisions:**
 - **MetadataLoadContext isolation:** Reflection on BCL without version conflicts

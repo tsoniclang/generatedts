@@ -8,6 +8,7 @@ Transforms CLR semantics → TypeScript-compatible semantics. All passes are pur
 1. GlobalInterfaceIndex      → Build global interface signature index
 2. InterfaceDeclIndex         → Build declared-only member index
 3. InterfaceInliner          → Flatten interface hierarchies (remove extends)
+3.5. InternalInterfaceFilter  → Remove internal BCL interfaces (FIX F - jumanji7)
 4. StructuralConformance     → Synthesize ViewOnly for non-conforming interfaces
 5. ExplicitImplSynthesizer   → Synthesize missing EII members
 6. InterfaceResolver         → Resolve which interface declares member
@@ -25,6 +26,8 @@ Transforms CLR semantics → TypeScript-compatible semantics. All passes are pur
 ```
 
 **Critical Dependencies:**
+- 3 before 3.5: InternalInterfaceFilter needs flattened interfaces (jumanji7)
+- 3.5 before 4-5: Don't synthesize for internal interfaces (jumanji7)
 - 3 before 4-5: Synthesis needs flattened interfaces
 - 1-2 before 6: Resolver needs indexes
 - 4-5 before 11: View planning needs ViewOnly members
@@ -78,17 +81,62 @@ Flattens interface hierarchies - copies all inherited members into each interfac
 
 **Algorithm:**
 1. BFS traversal of `iface.Interfaces`, collect all members
-2. Deduplicate:
+2. **FIX D (jumanji7): Generic parameter substitution** - for each inherited member:
+   - Build substitution map: interface generic params → actual type args
+   - Compose parent substitutions for chained generics
+   - Substitute method/property/event types
+   - **CRITICAL:** Filter out method-level generic params (don't substitute method's own `<T>`)
+3. Deduplicate:
    - Methods: by canonical signature
    - Properties: by name (TS doesn't allow property overloads)
    - Events: by canonical signature
-3. Clear `Interfaces` array
+4. Clear `Interfaces` array
 
-**Example:**
+**FIX D Key Methods:**
+- `BuildSubstitutionMapForInterface()` - Maps generic param names → type args
+- `ComposeSubstitutions()` - Handles grandparent → parent → child chains
+- `SubstituteMethodMembers()` - Protects method-level generics from substitution
+- `SubstitutePropertyMembers()` - Substitutes property types and indexer params
+- `SubstituteEventMembers()` - Substitutes event handler types
+
+**Example without FIX D:**
+```csharp
+interface IBase<T> { T GetValue(); }
+interface IDerived : IBase<string> { }
+// WRONG: IDerived would get "T GetValue()" - orphaned generic!
 ```
-Before: IEnumerable<T> extends IEnumerable
-After:  IEnumerable_1<T> { both GetEnumerator() variants inlined }
+
+**Example with FIX D:**
+```csharp
+interface IDerived : IBase<string> { }
+// CORRECT: IDerived gets "string GetValue()" - T substituted
 ```
+
+---
+
+## Pass 3.5: InternalInterfaceFilter (FIX F - jumanji7)
+
+**Purpose:** Filters internal BCL interfaces from type interface lists. Internal interfaces are implementation details not meant for public use.
+
+**Why needed?** Types implement internal interfaces like `IValueTupleInternal`, `IDebuggerDisplay`, `ISimdVector<T>` that cause TS2304 errors ("Cannot find name").
+
+**Algorithm:**
+1. For each type in graph:
+   - For each interface in `type.Interfaces`:
+     - Check if internal (explicit list + pattern matching)
+     - If internal: remove from interface list, log
+2. Return new graph with filtered interfaces
+
+**Detection Logic:**
+- **Explicit list**: Exact CLR full name matches (e.g., `"System.Runtime.Intrinsics.ISimdVector\`2"`)
+- **Pattern matching**: Simple name contains patterns (e.g., "Internal", "Debugger", "ParseAndFormatInfo")
+
+**Patterns:** `"Internal"`, `"Debugger"`, `"ParseAndFormatInfo"`, `"Runtime"`, `"Compiler"`, `"Roslyn"`
+
+**Impact:** Eliminated 74 TS2304 errors in BCL validation
+
+**Must run AFTER:** InterfaceInliner (needs flattened list)
+**Must run BEFORE:** ExplicitImplSynthesizer (don't synthesize for internal interfaces)
 
 ---
 
