@@ -228,6 +228,31 @@ public static class ImportGraph
             }
         }
 
+        // Analyze constructors
+        foreach (var ctor in type.Members.Constructors)
+        {
+            // Parameters - collect ALL referenced types recursively
+            foreach (var param in ctor.Parameters)
+            {
+                var paramTypeRefs = new HashSet<(string FullName, string? Namespace)>();
+                CollectTypeReferences(ctx, param.Type, graph, graphData, paramTypeRefs);
+
+                foreach (var (fullName, targetNs) in paramTypeRefs)
+                {
+                    if (targetNs != null && targetNs != ns.Name)
+                    {
+                        dependencies.Add(targetNs);
+                        graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
+                            SourceNamespace: ns.Name,
+                            SourceType: type.ClrFullName,
+                            TargetNamespace: targetNs,
+                            TargetType: fullName,
+                            ReferenceKind: ReferenceKind.ConstructorParameter));
+                    }
+                }
+            }
+        }
+
         // Analyze properties - collect ALL referenced types recursively
         foreach (var property in type.Members.Properties)
         {
@@ -447,6 +472,12 @@ public static class ImportGraph
 
                 collected.Add((clrKey, ns));
 
+                // FIX E: Track unresolved types (ns == null means not in our graph)
+                if (ns == null && !string.IsNullOrEmpty(clrKey))
+                {
+                    graphData.UnresolvedClrKeys.Add(clrKey);
+                }
+
                 // Recurse into type arguments
                 foreach (var arg in named.TypeArguments)
                 {
@@ -469,6 +500,12 @@ public static class ImportGraph
                 }
 
                 collected.Add((nestedClrKey, nestedNs));
+
+                // FIX E: Track unresolved nested types
+                if (nestedNs == null && !string.IsNullOrEmpty(nestedClrKey))
+                {
+                    graphData.UnresolvedClrKeys.Add(nestedClrKey);
+                }
 
                 // Recurse into type arguments of nested type
                 foreach (var arg in nested.FullReference.TypeArguments)
@@ -526,6 +563,18 @@ public sealed class ImportGraphData
     /// List of all cross-namespace type references.
     /// </summary>
     public List<CrossNamespaceReference> CrossNamespaceReferences { get; init; } = new();
+
+    /// <summary>
+    /// FIX E: Set of CLR keys that couldn't be resolved to a namespace in the current graph.
+    /// These are candidates for cross-assembly resolution.
+    /// </summary>
+    public HashSet<string> UnresolvedClrKeys { get; init; } = new();
+
+    /// <summary>
+    /// FIX E: Maps unresolved CLR key → declaring assembly name (resolved via reflection).
+    /// Populated after DeclaringAssemblyResolver runs.
+    /// </summary>
+    public Dictionary<string, string> UnresolvedToAssembly { get; set; } = new();
 }
 
 /// <summary>
@@ -548,6 +597,7 @@ public enum ReferenceKind
     GenericConstraint,
     MethodReturn,
     MethodParameter,
+    ConstructorParameter,
     PropertyType,
     FieldType,
     EventType

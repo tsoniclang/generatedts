@@ -103,7 +103,15 @@ public sealed class TypeReferenceFactory
     private TypeReference CreateNamed(Type type)
     {
         var assemblyName = type.Assembly.GetName().Name ?? "Unknown";
-        var fullName = type.FullName ?? type.Name;
+
+        // CRITICAL: For constructed generic types (e.g., IEquatable<StandardFormat>),
+        // use the open generic form's FullName, NOT the constructed form.
+        // Constructed form includes assembly-qualified type args which breaks StableId lookup.
+        // Example: "System.IEquatable`1" not "System.IEquatable`1[[System.Buffers.StandardFormat, ...]]"
+        var fullName = type.IsGenericType && type.IsConstructedGenericType
+            ? type.GetGenericTypeDefinition().FullName ?? type.Name
+            : type.FullName ?? type.Name;
+
         var namespaceName = type.Namespace ?? "";
         var name = type.Name;
 

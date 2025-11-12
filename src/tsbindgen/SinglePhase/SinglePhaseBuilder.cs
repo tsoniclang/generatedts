@@ -1,3 +1,4 @@
+using System.Reflection;
 using tsbindgen.Core.Policy;
 using tsbindgen.SinglePhase.Load;
 using tsbindgen.SinglePhase.Model;
@@ -43,7 +44,7 @@ public static class SinglePhaseBuilder
         {
             // Phase 1: Load
             ctx.Log("Build", "\n--- Phase 1: Load ---");
-            var graph = LoadPhase(ctx, assemblyPaths);
+            var (graph, loadContext) = LoadPhase(ctx, assemblyPaths);
             var stats = graph.GetStatistics();
             ctx.Log("Build", $"Loaded: {stats.NamespaceCount} namespaces, {stats.TypeCount} types, {stats.TotalMembers} members");
 
@@ -64,7 +65,7 @@ public static class SinglePhaseBuilder
 
             // Phase 4: Plan
             ctx.Log("Build", "\n--- Phase 4: Plan ---");
-            var plan = PlanPhase(ctx, graph);
+            var plan = PlanPhase(ctx, graph, loadContext);
             ctx.Log("Build", $"Planned emission order for {plan.NamespaceCount} namespaces");
 
             // Phase 5: Emit
@@ -114,8 +115,9 @@ public static class SinglePhaseBuilder
     /// <summary>
     /// Phase 1: Load assemblies and build symbol graph.
     /// Uses transitive closure loading to resolve all assembly dependencies.
+    /// Returns both the symbol graph and the MetadataLoadContext for later use.
     /// </summary>
-    private static SymbolGraph LoadPhase(BuildContext ctx, IReadOnlyList<string> assemblyPaths)
+    private static (SymbolGraph Graph, MetadataLoadContext LoadContext) LoadPhase(BuildContext ctx, IReadOnlyList<string> assemblyPaths)
     {
         var loader = new AssemblyLoader(ctx);
 
@@ -154,7 +156,7 @@ public static class SinglePhaseBuilder
         // Substitute closed generic interface members
         InterfaceMemberSubstitution.SubstituteClosedInterfaces(ctx, graph);
 
-        return graph;
+        return (graph, closureResult.LoadContext);
     }
 
     /// <summary>
@@ -247,10 +249,30 @@ public static class SinglePhaseBuilder
     /// <summary>
     /// Phase 4: Plan imports and emission order.
     /// </summary>
-    private static EmissionPlan PlanPhase(BuildContext ctx, SymbolGraph graph)
+    private static EmissionPlan PlanPhase(BuildContext ctx, SymbolGraph graph, MetadataLoadContext loadContext)
     {
         // Build import graph
         var importGraph = ImportGraph.Build(ctx, graph);
+
+        // FIX E: Resolve unresolved types to declaring assemblies
+        if (importGraph.UnresolvedClrKeys.Count > 0)
+        {
+            ctx.Log("CrossAssembly", $"Found {importGraph.UnresolvedClrKeys.Count} unresolved type references");
+
+            var resolver = new Load.DeclaringAssemblyResolver(loadContext, ctx);
+            var unresolvedToAssembly = resolver.ResolveBatch(importGraph.UnresolvedClrKeys);
+
+            // Store in graph data
+            importGraph.UnresolvedToAssembly = unresolvedToAssembly;
+
+            // Group by assembly for diagnostics
+            var byAssembly = resolver.GroupByAssembly(unresolvedToAssembly);
+            ctx.Log("CrossAssembly", $"Resolved {unresolvedToAssembly.Count} types across {byAssembly.Count} assemblies:");
+            foreach (var (assembly, types) in byAssembly)
+            {
+                ctx.Log("CrossAssembly", $"  - {assembly}: {types.Count} types");
+            }
+        }
 
         // Plan imports and aliases
         var imports = ImportPlanner.PlanImports(ctx, graph, importGraph);

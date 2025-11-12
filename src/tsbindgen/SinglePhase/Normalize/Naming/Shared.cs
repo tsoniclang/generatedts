@@ -16,6 +16,60 @@ internal static class Shared
     /// <summary>
     /// Compute the requested base name for a type (before reservation/numeric suffix).
     /// Handles nested types, generic arity, and reserved word sanitization.
+    /// FIX C: TypeSymbol overload correctly composes nested type names.
+    /// </summary>
+    internal static string ComputeTypeRequestedBase(TypeSymbol type)
+    {
+        // FIX C: For nested types, we need to use the composed name that includes the parent
+        // Example: System.Buffers.ReadOnlySequence`1+Enumerator
+        //   → Extract: ReadOnlySequence`1+Enumerator (without namespace)
+        //   → Transform: ReadOnlySequence_1_Enumerator
+
+        string nameToTransform;
+
+        // Check if nested type by looking for '+' in ClrFullName
+        // CLR uses '+' to separate nested types: Outer+Inner
+        if (type.ClrFullName.Contains('+'))
+        {
+            // Extract type hierarchy without namespace from ClrFullName
+            // ClrFullName: "System.Buffers.ReadOnlySequence`1+Enumerator"
+            // Namespace: "System.Buffers"
+            // Extract: "ReadOnlySequence`1+Enumerator"
+            var fullName = type.ClrFullName;
+            var ns = type.Namespace;
+
+            if (!string.IsNullOrEmpty(ns))
+            {
+                // Remove "Namespace." prefix
+                var nsPrefix = ns + ".";
+                if (fullName.StartsWith(nsPrefix))
+                {
+                    nameToTransform = fullName.Substring(nsPrefix.Length);
+                }
+                else
+                {
+                    // Fallback: use ClrName
+                    nameToTransform = type.ClrName;
+                }
+            }
+            else
+            {
+                // Root namespace - no prefix to remove
+                nameToTransform = fullName;
+            }
+        }
+        else
+        {
+            // Non-nested type: use simple ClrName
+            nameToTransform = type.ClrName;
+        }
+
+        return ComputeTypeRequestedBase(nameToTransform);
+    }
+
+    /// <summary>
+    /// Compute the requested base name for a type from a CLR name string.
+    /// Handles nested types, generic arity, and reserved word sanitization.
     /// </summary>
     internal static string ComputeTypeRequestedBase(string clrName)
     {

@@ -53,7 +53,8 @@ public static class NameReservation
                 }
 
                 // Reserve in Renamer only (don't mutate)
-                var requested = Shared.ComputeTypeRequestedBase(type.ClrName);
+                // FIX C: Pass TypeSymbol to correctly compose nested type names
+                var requested = Shared.ComputeTypeRequestedBase(type);
                 ctx.Renamer.ReserveTypeName(type.StableId, requested, nsScope, "TypeDeclaration", "NameReservation");
                 typesReserved++;
 

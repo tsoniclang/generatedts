@@ -4,6 +4,7 @@ using tsbindgen.SinglePhase.Emit.Printers;
 using tsbindgen.SinglePhase.Model;
 using tsbindgen.SinglePhase.Model.Symbols;
 using tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
+using tsbindgen.SinglePhase.Model.Types;
 using tsbindgen.SinglePhase.Plan;
 using tsbindgen.SinglePhase.Renaming;
 
@@ -110,6 +111,11 @@ public static class InternalIndexEmitter
         var isRoot = nsOrder.Namespace.IsRoot;
         var indent = isRoot ? "" : "    ";
 
+        // PHASE-1 FIX: Collect types for top-level re-export shim (TS2305/TS2315 fix)
+        // Non-root namespaces need top-level re-exports so imports can use named imports
+        // Store TypeSymbol to preserve generic parameter information
+        var topLevelExports = new List<TypeSymbol>();
+
         if (!isRoot)
         {
             // Non-root: Wrap in namespace declaration
@@ -126,7 +132,7 @@ public static class InternalIndexEmitter
             if (hasViews)
             {
                 // Emit class with $instance suffix - PUBLIC TYPES GET export KEYWORD
-                var instanceClass = ClassPrinter.PrintInstance(typeOrder.Type, resolver, ctx);
+                var instanceClass = ClassPrinter.PrintInstance(typeOrder.Type, resolver, ctx, graph);
                 var indentedInstance = Indent(instanceClass, indent);
 
                 // PUBLIC TYPES: Always export (both root and namespaces)
@@ -150,17 +156,26 @@ public static class InternalIndexEmitter
                 // Type alias already includes "export" keyword
                 sb.AppendLine(indentedAlias);
                 sb.AppendLine();
+
+                // PHASE-1 FIX: Collect type for top-level re-export
+                // For views pattern: export the final type alias
+                if (!isRoot)
+                    topLevelExports.Add(typeOrder.Type);
             }
             else
             {
                 // Normal emission (no views) - PUBLIC TYPES GET export KEYWORD
-                var typeDecl = ClassPrinter.Print(typeOrder.Type, resolver, ctx);
+                var typeDecl = ClassPrinter.Print(typeOrder.Type, resolver, ctx, graph);
                 var indented = Indent(typeDecl, indent);
 
                 // PUBLIC TYPES: Always export (both root and namespaces)
                 sb.Append("export ");
                 sb.AppendLine(indented);
                 sb.AppendLine();
+
+                // PHASE-1 FIX: Collect type for top-level re-export
+                if (!isRoot)
+                    topLevelExports.Add(typeOrder.Type);
             }
         }
 
@@ -168,6 +183,34 @@ public static class InternalIndexEmitter
         {
             // Close namespace wrapper
             sb.AppendLine("}");
+            sb.AppendLine();
+
+            // PHASE-1 FIX: Emit top-level re-exports for TS2305/TS2315 fix
+            // This allows: import type { Object_ } from "../../System/internal/index"
+            // Instead of:  import type { System } from "../../System/internal/index"
+            // Once verified working, we can remove namespace wrapper entirely (PHASE-2)
+            if (topLevelExports.Count > 0)
+            {
+                sb.AppendLine("// Top-level re-exports (transitional shim for import compatibility)");
+                sb.AppendLine($"// These allow named imports instead of namespace imports");
+
+                // Sort by type name for stable output
+                var sortedExports = topLevelExports.OrderBy(t => ctx.Renamer.GetFinalTypeName(t)).ToList();
+
+                // Emit as type aliases with generic parameters preserved
+                foreach (var type in sortedExports)
+                {
+                    var typeName = ctx.Renamer.GetFinalTypeName(type);
+
+                    // Build generic parameter list if type is generic
+                    var genericParams = type.GenericParameters.Length > 0
+                        ? "<" + string.Join(", ", type.GenericParameters.Select(gp => gp.Name)) + ">"
+                        : "";
+
+                    // Emit: export type Foo<T, U> = Namespace.Foo<T, U>;
+                    sb.AppendLine($"export type {typeName}{genericParams} = {nsOrder.Namespace.Name}.{typeName}{genericParams};");
+                }
+            }
         }
 
         return sb.ToString();
@@ -218,13 +261,56 @@ public static class InternalIndexEmitter
             sb.Append("    readonly ");
             sb.Append(view.ViewPropertyName);
             sb.Append(": ");
-            sb.Append(Printers.TypeRefPrinter.Print(view.InterfaceReference, resolver, ctx));
+
+            // FIX D: Match view's interface reference to type's actual interface implementation
+            // to get correct type arguments (fixes generic "T" leaks in view interfaces)
+            var matchedInterface = FindMatchingInterface(type, view.InterfaceReference);
+            var interfaceToEmit = matchedInterface ?? view.InterfaceReference;
+
+            sb.Append(Printers.TypeRefPrinter.Print(interfaceToEmit, resolver, ctx));
             sb.AppendLine(";");
         }
 
         sb.Append("}");
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// FIX D: Find the matching interface in type.Interfaces that corresponds to the view's interface reference.
+    /// Returns the matched interface with correct type arguments, or null if not found.
+    /// </summary>
+    private static TypeReference? FindMatchingInterface(TypeSymbol type, TypeReference viewInterfaceRef)
+    {
+        // Get the base name without type arguments for matching
+        var viewBaseName = GetInterfaceBaseName(viewInterfaceRef);
+
+        foreach (var implementedInterface in type.Interfaces)
+        {
+            var implBaseName = GetInterfaceBaseName(implementedInterface);
+
+            // Match by base name (e.g., "IEnumerator_1" matches)
+            if (viewBaseName == implBaseName)
+            {
+                return implementedInterface;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Get the base name of an interface (without type arguments) for matching.
+    /// Examples: "IEnumerator`1" -> "IEnumerator`1", "System.Collections.Generic.IEnumerator`1" -> "IEnumerator`1"
+    /// </summary>
+    private static string GetInterfaceBaseName(TypeReference typeRef)
+    {
+        return typeRef switch
+        {
+            NamedTypeReference named => named.Name,  // Just the name, e.g., "IEnumerator`1"
+            NestedTypeReference nested => nested.NestedName,
+            _ => typeRef.ToString() ?? ""
+        };
     }
 
     private static string EmitIntersectionTypeAlias(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)

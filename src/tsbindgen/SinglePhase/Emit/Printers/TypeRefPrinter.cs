@@ -52,6 +52,12 @@ public static class TypeRefPrinter
             return primitiveType;
         }
 
+        // Handle TypeScript built-in types that we synthesize (not from CLR)
+        if (named.FullName == "unknown")
+        {
+            return "unknown";
+        }
+
         // CRITICAL: Get final TypeScript name from Renamer via resolver
         // This ensures printed names match import statements (single source of truth)
         // For types in graph: uses Renamer final name (may have suffix)
