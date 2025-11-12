@@ -1,306 +1,380 @@
-# Phase 3: Model - Data Structures
+# Phase MODEL: Data Structures
 
-Immutable data structures for entire symbol graph. Type-safe CLR→TypeScript bridge with stable identities, provenance tracking, emit scope control.
+## Overview
 
-All are immutable records with `with` expressions.
+Immutable data structures representing the complete symbol graph. Created during Load phase, transformed during Shape phase.
+
+**Model provides:**
+1. Type-safe representation of CLR types/members
+2. Stable identities for tracking through transformations
+3. Type references (generics, arrays, pointers)
+4. Provenance tracking
+5. Emit scope control
+
+All structures are **immutable records** with structural equality and `with` expressions for transformations.
 
 ---
 
 ## SymbolGraph.cs
 
-### SymbolGraph
-- `Namespaces, SourceAssemblies, NamespaceIndex, TypeIndex`
-- `WithIndices()` - **MUST call after creation** for O(1) lookups
-- `TryGetNamespace(string, out NamespaceSymbol?)`, `TryGetType(string, out TypeSymbol?)`
-- `WithUpdatedType(keyOrStableId, transform)` - Auto-rebuilds indices
+### Record: SymbolGraph
+Root container for entire symbol graph.
 
-### SymbolGraphStatistics
-- `NamespaceCount, TypeCount, MethodCount, PropertyCount, FieldCount, EventCount, TotalMembers`
+**Properties:**
+- `Namespaces: ImmutableArray<NamespaceSymbol>` - All namespaces with types
+- `SourceAssemblies: ImmutableHashSet<string>` - Source assembly paths
+- `NamespaceIndex: ImmutableDictionary<string, NamespaceSymbol>` - O(1) namespace lookup
+- `TypeIndex: ImmutableDictionary<string, TypeSymbol>` - O(1) type lookup by CLR name
+
+**Key Methods:**
+- `WithIndices()` - Build indices for fast lookups (MUST call after creation)
+- `TryGetNamespace(string name)` - Safe namespace lookup
+- `TryGetType(string clrFullName)` - Safe type lookup (handles nested)
+- `WithUpdatedType(string key, Func<TypeSymbol, TypeSymbol> transform)` - Update single type, return new graph
+- `GetStatistics()` - Count namespaces, types, members
+
+### Record: SymbolGraphStatistics
+- `NamespaceCount`, `TypeCount`, `MethodCount`, `PropertyCount`, `FieldCount`, `EventCount`, `TotalMembers`
 
 ---
 
 ## AssemblyKey.cs
 
-### AssemblyKey(Name, PublicKeyToken, Culture, Version)
-- `PublicKeyToken` - Hex or `"null"`, `Culture` - Name or `"neutral"`, `Version` - `"Major.Minor.Build.Revision"`
-- `SimpleName` - Just `Name`
-- `static From(AssemblyName)` - Normalizes
-- `ToString()` - GAC format: `"System.Private.CoreLib, PublicKeyToken=..., Culture=neutral, Version=10.0.0.0"`
+### Record Struct: AssemblyKey
+Normalized assembly identity.
+
+```csharp
+record struct AssemblyKey(string Name, string PublicKeyToken, string Culture, string Version)
+```
+
+**Computed Properties:**
+- `SimpleName` - Name without version/culture/token
+- `IdentityString` - Full identity: `"Name, Version=X, Culture=Y, PublicKeyToken=Z"`
+
+**Methods:**
+- `FromAssemblyName(AssemblyName)` - Convert from System.Reflection type
+- `ToAssemblyName()` - Convert to System.Reflection type
+- `ToSortKey()` - For stable sort order
+
+**Equality:** By all four components. **Hash:** Combines all components.
 
 ---
 
 ## NamespaceSymbol.cs
 
-### NamespaceSymbol
-- `Name` - Empty for root/global
-- `Types` - Not nested namespace types
-- `StableId, ContributingAssemblies`
-- `IsRoot`, `SafeNameOrNull` - Null for root
+### Record: NamespaceSymbol
+Container for types in a namespace.
+
+**Properties:**
+- `Name: string` - Namespace name (e.g., `"System.Collections.Generic"`)
+- `Types: ImmutableArray<TypeSymbol>` - All types (classes, interfaces, enums, etc.)
 
 ---
 
 ## TypeSymbol.cs
 
-### TypeSymbol
+### Record: TypeSymbol
+Represents a CLR type (class, interface, struct, enum, delegate).
 
-**Identity:**
-- `StableId: TypeStableId` - `"AssemblyName:ClrFullName"` (e.g., `"System.Private.CoreLib:System.Collections.Generic.List`1"`)
-- `ClrFullName` - `"List`1"` (backtick)
-- `ClrName` - Without namespace
-- `TsEmitName` - Set in Shape. `"List_1"` (underscore), nested: `"Console$Error"` (dollar)
+**Core Identity:**
+- `StableId: TypeStableId` - Assembly-qualified identity
+- `ClrFullName: string` - CLR name with backtick generics (`List\`1`)
+- `ClrSimpleName: string` - Name without namespace
+- `NamespaceName: string` - Containing namespace
 
-**Classification:**
-- `Namespace, Kind, Accessibility`
+**Type Classification:**
+- `Kind: TypeKind` - Class/Interface/Struct/Enum/Delegate/StaticNamespace
+- `Accessibility: Accessibility` - Public/Internal/Private
 
-**Generics:**
-- `Arity, GenericParameters`
+**TypeScript Naming:**
+- `TsEmitName: string?` - Final TypeScript name (null until Phase 3.5)
+- `TsNamespace: string?` - TypeScript namespace (if different from CLR)
 
-**Hierarchy:**
-- `BaseType` - Null for interfaces/Object/ValueType
-- `Interfaces` - Direct
+**Type System:**
+- `GenericParameters: ImmutableArray<GenericParameterSymbol>` - Type parameters
+- `BaseClass: TypeReference?` - Base type
+- `Interfaces: ImmutableArray<TypeReference>` - Implemented interfaces
 
 **Members:**
-- `Members: TypeMembers, NestedTypes`
+- `Members: TypeMembers` - All members (methods, properties, fields, events, constructors)
+- `NestedTypes: ImmutableArray<TypeSymbol>` - Nested types
 
-**Characteristics:**
-- `IsValueType, IsAbstract, IsSealed, IsStatic, DeclaringType`
+**Emit Control:**
+- `ExplicitViews: ImmutableArray<ExplicitView>` - As_IInterface view properties
 
-**Other:**
-- `Documentation, ExplicitViews`
+**Metadata:**
+- `IsAbstract`, `IsSealed`, `IsStatic`, `IsValueType`, `IsEnum`, `IsDelegate`, `IsNested`
 
-**Withers:**
-- `WithMembers, WithAddedMethods, WithRemovedMethods, WithAddedProperties, WithRemovedProperties, WithAddedFields, WithTsEmitName, WithExplicitViews`
-
-### TypeKind
-Class, Struct, Interface, Enum, Delegate, StaticNamespace
-
-### GenericParameterSymbol
-- `Id` - Declaring type + position
-- `Name, Position`
-- `Constraints` - Resolved by ConstraintCloser (initially empty)
-- `RawConstraintTypes` - Raw CLR (null after resolution)
-- `Variance` - None, Covariant (out), Contravariant (in)
-- `SpecialConstraints` - struct, class, new(), notnull
-
-### Variance
-None, Covariant, Contravariant
-
-### GenericParameterConstraints (Flags)
-None, ReferenceType, ValueType, DefaultConstructor, NotNullable
-
-### TypeMembers
-- `Methods, Properties, Fields, Events, Constructors`
-- `static Empty`
-
-### Accessibility
-Public, Protected, Internal, ProtectedInternal, Private, PrivateProtected
+**Wither Methods:**
+- `WithAddedMethods()`, `WithAddedProperties()`, `WithAddedFields()`, `WithUpdatedMember()`
+- `WithTsEmitName()`, `WithBaseClass()`, `WithInterfaces()`, `WithExplicitViews()`
 
 ---
 
-## MethodSymbol.cs
+## TypeMembers.cs
 
-### MethodSymbol
-- **Identity:** `StableId` (e.g., `"Asm:Type::Method(Params)->Return"`), `ClrName, TsEmitName`
-- **Signature:** `ReturnType` (System.Void for void), `Parameters, GenericParameters, Arity`
-- **Modifiers:** `IsStatic, IsAbstract, IsVirtual, IsOverride, IsSealed, IsNew`
-- **Provenance & Scope:** `Provenance, EmitScope` (**MUST set in Shape**, PG_FIN_001 if Unspecified)
-- **Other:** `Visibility, SourceInterface, Documentation`
-- **Method:** `WithSourceInterface`
+### Record: TypeMembers
+Container for all members of a type.
 
-### ParameterSymbol
-- `Name, Type, IsRef, IsOut, IsParams, HasDefaultValue, DefaultValue`
+**Properties:**
+- `Methods: ImmutableArray<MethodSymbol>`
+- `Properties: ImmutableArray<PropertySymbol>`
+- `Fields: ImmutableArray<FieldSymbol>`
+- `Events: ImmutableArray<EventSymbol>`
+- `Constructors: ImmutableArray<ConstructorSymbol>`
 
-### Visibility
-Public, Protected, Internal, ProtectedInternal, PrivateProtected, Private
-
-### MemberProvenance
-Original, FromInterface, Synthesized, HiddenNew, BaseOverload, DiamondResolved, IndexerNormalized, ExplicitView, OverloadReturnConflict
-
-### EmitScope
-- **Unspecified (0)** - **MUST change**, PG_FIN_001 if reaches emission
-- **ClassSurface** - Main class/interface
-- **StaticSurface** - Static class members
-- **ViewOnly** - Only in As_IInterface views
-- **Omitted** - Unified/skipped
-
-Flow: Load→Unspecified → Shape→ClassSurface/ViewOnly/Omitted/StaticSurface → Emit→validates
+**Methods:**
+- `WithAddedMethods()`, `WithAddedProperties()`, etc.
+- `GetAllMembers()` - Flat list of all members
+- `GetMemberByStableId(MemberStableId)` - Lookup by identity
 
 ---
 
-## PropertySymbol.cs
+## MemberSymbols/
 
-### PropertySymbol
-- `StableId, ClrName` (`"Item"` for indexers), `TsEmitName`
-- `PropertyType, IndexParameters` (empty for normal), `IsIndexer`
-- `HasGetter, HasSetter`
-- `IsStatic, IsVirtual, IsOverride, IsAbstract`
-- `Visibility, Provenance, EmitScope, SourceInterface, Documentation`
-- `WithSourceInterface`
+### Record: MethodSymbol
+
+**Core Identity:**
+- `StableId: MemberStableId` - Assembly-qualified member identity
+- `ClrName: string` - CLR method name
+- `TsEmitName: string?` - TypeScript name (null until Phase 3.5)
+
+**Signature:**
+- `Parameters: ImmutableArray<ParameterSymbol>`
+- `ReturnType: TypeReference`
+- `GenericParameters: ImmutableArray<GenericParameterSymbol>`
+
+**Metadata:**
+- `IsStatic`, `IsVirtual`, `IsOverride`, `IsAbstract`, `IsSealed`, `IsNew`
+- `Visibility: Visibility` - Public/Protected/Internal/Private
+- `Provenance: MemberProvenance` - Original/ExplicitView/BaseOverload/etc.
+- `EmitScope: EmitScope` - ClassSurface/ViewOnly/StaticSurface/Omitted
+
+**Optional:**
+- `SourceInterface: TypeReference?` - For explicit impl ViewOnly members
+- `ExplicitInterfaceImpl: string?` - Qualified name if explicit impl
+
+**Methods:**
+- `WithTsEmitName()`, `WithEmitScope()`, `WithProvenance()`, `WithReturnType()`
+
+### Record: ParameterSymbol
+
+**Properties:**
+- `Name: string`
+- `Type: TypeReference`
+- `IsRef`, `IsOut`, `IsParams`, `IsOptional`
+- `DefaultValue: object?`
+
+### Record: PropertySymbol
+
+**Core:**
+- `StableId`, `ClrName`, `TsEmitName`, `Type`, `Visibility`, `Provenance`, `EmitScope`
+
+**Metadata:**
+- `IsStatic`, `IsReadOnly`, `IsIndexer`, `IsOverride`, `IsNew`
+- `IndexParameters: ImmutableArray<ParameterSymbol>` - For indexers
+- `SourceInterface: TypeReference?`
+
+### Record: FieldSymbol
+
+**Core:**
+- `StableId`, `ClrName`, `TsEmitName`, `Type`, `Visibility`, `Provenance`, `EmitScope`
+
+**Metadata:**
+- `IsStatic`, `IsReadOnly`, `IsConst`
+- `ConstValue: object?`
+
+### Record: EventSymbol
+
+**Core:**
+- `StableId`, `ClrName`, `TsEmitName`, `Type` (handler delegate type), `Visibility`, `Provenance`, `EmitScope`
+
+**Metadata:**
+- `IsStatic`, `IsOverride`, `IsNew`
+- `SourceInterface: TypeReference?`
+- `ExplicitInterfaceImpl: string?`
+
+### Record: ConstructorSymbol
+
+**Core:**
+- `StableId`, `ClrName`, `TsEmitName` (always null - not emitted in d.ts)
+- `Parameters: ImmutableArray<ParameterSymbol>`
+- `Visibility`, `Provenance`, `EmitScope`
+
+**Metadata:**
+- `IsStatic` (static constructor vs instance)
 
 ---
 
-## FieldSymbol.cs
+## TypeReference Hierarchy
 
-### FieldSymbol
-- `StableId, ClrName, TsEmitName, FieldType`
-- `IsStatic, IsReadOnly, IsConst, ConstValue`
-- `Visibility, Provenance, EmitScope, Documentation`
+### Abstract Record: TypeReference
+Base for all type references.
 
----
+**Kind: TypeReferenceKind** - Named/GenericParameter/Array/Pointer/ByRef/Placeholder
 
-## EventSymbol.cs
+### Record: NamedTypeReference
+Regular types (classes, interfaces, structs, enums).
 
-### EventSymbol
-- `StableId, ClrName, TsEmitName, EventHandlerType`
-- `IsStatic, IsVirtual, IsOverride`
-- `Visibility, Provenance, EmitScope, SourceInterface, Documentation`
-- `WithSourceInterface`
+**Properties:**
+- `AssemblyName: string`
+- `Namespace: string`
+- `Name: string` - Simple name
+- `TypeArguments: ImmutableArray<TypeReference>` - For generics
+- `InterfaceStableId: string?` - Precomputed "{assembly}:{fullName}" for interfaces
 
----
+**Methods:**
+- `GetOpenGenericForm()` - Remove type arguments, keep arity
+- `IsGeneric` - Has type arguments
+- `Arity` - Type argument count
 
-## ConstructorSymbol.cs
+### Record: GenericParameterReference
+Reference to type parameter (`T` in `List<T>`).
 
-### ConstructorSymbol
-- `StableId, Parameters, IsStatic, Visibility, Documentation`
-- **Note:** No Provenance/EmitScope (always emitted)
+**Properties:**
+- `Id: GenericParameterId` - Identifies parameter
+- `Name: string` - Parameter name
 
----
+**GenericParameterId:** `DeclaringTypeClrFullName + Position`
 
-## TypeReference.cs
+### Record: ArrayTypeReference
+Array types.
 
-### TypeReference
-`abstract record TypeReference { TypeReferenceKind Kind }`
+**Properties:**
+- `ElementType: TypeReference`
+- `Rank: int` - 1 for T[], 2 for T[,], etc.
 
-Recursive: Named types, Generic parameters, Constructed generics, Arrays, Pointers, ByRef, Nested types
+### Record: PointerTypeReference
+Pointer types (unsafe).
 
-### TypeReferenceKind
-Named, GenericParameter, Array, Pointer, ByRef, Nested, Placeholder
+**Properties:**
+- `PointeeType: TypeReference`
+- `PointerDepth: int` - 1 for T*, 2 for T**, etc.
 
-### NamedTypeReference
-- `Kind` → Named
-- `AssemblyName, FullName, Namespace, Name, Arity`
-- `TypeArguments: IReadOnlyList<TypeReference>` - Empty for open generics
-- `IsValueType`
-- `InterfaceStableId: string?` - `"AssemblyName:FullName"` for interfaces, null otherwise
+### Record: ByRefTypeReference
+Ref/out parameters.
 
-### GenericParameterReference
-- `Kind` → GenericParameter
-- `Id, Name, Position, Constraints`
-
-### ArrayTypeReference
-- `Kind` → Array
-- `ElementType: TypeReference, Rank` - 1 for T[], 2 for T[,]
-
-### PointerTypeReference
-- `Kind` → Pointer
-- `PointeeType: TypeReference, Depth` - 1 for T*, 2 for T**
-
-### ByRefTypeReference
-- `Kind` → ByRef
+**Properties:**
 - `ReferencedType: TypeReference`
 
-### NestedTypeReference
-- `Kind` → Nested
-- `DeclaringType: TypeReference, NestedName, FullReference: NamedTypeReference`
+### Record: PlaceholderTypeReference
+Cycle breaker for recursive constraints.
 
-### PlaceholderTypeReference
-- `Kind` → Placeholder, `DebugName`
-- **Never in final output** - emits `any` with diagnostic
+**Properties:** None (sentinel value)
 
 ---
 
-## GenericParameterId.cs
+## Enums
 
-### GenericParameterId
-- `DeclaringTypeName, Position, IsMethodParameter`
-- `ToString()` - `"DeclaringTypeName#Position"` (+ `"M"` if method)
+### Enum: TypeKind
+`Class`, `Interface`, `Struct`, `Enum`, `Delegate`, `StaticNamespace` (abstract+sealed class)
 
----
+### Enum: Accessibility
+`Public`, `Internal`, `Protected`, `Private`, `ProtectedOrInternal`, `ProtectedAndInternal`
 
-## StableId.cs
+### Enum: Visibility
+`Public`, `Protected`, `Internal`, `Private`, `ProtectedInternal`, `PrivateProtected`
 
-### StableId
-`abstract record StableId { string AssemblyName }`
+### Enum: MemberProvenance
+Tracks member origin:
+- `Original` - From CLR reflection
+- `ExplicitView` - Explicit interface impl (synthesized)
+- `BaseOverload` - Base class overload (synthesized)
+- `IndexerNormalized` - Indexer converted to methods
+- `HiddenNew` - C# 'new' keyword hiding
 
-### TypeStableId
-- `AssemblyName, ClrFullName`
-- ToString: `"AssemblyName:ClrFullName"` (e.g., `"System.Private.CoreLib:System.Collections.Generic.List`1"`)
+### Enum: EmitScope
+Placement control:
+- `ClassSurface` - Direct on class/interface
+- `StaticSurface` - Static section
+- `ViewOnly` - As_IInterface view property
+- `Omitted` - Not emitted (tracked in metadata)
 
-### MemberStableId
-- `AssemblyName, DeclaringClrFullName, MemberName, CanonicalSignature`
-- `MetadataToken: int?` - **NOT in equality**
-- ToString: `"AssemblyName:DeclaringClrFullName::MemberName[CanonicalSignature]"`
-- Equality: **Excludes MetadataToken**
+### Enum: Variance
+For generic parameters:
+`None`, `Covariant` (out), `Contravariant` (in)
 
----
+### Enum: GenericParameterConstraints (Flags)
+- `None` - No special constraints
+- `ReferenceType` - class constraint
+- `ValueType` - struct constraint
+- `DefaultConstructor` - new() constraint
 
-## Key Concepts
-
-### StableId Formats
-
-**TypeStableId:** `"AssemblyName:ClrFullName"`
-- Example: `"System.Private.CoreLib:System.String"`
-
-**MemberStableId:** `"AssemblyName:DeclaringType::MemberName[Signature]"`
-- Example: `"System.Private.CoreLib:System.String::Substring(System.Int32,System.Int32)->System.String"`
-- Semantic equality (excludes MetadataToken)
-
-### Canonical Signatures
-
-**Methods:** `"(ParamType1,ParamType2,...)->ReturnType"`
-**Properties:** `"(IndexParam1,...)->PropertyType"` or `"()->PropertyType"`
-**Fields/Events:** `"->FieldType"` or empty
-
-### EmitScope Values
-
-1. **Unspecified (0)** - Default, MUST change (PG_FIN_001)
-2. **ClassSurface** - Main class/interface
-3. **StaticSurface** - Static class members
-4. **ViewOnly** - As_IInterface views only
-5. **Omitted** - Unified/skipped
-
-### MemberProvenance
-
-1. Original
-2. FromInterface
-3. Synthesized
-4. HiddenNew
-5. BaseOverload
-6. DiamondResolved
-7. IndexerNormalized
-8. ExplicitView
-9. OverloadReturnConflict
+### Enum: TypeReferenceKind
+`Named`, `GenericParameter`, `Array`, `Pointer`, `ByRef`, `Placeholder`
 
 ---
 
-## Pipeline Usage
+## GenericParameterSymbol.cs
 
-### Load Phase
-1. System.Type → TypeSymbol
-2. System.Type → TypeReference
-3. StableId created
-4. Members: Provenance = Original
-5. EmitScope = Unspecified
-6. SymbolGraph indexed
+### Record: GenericParameterSymbol
+Represents a generic type parameter.
 
-### Shape Phase
-1. Interface closure: Provenance = FromInterface
-2. View planning: ExplicitViews
-3. Name application: TsEmitName
-4. Constraint resolution
-5. Emit scope assignment: all non-Unspecified
-6. Updates via WithUpdatedType()
+**Properties:**
+- `Name: string` - Parameter name (e.g., "T")
+- `Position: int` - 0-based position
+- `Variance: Variance` - None/Covariant/Contravariant
+- `Constraints: ImmutableArray<TypeReference>` - Type constraints
+- `SpecialConstraints: GenericParameterConstraints` - Flags (class/struct/new)
 
-### Emit Phase
-1. PhaseGate: validates EmitScope != Unspecified
-2. TypeScript emit: reads TsEmitName, EmitScope
-3. Metadata emit: uses StableId
-4. Bindings emit: TsEmitName → StableId
+---
+
+## StableId Types
+
+### Record Struct: TypeStableId
+Assembly-qualified type identity.
+
+```csharp
+record struct TypeStableId(string AssemblyName, string ClrFullName)
+```
+
+**Format:** `"AssemblyName:ClrFullName"`
+- Example: `"System.Private.CoreLib:System.Collections.Generic.List\`1"`
+
+### Record Struct: MemberStableId
+Assembly-qualified member identity.
+
+```csharp
+record struct MemberStableId(
+    string AssemblyName,
+    string DeclaringTypeClrFullName,
+    string MemberName,
+    string CanonicalSignature,
+    int MetadataToken)
+```
+
+**Format:** `"AssemblyName:DeclaringType::MemberName(Signature):ReturnType"`
+- Example: `"System.Private.CoreLib:System.Decimal::ToString(IFormatProvider):String"`
+
+**Equality:** By assembly, declaring type, member name, and signature. **Metadata token excluded from equality.**
+
+---
+
+## ExplicitView.cs
+
+### Record: ExplicitView
+Represents an As_IInterface view property.
+
+**Properties:**
+- `InterfaceReference: TypeReference` - Interface being viewed
+- `ViewPropertyName: string` - TypeScript property name (e.g., `"As_IConvertible"`)
+- `ViewMembers: ImmutableArray<MemberSymbol>` - Members in this view
 
 ---
 
 ## Summary
 
-Provides: Immutable pure data structures, stable identities, type-safe CLR representation, provenance tracking, emit scope control, efficient lookups, pure transformations.
+**Model architecture:**
+- **Root:** SymbolGraph contains Namespaces
+- **Hierarchy:** Graph → Namespaces → Types → Members
+- **Identity:** StableIds provide stable cross-phase identity
+- **Type System:** TypeReference hierarchy captures full CLR type system
+- **Emit Control:** EmitScope + Provenance track member placement and origin
+- **Immutability:** All pure functional transformations via `with` expressions
 
-Design: Immutability, structural equality, functional transformations, type safety, performance.
+**Key principles:**
+- Structural equality for all records
+- Immutable collections (ImmutableArray, ImmutableHashSet, ImmutableDictionary)
+- No null references except for optional/late-bound properties (TsEmitName, SourceInterface)
+- Fast lookups via indices (NamespaceIndex, TypeIndex)
+- Generic-aware type references (NamedTypeReference.TypeArguments)
