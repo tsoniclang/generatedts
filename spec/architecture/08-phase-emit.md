@@ -1744,6 +1744,9 @@ private static string PrintNamed(NamedTypeReference named, TypeNameResolver reso
 var primitiveType = TypeNameResolver.TryMapPrimitive(named.FullName);
 if (primitiveType != null) return primitiveType;
 
+// 1.5. Handle TypeScript built-in synthesized types
+if (named.FullName == "unknown") return "unknown";
+
 // 2. Get final name from resolver (handles both graph types and external types)
 var baseName = resolver.ResolveTypeName(named);
 

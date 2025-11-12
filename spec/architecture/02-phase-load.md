@@ -1585,7 +1585,17 @@ Creates `NamedTypeReference` for class, struct, interface, enum, or delegate.
 
 **Step 1: Extract basic metadata**
 - `assemblyName = type.Assembly.GetName().Name ?? "Unknown"`
-- `fullName = type.FullName ?? type.Name`
+- **CRITICAL - Open generic form for constructed generics:**
+  ```csharp
+  var fullName = type.IsGenericType && type.IsConstructedGenericType
+      ? type.GetGenericTypeDefinition().FullName ?? type.Name
+      : type.FullName ?? type.Name;
+  ```
+  - For constructed generics (e.g., `IEquatable<StandardFormat>`), use open generic form
+  - Open form: `"System.IEquatable\`1"` (clean, backtick arity only)
+  - Constructed form: `"System.IEquatable\`1[[System.Buffers.StandardFormat, ...]]"` (has assembly-qualified type args)
+  - **Why needed:** Constructed form breaks StableId lookup and causes import garbage bugs
+  - **Related:** ImportGraph.GetOpenGenericClrKey() uses same logic to prevent assembly-qualified type arg pollution
 - `namespaceName = type.Namespace ?? ""`
 - `name = type.Name`
 
