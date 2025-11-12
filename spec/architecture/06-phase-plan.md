@@ -189,18 +189,29 @@ public static ImportGraphData Build(BuildContext ctx, SymbolGraph graph)
 
 1. Create empty `ImportGraphData` structure with:
    - `NamespaceDependencies` - maps namespace → set of dependent namespaces
-   - `NamespaceTypeIndex` - maps namespace → set of type full names
+   - `NamespaceTypeIndex` - maps namespace → set of type full names (set-based, legacy)
+   - `ClrFullNameToNamespace` - **NEW:** fast O(1) lookup: CLR name → namespace
    - `CrossNamespaceReferences` - list of all foreign type references
+   - `UnresolvedClrKeys` - **NEW:** types not found in graph (Fix E infrastructure)
+   - `UnresolvedToAssembly` - **NEW:** unresolved type → assembly mapping (Fix E)
 
 2. **Build namespace type index first**:
    - Call `BuildNamespaceTypeIndex()` to catalog all public types
-   - Creates reverse lookup: CLR full name → namespace
+   - Creates TWO lookups:
+     - Set-based: `NamespaceTypeIndex[ns] = {type1, type2, ...}` (legacy)
+     - Map-based: `ClrFullNameToNamespace["Type`1"] = "Namespace"` (fast lookup)
 
 3. **Analyze dependencies**:
    - For each namespace, call `AnalyzeNamespaceDependencies()`
    - Recursively scans all type references in signatures
+   - **NEW:** Tracks unresolved types in `UnresolvedClrKeys`
 
 4. Return complete `ImportGraphData`
+
+**Key improvements in jumanji7:**
+- Fast O(1) namespace lookup via `ClrFullNameToNamespace` map
+- Unresolved type tracking for cross-assembly resolution (Fix E Phase 1)
+- Constructor parameter analysis (missing constructor imports fix)
 
 #### Method: BuildNamespaceTypeIndex()
 
@@ -215,13 +226,28 @@ private static void BuildNamespaceTypeIndex(
 
 1. For each namespace in graph:
    - Get all public types (`Accessibility.Public`)
-   - Extract CLR full names
-   - Add to `graphData.NamespaceTypeIndex[ns.Name]`
+   - Extract CLR full names (in backtick form, e.g., `"IEnumerable\`1"`)
+   - Add to **both** indexes:
+     - `graphData.NamespaceTypeIndex[ns.Name].Add(type.ClrFullName)` (set-based, legacy)
+     - `graphData.ClrFullNameToNamespace[type.ClrFullName] = ns.Name` (map-based, **NEW**)
 
 **Why only public types:**
 - Internal types won't be emitted, so shouldn't be in import index
 - Prevents imports of non-existent declarations
 - Enforces access boundaries at namespace level
+
+**Dual indexing (jumanji7):**
+- **Set-based** (`NamespaceTypeIndex`): Legacy, used for set operations
+- **Map-based** (`ClrFullNameToNamespace`): **NEW**, enables O(1) lookups in `FindNamespaceForType()`
+  - Before: O(n) iteration through all namespaces
+  - After: O(1) dictionary lookup
+  - Critical for BCL generation with 4,000+ types
+
+**CLR full name format:**
+- **Generic types**: Use backtick arity notation (e.g., `"IEnumerable\`1"`, `"Dictionary\`2"`)
+- **Non-generic types**: Simple full name (e.g., `"System.String"`, `"System.Exception"`)
+- **Nested types**: Use `+` separator (e.g., `"ImmutableArray\`1+Builder"`)
+- This matches `TypeSymbol.ClrFullName` and `NamedTypeReference.FullName` format
 
 #### Method: AnalyzeNamespaceDependencies()
 
@@ -284,17 +310,24 @@ private static void AnalyzeMemberDependencies(
    - Generic constraints: For method-level type parameters
      - Reference kind: `ReferenceKind.GenericConstraint`
 
-2. **Properties:**
+2. **Constructors** (**NEW in jumanji7**):
+   - **Parameters**: `CollectTypeReferences(param.Type)` for each parameter
+     - Reference kind: `ReferenceKind.ConstructorParameter` (**NEW enum value**)
+   - **Why added**: Major bug fix - constructors create objects, parameter types must be imported
+   - **Impact**: -157 errors in BCL validation (missing constructor parameter imports)
+   - **Example**: `new List<string>(IEnumerable<string> collection)` needs both `List\`1` and `IEnumerable\`1` imports
+
+3. **Properties:**
    - Property type: `CollectTypeReferences(property.PropertyType)`
      - Reference kind: `ReferenceKind.PropertyType`
    - Index parameters: For indexers, scan parameter types
      - Adds to dependencies but no detailed reference (indexers omitted from output)
 
-3. **Fields:**
+4. **Fields:**
    - Field type: `CollectTypeReferences(field.FieldType)`
      - Reference kind: `ReferenceKind.FieldType`
 
-4. **Events:**
+5. **Events:**
    - Event handler type: `CollectTypeReferences(event.EventHandlerType)`
      - Reference kind: `ReferenceKind.EventType`
 
@@ -315,26 +348,52 @@ This is the **critical deep scanning function** that finds ALL foreign types.
 **Algorithm by type reference kind:**
 
 1. **NamedTypeReference:**
-   - Call `FindNamespaceForType()` to locate namespace
-   - Add `(named.FullName, namespace)` to collected set
-   - **Recurse into type arguments:** For `List<Dictionary<K, V>>`, finds List, Dictionary, K, V
+   - Find namespace: `ns = FindNamespaceForType(graph, graphData, named)`
+   - **Get open generic CLR key**: `clrKey = GetOpenGenericClrKey(named)` (**NEW**)
+   - **INVARIANT GUARD** (jumanji7 - prevents import garbage regression):
+     ```csharp
+     if (clrKey.Contains('[') || clrKey.Contains(','))
+         ERROR: "INVARIANT VIOLATION: assembly-qualified key detected"
+     ```
+     - Detects if `GetOpenGenericClrKey()` failed to strip assembly info
+     - Example bad key: `"IEnumerable\`1[[System.String, mscorlib, ...]]"`
+     - Example good key: `"System.Collections.Generic.IEnumerable\`1"`
+   - Add to collected set: `collected.Add((clrKey, ns))`
+   - **Track unresolved types** (Fix E infrastructure):
+     ```csharp
+     if (ns == null && !string.IsNullOrEmpty(clrKey))
+         graphData.UnresolvedClrKeys.Add(clrKey);
+     ```
+     - Captures types not in current graph (external assemblies)
+     - Later resolved by `DeclaringAssemblyResolver` (Fix E Phase 1)
+   - **Recurse into type arguments:** For `List<Dictionary<K, V>>`, recursively processes Dictionary, K, V
    - Example: `Dictionary<string, List<int>>` finds both Dictionary and List
 
 2. **NestedTypeReference:**
-   - Use full reference name (`Outer.Inner`)
-   - Call `FindNamespaceForType()` with full nested name
-   - Recurse into nested type's type arguments
+   - Find namespace: `nestedNs = FindNamespaceForType(graph, graphData, nested)`
+   - **Get open generic CLR key**: `nestedClrKey = GetOpenGenericClrKey(nested.FullReference)` (**NEW**)
+   - **INVARIANT GUARD**: Same check as NamedTypeReference
+   - Add to collected set: `collected.Add((nestedClrKey, nestedNs))`
+   - **Track unresolved nested types** (Fix E):
+     ```csharp
+     if (nestedNs == null && !string.IsNullOrEmpty(nestedClrKey))
+         graphData.UnresolvedClrKeys.Add(nestedClrKey);
+     ```
+   - **Recurse into type arguments** of nested type
+   - Example: `ImmutableArray<T>.Builder` processes both outer and nested type
 
 3. **ArrayTypeReference:**
-   - Recurse into element type: `CollectTypeReferences(arr.ElementType)`
+   - Recurse into element type: `CollectTypeReferences(ctx, arr.ElementType, ...)`
    - Example: `List<int>[]` finds List
 
 4. **PointerTypeReference / ByRefTypeReference:**
    - Recurse into pointee/referenced type
    - Example: `ref List<T>` finds List
+   - TypeScript doesn't have pointers/refs, so we erase to underlying type
 
 5. **GenericParameterReference:**
    - Skip - generic parameters are declared locally, don't need imports
+   - Example: `T` in `class List<T>` doesn't add to collected set
 
 **Why this is recursive:**
 - Generic type arguments can be complex types: `Dictionary<string, List<MyClass>>`
@@ -351,21 +410,150 @@ private static string? FindNamespaceForType(
     TypeReference typeRef)
 ```
 
-**Namespace lookup algorithm:**
+**Namespace lookup algorithm (jumanji7 - optimized):**
 
-1. Extract full CLR name from TypeReference
-2. Iterate through `graphData.NamespaceTypeIndex`
-3. Check if namespace's type set contains the full name
-4. Return namespace name if found, null if external
+1. Get normalized CLR lookup key: `clrKey = GetClrLookupKey(typeRef)`
+   - Returns null for generic parameters, placeholders (no import needed)
+   - Returns open generic form for constructed generics (e.g., `"IEnumerable\`1"` not `"IEnumerable\`1[[System.String]]"`)
+
+2. **Fast O(1) dictionary lookup** (NEW):
+   ```csharp
+   if (graphData.ClrFullNameToNamespace.TryGetValue(clrKey, out var ns))
+       return ns;
+   ```
+   - Before: O(n) iteration through all namespaces
+   - After: O(1) hash table lookup
+   - Critical for BCL with 4,000+ types
+
+3. Return null if not found (external type)
 
 **Why null is valid:**
 - Type might be from external assembly not in our graph
 - Could be built-in TypeScript type (string, number)
+- Could be type-forwarded or from different assembly version
 - ImportPlanner will handle missing types appropriately
+
+**Old algorithm (pre-jumanji7):**
+1. Extract full CLR name from TypeReference
+2. **Iterate through `graphData.NamespaceTypeIndex`** (O(n))
+3. Check if namespace's type set contains the full name
+4. Return namespace name if found
+
+**Performance improvement:**
+- Old: O(n × m) where n = namespaces, m = lookups per namespace
+- New: O(1) per lookup via hash table
+
+#### Method: GetClrLookupKey() (**NEW in jumanji7**)
+
+```csharp
+private static string? GetClrLookupKey(TypeReference typeRef)
+```
+
+**Purpose:** Get normalized CLR lookup key for any TypeReference kind. Always returns the OPEN generic definition name (not constructed).
+
+**Algorithm by TypeReference kind:**
+
+```csharp
+NamedTypeReference named => GetOpenGenericClrKey(named)
+NestedTypeReference nested => GetClrLookupKey(nested.FullReference)  // Recurse to NamedTypeReference
+ArrayTypeReference arr => GetClrLookupKey(arr.ElementType)           // Recurse to element type
+PointerTypeReference ptr => GetClrLookupKey(ptr.PointeeType)         // Recurse to pointee type
+ByRefTypeReference byref => GetClrLookupKey(byref.ReferencedType)   // Recurse to referenced type
+GenericParameterReference => null                                    // Type parameters are local
+PlaceholderTypeReference => null                                     // Placeholders are unknown
+_ => null                                                            // Unknown reference types
+```
+
+**Why this is needed:**
+- TypeReference.FullName may be constructed with type arguments: `"IEnumerable\`1[[System.String, mscorlib...]]"`
+- Index uses open generic keys: `"System.Collections.Generic.IEnumerable\`1"`
+- Lookup would fail without normalization
+
+**Examples:**
+- `IEnumerable<string>` → `"System.Collections.Generic.IEnumerable\`1"` (strips `[[System.String]]`)
+- `List<Dictionary<K,V>>` → `"System.Collections.Generic.List\`1"` (strips all type args)
+- `Exception` → `"System.Exception"` (non-generic, pass through)
+- `T` (GenericParameterReference) → `null` (no import needed)
+- `int*` (PointerTypeReference) → `"System.Int32"` (recurses to pointee)
+
+#### Method: GetOpenGenericClrKey() (**NEW in jumanji7**)
+
+```csharp
+private static string GetOpenGenericClrKey(NamedTypeReference named)
+```
+
+**Purpose:** Construct open generic CLR key from NamedTypeReference. This is the CRITICAL method that fixed the import garbage bug (commit 70d21db).
+
+**Algorithm:**
+
+1. **Extract components:**
+   ```csharp
+   var ns = named.Namespace;       // "System.Collections.Generic"
+   var name = named.Name;          // "IEnumerable`1" or potentially "IEnumerable"
+   var arity = named.Arity;        // 1 (0 for non-generic)
+   ```
+
+2. **Validate inputs (defensive):**
+   ```csharp
+   if (string.IsNullOrWhiteSpace(ns) || string.IsNullOrWhiteSpace(name))
+       return named.FullName;  // Fallback to FullName if namespace/name empty
+   ```
+
+3. **Strip assembly qualification from name (defensive):**
+   ```csharp
+   if (name.Contains(','))
+       name = name.Substring(0, name.IndexOf(',')).Trim();
+   ```
+   - Prevents garbage like `"IEnumerable, mscorlib, Version=..."`
+   - Defensive guard against malformed TypeReferences
+
+4. **Non-generic path:**
+   ```csharp
+   if (arity == 0)
+       return $"{ns}.{name}";  // e.g., "System.Exception"
+   ```
+
+5. **Generic path:**
+   ```csharp
+   // Strip backtick from name if present
+   var nameWithoutArity = name.Contains('`')
+       ? name.Substring(0, name.IndexOf('`'))
+       : name;
+
+   // Reconstruct with backtick arity
+   return $"{ns}.{nameWithoutArity}`{arity}";
+   ```
+   - Handles both `"IEnumerable\`1"` and `"IEnumerable"` inputs
+   - Always produces consistent `"IEnumerable\`1"` output
+
+**Examples:**
+
+| Input (NamedTypeReference) | Namespace | Name | Arity | Output CLR Key |
+|---|---|---|---|---|
+| `IEnumerable<T>` | `System.Collections.Generic` | `IEnumerable\`1` | 1 | `System.Collections.Generic.IEnumerable\`1` |
+| `List<T>` | `System.Collections.Generic` | `List` | 1 | `System.Collections.Generic.List\`1` |
+| `Dictionary<K,V>` | `System.Collections.Generic` | `Dictionary\`2` | 2 | `System.Collections.Generic.Dictionary\`2` |
+| `Exception` | `System` | `Exception` | 0 | `System.Exception` |
+
+**Why this fixed import garbage bug:**
+
+**Before (broken):**
+- Used `NamedTypeReference.FullName` directly: `"IEnumerable\`1[[System.String, mscorlib, Version=4.0.0.0, ...]]"`
+- Lookup failed (not in index)
+- No import generated
+- TS2304 error
+
+**After (fixed):**
+- Uses `GetOpenGenericClrKey()`: `"System.Collections.Generic.IEnumerable\`1"`
+- Matches index key exactly
+- Import generated correctly
+- No error
+
+**Commit reference:** 70d21db ("fix: Use open generic CLR keys in import planning, eliminating garbage imports")
 
 #### Method: GetTypeFullName()
 
-Helper to extract CLR full name from various TypeReference kinds.
+Helper to extract CLR full name from various TypeReference kinds. Used for logging and diagnostics, not for lookups.
 
 ### Class: ImportGraphData
 
@@ -376,16 +564,40 @@ Result of import graph analysis.
 1. **NamespaceDependencies**: `Dictionary<string, HashSet<string>>`
    - Maps namespace name → set of namespace names it depends on
    - Example: `"System.Collections.Generic" → { "System", "System.Collections" }`
+   - Used by ImportPlanner to generate import statements
 
 2. **NamespaceTypeIndex**: `Dictionary<string, HashSet<string>>`
    - Maps namespace name → set of CLR full names of public types in that namespace
-   - Used for reverse lookup: "given a type name, which namespace is it in?"
-   - Example: `"System.Collections.Generic" → { "List`1", "Dictionary`2", ... }`
+   - **Legacy set-based index** (kept for backwards compatibility)
+   - Example: `"System.Collections.Generic" → { "List\`1", "Dictionary\`2", ... }`
+   - Used for set operations and existence checks
 
-3. **CrossNamespaceReferences**: `List<CrossNamespaceReference>`
+3. **ClrFullNameToNamespace**: `Dictionary<string, string>` (**NEW in jumanji7**)
+   - **Fast O(1) lookup map**: CLR full name (backtick form) → owning namespace
+   - Example: `"System.Collections.Generic.IEnumerable\`1" → "System.Collections.Generic"`
+   - Built once during `BuildNamespaceTypeIndex()` for O(1) lookups
+   - **Critical performance improvement**: Replaces O(n) iteration with O(1) hash lookup
+   - Used by `FindNamespaceForType()` for all namespace resolution
+
+4. **CrossNamespaceReferences**: `List<CrossNamespaceReference>`
    - Detailed record of every foreign type reference
    - Used by ImportPlanner to know which specific types to import
    - Includes context: where reference occurs, what kind of reference
+   - Example: `(SourceNs: "System.Linq", SourceType: "Enumerable", TargetNs: "System.Collections.Generic", TargetType: "IEnumerable\`1", Kind: MethodReturn)`
+
+5. **UnresolvedClrKeys**: `HashSet<string>` (**NEW in jumanji7 - Fix E infrastructure**)
+   - Set of CLR keys that couldn't be resolved to a namespace in the current graph
+   - Example: `{ "System.Runtime.CompilerServices.Unsafe", "System.Reflection.Metadata.MetadataReader" }`
+   - These are candidates for cross-assembly resolution
+   - Populated during `CollectTypeReferences()` when `FindNamespaceForType()` returns null
+   - Used by `DeclaringAssemblyResolver` to find declaring assemblies via reflection
+
+6. **UnresolvedToAssembly**: `Dictionary<string, string>` (**NEW in jumanji7 - Fix E Phase 1**)
+   - Maps unresolved CLR key → declaring assembly name (resolved via MetadataLoadContext)
+   - Example: `{ "System.Runtime.CompilerServices.Unsafe" → "System.Runtime.CompilerServices.Unsafe" }`
+   - Populated by `DeclaringAssemblyResolver.ResolveBatch()` after import graph analysis
+   - Enables cross-assembly type resolution for external dependencies
+   - Used in Fix E Phase 2 (planned) for cross-assembly import generation
 
 ### Record: CrossNamespaceReference
 
@@ -408,6 +620,10 @@ Categorizes where in the type system a reference occurs:
 - `GenericConstraint` - Constraint: `class Foo<T> where T : Bar`
 - `MethodReturn` - Return type: `Bar GetBar()`
 - `MethodParameter` - Parameter: `void SetBar(Bar b)`
+- `ConstructorParameter` - **NEW in jumanji7**: Constructor parameter: `new Foo(Bar b)`
+  - **Why added**: Major bug fix - constructors were not analyzed for import dependencies
+  - **Impact**: -157 errors in BCL validation
+  - **Example**: `new List<T>(IEnumerable<T> collection)` needs `IEnumerable\`1` import
 - `PropertyType` - Property: `Bar MyBar { get; }`
 - `FieldType` - Field: `Bar myBar;`
 - `EventType` - Event: `event BarHandler OnBar;`
