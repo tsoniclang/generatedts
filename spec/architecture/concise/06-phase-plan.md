@@ -1,512 +1,381 @@
-# Plan Phase - Concise
+# Phase PLAN: Import Planning and Cross-Assembly Resolution
 
 ## Overview
 
-Final preparation before emission:
-- Build cross-namespace dependency graph
-- Plan imports/exports with alias resolution
-- Compute TypeScript module paths
-- Topological emission order
-- Audit constraint losses
-- Validate 50+ PhaseGate rules
+Analyzes dependencies, plans imports/exports, determines emission order, audits constraints, validates via PhaseGate.
 
-**Input:** Shaped `SymbolGraph`
-**Output:** `ImportPlan`, `EmitOrder`, validation reports
-
----
-
-## ImportPlanner.cs
-
-Plans TypeScript import/export statements with name collision resolution.
-
-### Key Methods
-
-**PlanImports()** - Creates `ImportPlan` with three dictionaries:
-- `NamespaceImports` - namespace → import statements
-- `NamespaceExports` - namespace → export statements
-- `ImportAliases` - namespace → (name → alias)
-
-**PlanNamespaceImports()** - Foreign type detection:
-1. Lookup dependencies in `ImportGraphData.NamespaceDependencies`
-2. Filter `CrossNamespaceReferences` for this namespace
-3. Get relative path via `PathPlanner.GetSpecifier()`
-4. Check collisions, assign aliases via `DetermineAlias()`
-5. Build `ImportStatement(Path, Target, TypeImports)`
-
-**Alias strategy:** Assign when name collision or policy requires. Format: `{TypeName}_{TargetNamespaceShort}`
-
-**PlanNamespaceExports()** - Catalog public types:
-- Filter to `Accessibility.Public`
-- Map TypeKind → ExportKind (Class/Interface/Enum/Type)
-- Create `ExportStatement(Name, Kind)`
-
-### Records
-
-```csharp
-ImportStatement(ImportPath, TargetNamespace, List<TypeImport>)
-TypeImport(TypeName, Alias?)
-ExportStatement(ExportName, ExportKind)
-```
+**Input**: `SymbolGraph` (fully named)
+**Output**: `EmissionPlan` (SymbolGraph + ImportPlan + EmitOrder)
+**Sub-phases**: ImportGraph → ImportPlanner → EmitOrderPlanner → OverloadUnifier → InterfaceConstraintAuditor → PhaseGate
 
 ---
 
 ## ImportGraph.cs
 
-Builds cross-namespace dependency graph via signature analysis.
+### Purpose
+Builds dependency graph showing which namespaces use types from other namespaces.
 
-### Build() Algorithm
+### Method: Build(BuildContext, SymbolGraph) → ImportGraph
 
-1. Create empty `ImportGraphData`:
-   - `NamespaceDependencies` - namespace → dependent namespaces
-   - `NamespaceTypeIndex` - namespace → public type names
-   - `CrossNamespaceReferences` - detailed reference list
+**Algorithm:**
+1. For each namespace:
+   - For each type:
+     - Scan base class, interfaces, members (return types, parameters)
+     - Extract foreign type references
+     - Record: `(currentNamespace, foreignNamespace, foreignType)`
+2. Build graph:
+   - Nodes: namespaces
+   - Edges: dependencies
+3. Return `ImportGraph` with dependency map
 
-2. Build reverse index: `BuildNamespaceTypeIndex()`
-   - Public types only (internal won't be emitted)
+### Method: GetOpenGenericClrKey(NamedTypeReference) → string
 
-3. Analyze dependencies: `AnalyzeNamespaceDependencies()`
-   - Scan all type signatures recursively
+**Purpose:** Construct open generic CLR key from NamedTypeReference.
 
-### AnalyzeNamespaceDependencies()
+**Algorithm:**
+1. Start with `ref.Name`
+2. If `ref.TypeArguments.Count > 0`:
+   - Append backtick + arity: `List\`1`
+3. Prepend namespace: `System.Collections.Generic.List\`1`
+4. Return CLR key (NO assembly-qualified type args)
 
-For each public type:
-1. **Base class:** `CollectTypeReferences(type.BaseType)` → `ReferenceKind.BaseClass`
-2. **Interfaces:** Each interface → `ReferenceKind.Interface`
-3. **Generic constraints:** Each constraint → `ReferenceKind.GenericConstraint`
-4. **Members:** `AnalyzeMemberDependencies()`
+**Critical:** Returns OPEN generic form (e.g., `List\`1`), not closed (`List\`1[[System.String]]`). Prevents assembly-qualified garbage in imports.
 
-### AnalyzeMemberDependencies()
+**Related:** TypeReferenceFactory.CreateNamed() uses same logic.
 
-Scans signatures:
-- **Methods:** Return type (`MethodReturn`), parameters (`MethodParameter`), generic constraints
-- **Properties:** Property type (`PropertyType`), indexer parameters
-- **Fields:** Field type (`FieldType`)
-- **Events:** Handler type (`EventType`)
+### Method: ClrFullNameToNamespace(string clrFullName) → string
 
-### CollectTypeReferences() - Recursive Deep Scan
+**Purpose:** Extract namespace from CLR full name.
 
-Critical function that finds ALL foreign types via tree traversal:
+**Algorithm:**
+1. Find last `.` in `clrFullName`
+2. Substring before `.` is namespace
+3. Handle nested types (contains `+`): still use last `.`
+4. Return namespace string
 
-**NamedTypeReference:**
-- Find namespace via `FindNamespaceForType()`
-- **Recurse into type arguments** (e.g., `Dictionary<string, List<int>>` finds both)
+**Example:** `System.Collections.Generic.List\`1` → `System.Collections.Generic`
 
-**NestedTypeReference:** Use full name (`Outer.Inner`)
+---
 
-**ArrayTypeReference:** Recurse into element type
+## ImportPlanner.cs
 
-**PointerTypeReference / ByRefTypeReference:** Recurse into pointee/referenced type
+### Purpose
+Plans which types to import, which to export, which to alias.
 
-**GenericParameterReference:** Skip (local, no import)
+### Method: PlanImports(BuildContext, SymbolGraph, ImportGraph) → ImportPlan
 
-### FindNamespaceForType()
+**Algorithm:**
+1. **Determine Exports**:
+   - For each namespace:
+     - All public types are exported
+     - Internal types not exported (unless policy override)
 
-Lookup via `NamespaceTypeIndex`. Returns null if external/built-in.
+2. **Determine Imports**:
+   - For each namespace:
+     - Get dependencies from ImportGraph
+     - For each foreign namespace:
+       - Add import for all used types
+       - Determine import path (relative vs absolute)
 
-### ImportGraphData Structure
+3. **Determine Aliases**:
+   - If type name collision across namespaces → create alias
+   - Alias format: `{TypeName}_{NamespaceSuffix}`
 
-```csharp
-NamespaceDependencies: Dict<string, HashSet<string>>  // namespace edges
-NamespaceTypeIndex: Dict<string, HashSet<string>>     // namespace → type names (reverse index)
-CrossNamespaceReferences: List<CrossNamespaceReference>  // detailed references
-```
+4. **Unresolved Types (Cross-Assembly)**:
+   - Collect types used but not in SymbolGraph
+   - Call `DeclaringAssemblyResolver.ResolveBatch()` to find declaring assemblies
+   - Group by assembly
+   - Log for future ambient stub generation
 
-### CrossNamespaceReference
+5. Return `ImportPlan`
 
-```csharp
-record CrossNamespaceReference(
-    SourceNamespace, SourceType,
-    TargetNamespace, TargetType,
-    ReferenceKind)  // BaseClass|Interface|GenericConstraint|MethodReturn|etc.
-```
+### Method: GetTypeScriptNameForExternalType(string clrFullName, SymbolGraph) → string
+
+**Purpose:** Compute TypeScript name for external (cross-assembly) types not in current graph.
+
+**Algorithm:**
+1. Parse CLR full name → namespace + simple name
+2. Apply same naming transforms as internal types:
+   - Strip backtick arity: `List\`1` → `List_1`
+   - Apply policy transforms (PascalCase, etc.)
+   - Sanitize reserved words
+3. Return TS name
+
+**Used by:** External type reference emission (future ambient stub generation)
 
 ---
 
 ## EmitOrderPlanner.cs
 
-Deterministic emission order using `Renamer.GetFinalTypeName()` for stability.
+### Purpose
+Determines stable emission order for namespaces to ensure deterministic output.
 
-### PlanOrder() Algorithm
+### Method: PlanOrder(BuildContext, SymbolGraph, ImportGraph) → List<string>
 
-1. Sort namespaces alphabetically
-2. For each namespace: `OrderTypes()`
-3. Return `EmitOrder` with `NamespaceEmitOrder` list
+**Algorithm:**
+1. Build dependency graph (namespace → dependencies)
+2. Topological sort:
+   - DFS from roots
+   - Emit dependencies before dependents
+   - Break cycles by alphabetical order
+3. Within same level: alphabetical sort
+4. Return ordered namespace list
 
-### OrderTypes() - Stable Sort
-
-Primary keys (in order):
-1. **Kind sort order:** Enums(0) → Delegates(1) → Interfaces(2) → Structs(3) → Classes(4) → StaticNamespaces(5)
-2. **Final TS name** from `ctx.Renamer.GetFinalTypeName()` (post-collision)
-3. **Arity** (generic parameter count)
-
-For each type:
-- Recurse into nested types
-- Order members via `OrderMembers()`
-
-**Rationale:** Forward-ref safe (enums/delegates first), alphabetical by final name (git-friendly)
-
-### OrderMembers() - Category Order
-
-Emission order: Constructors → Fields → Properties → Events → Methods
-
-Within category sort by:
-1. **IsStatic** (instance first, then static)
-2. **Final TS member name** via `ctx.Renamer.GetFinalMemberName()` (uses `ScopeFactory.ClassSurface/StaticSurface`)
-3. **Arity** (method generics)
-4. **Canonical signature** (from `StableId.CanonicalSignature` - disambiguates overloads)
-
-**Filtering:** Only `ClassSurface`/`StaticSurface` scopes (excludes view-only members)
-
-### Records
-
-```csharp
-EmitOrder(Namespaces: List<NamespaceEmitOrder>)
-NamespaceEmitOrder(Namespace, OrderedTypes: List<TypeEmitOrder>)
-TypeEmitOrder(Type, OrderedMembers, OrderedNestedTypes)  // recursive
-MemberEmitOrder(Constructors, Fields, Properties, Events, Methods)  // all pre-sorted
-```
+**Determinism**: Same input always produces same output (critical for reproducibility).
 
 ---
 
-## PathPlanner.cs
+## OverloadUnifier.cs
 
-Computes relative TypeScript module paths for imports.
+### Purpose
+Unifies method overloads that TypeScript cannot distinguish (already covered in Phase Normalize).
 
-### GetSpecifier() Algorithm
+### Method: UnifyOverloads(BuildContext, SymbolGraph) → SymbolGraph
 
-**Input:** Source/target namespace names (empty = root)
-
-**Rules:**
-1. Determine root: `isRoot = string.IsNullOrEmpty(namespace)`
-2. Target path:
-   - Root: `targetDir="_root"`, `targetFile="index"`
-   - Named: `targetDir=namespace`, `targetFile="internal/index"`
-3. Relative path:
-   - Root → Root: `./_root/index`
-   - Root → Named: `./{namespace}/internal/index`
-   - Named → Root: `../_root/index`
-   - Named → Named: `../{namespace}/internal/index`
-
-**Why always `internal/index`:** Public API re-exports from internal. Imports need full definitions.
-
-**Examples:**
-
-| Source | Target | Specifier |
-|--------|--------|-----------|
-| (root) | (root) | `./_root/index` |
-| (root) | `System` | `./System/internal/index` |
-| `System.Collections` | (root) | `../_root/index` |
-| `System.Collections` | `System.Text` | `../System.Text/internal/index` |
+**Algorithm:**
+1. For each type:
+   - Group methods by (Name, EmitScope, IsStatic)
+   - For each group:
+     - Build TS signatures (erase ref/out/constraints)
+     - Group by TS signature
+     - If multiple CLR sigs → same TS sig: keep first, mark rest `Omitted`
+2. Return new graph
 
 ---
 
 ## InterfaceConstraintAuditor.cs
 
-Audits constructor constraint loss per (Type, Interface) pair.
+### Purpose
+Audits constructor constraints for (Type, Interface) pairs.
 
-**M4/M5 Fix:** One finding per interface implementation, not per view member.
+### Method: Audit(BuildContext, SymbolGraph) → ConstraintFindings
 
-### Audit() Algorithm
+**Algorithm:**
+1. For each type:
+   - For each interface:
+     - Check if interface has `new()` constraint
+     - Check if type has parameterless constructor
+     - If constraint not satisfied: record finding
+2. Return `ConstraintFindings`
 
-1. For each type implementing interfaces:
-2. For each interface reference:
-   - Resolve interface: `ResolveInterface()`
-   - Check constraints: `CheckInterfaceConstraints()`
-   - Add finding if detected
-
-### CheckInterfaceConstraints()
-
-1. Skip if interface has no generic parameters
-2. For each generic parameter:
-   - Check `(gp.SpecialConstraints & GenericParameterConstraints.DefaultConstructor) != 0`
-   - If true: **Constructor constraint loss detected**
-
-3. Create finding:
-```csharp
-InterfaceConstraintFinding {
-    ImplementingTypeStableId, InterfaceStableId,
-    LossKind = ConstraintLossKind.ConstructorConstraintLoss,
-    GenericParameterName, TypeFullName, InterfaceFullName
-}
-```
-
-**What's lost:**
-```csharp
-// C#: interface IFactory<T> where T : new()
-// TypeScript: interface IFactory_1<T>  // No "new()" constraint
-```
-
-**Why it matters:** TypeScript can't enforce `new()`. Metadata tracks it for runtime binding.
-
-### ResolveInterface()
-
-Search all namespaces for type with matching CLR name and `TypeKind.Interface`. Returns null if external.
+**Used by:** PhaseGate validation (PG_CNSTR_* checks)
 
 ---
 
 ## TsAssignability.cs
 
-TypeScript structural typing for erased type shapes.
+### Purpose
+TypeScript assignability rules (for structural conformance checking).
 
-### IsAssignable() Rules
+### Method: IsMethodAssignable(MethodSig class, MethodSig iface) → bool
 
-1. **Exact match:** `source.Equals(target)`
-2. **Unknown type:** Conservative (assume compatible)
-3. **Type parameter:** Match by name (`T` = `T`)
-4. **Array covariance:** `IsAssignable(elemSource, elemTarget)` (readonly arrays)
-5. **Generic application:**
-   - Base generic must match: `List<>` = `List<>`
-   - Type arguments pairwise (invariant currently)
-6. **Named widening:** `IsWideningConversion()`
+**Algorithm:**
+1. Compare parameter counts
+2. For each parameter:
+   - Check contravariant assignability (interface param assignable TO class param)
+3. Check return type (covariant): class return assignable TO interface return
+4. Return true if all checks pass
 
-### IsWideningConversion()
+**TS Rule:** Method on class is assignable to interface method if:
+- Same arity
+- Class params are contravariant to interface params
+- Class return is covariant to interface return
 
-Known widenings:
-- Same type
-- All numeric types → all numeric types (map to `number` brand)
-- Everything → `System.Object`
-- `System.ValueType` → `System.Object`
+### Method: IsPropertyAssignable(PropertySig class, PropertySig iface) → bool
 
-### IsMethodAssignable()
-
-Checks:
-1. Name match
-2. Arity match (generic parameters)
-3. Parameter count match
-4. **Return type covariance:** `IsAssignable(sourceReturn, targetReturn)`
-5. **Parameter invariance:** Both directions assignable (stricter than TS contravariance)
-
-### IsPropertyAssignable()
-
-1. Name match
-2. **Readonly covariance:** `IsAssignable(sourceProp, targetProp)` (safe, can't write)
-3. **Mutable invariance:** Exact type match (prevents unsound reads/writes)
+**Algorithm:**
+1. Check type assignability (class type assignable TO interface type)
+2. If interface is readonly: class can be readwrite or readonly
+3. If interface is readwrite: class MUST be readwrite
+4. Return true if all checks pass
 
 ---
 
 ## TsErase.cs
 
-Erases CLR specifics to TypeScript-level signatures.
+### Purpose
+Erase CLR-specific info to simulate TypeScript signatures (for assignability checks).
 
-### EraseMember(MethodSymbol)
+### Method: EraseToTsSignature(MethodSymbol) → TsMethodSig
 
-1. Take `method.TsEmitName`, `method.Arity`
-2. **Erase parameters:** `EraseType(p.Type)` - **removes ref/out**
-3. **Erase return:** `EraseType(method.ReturnType)`
+**Algorithm:**
+1. Strip ref/out from parameters
+2. Strip generic constraints
+3. Keep only: name, parameter types, return type
+4. Return erased signature
 
-Result: `TsMethodSignature` (no CLR concepts)
+**Used by:** TsAssignability for structural conformance
 
-### EraseMember(PropertySymbol)
+---
 
-1. Take `property.TsEmitName`
-2. Erase type: `EraseType(property.PropertyType)`
-3. Readonly: `!property.HasSetter`
+## PathPlanner.cs
 
-### EraseType() - Type Erasure
+### Purpose
+Plans file paths for emitted namespaces.
 
-**NamedTypeReference (generic):** `GenericApplication(Named(fullName), typeArgs.Select(EraseType))`
+### Method: PlanPaths(Policy, List<string> namespaces) → Dictionary<string, PathInfo>
 
-**NamedTypeReference (simple):** `Named(fullName)`
-
-**NestedTypeReference:** `Named(nested.FullReference.FullName)`
-
-**GenericParameterReference:** `TypeParameter(name)`
-
-**ArrayTypeReference:** `Array(EraseType(elementType))`
-
-**PointerTypeReference:** `EraseType(pointeeType)` - **erase pointer**
-
-**ByRefTypeReference:** `EraseType(referencedType)` - **erase ref/out**
-
-**Fallback:** `Unknown(description)`
-
-### TsTypeShape Hierarchy
-
-```csharp
-abstract record TsTypeShape {
-    Named(FullName)
-    TypeParameter(Name)
-    Array(ElementType)
-    GenericApplication(GenericType, TypeArguments)
-    Unknown(Description)
-}
-```
+**Algorithm:**
+1. For each namespace:
+   - Compute directory path: replace `.` with `/`
+   - Compute file names:
+     - `{ns}/internal/index.d.ts`
+     - `{ns}/index.d.ts` (facade)
+     - `{ns}/metadata.json`
+     - `{ns}/bindings.json`
+     - `{ns}/index.js`
+2. Return path map
 
 ---
 
 ## PhaseGate.cs
 
-Master validation orchestrator - 50+ correctness rules.
+### Purpose
+Comprehensive pre-emission validation (detailed in 07-phasegate.md).
 
-### Validate() Flow
+### Method: Validate(BuildContext, SymbolGraph, ImportPlan, ConstraintFindings)
 
-1. **Create ValidationContext** (error/warning counts, diagnostics)
+**Validation Categories:**
+1. Finalization (PG_FIN_* ) - TsEmitName set
+2. Scopes (PG_SCOPE_*) - Well-formed scopes
+3. Names (PG_NAME_*) - Uniqueness
+4. Views (PG_INT_*) - View integrity
+5. Imports/Exports (PG_IMPORT_*, PG_EXPORT_*, PG_API_*) - Valid imports
+6. Types (PG_LOAD_*, PG_TYPEMAP_*) - Type resolution
+7. Overloads (PG_OL_*) - No collisions
+8. Constraints (PG_CNSTR_*) - Constraint satisfaction
 
-2. **Core validation checks** (delegated to `Validation.Core`):
-   - Type/member naming rules
-   - Generic parameter constraints
-   - Interface conformance
-   - Inheritance hierarchies
-   - EmitScope assignments
-   - Import consistency
-   - Policy compliance
+**Total:** 50+ validation rules
 
-3. **PhaseGate Hardening** (module checks):
+**Output:** Diagnostics in `ctx.Diagnostics` (ERROR blocks emission)
 
-   **M1:** Identifier sanitization (`Names.ValidateIdentifiers()` - PG_NAME_001/002)
+---
 
-   **M2:** Overload collisions (`Names.ValidateOverloadCollisions()` - PG_NAME_006)
+## DeclaringAssemblyResolver.cs
 
-   **M3:** View integrity (`Views.Validate()`, `Views.ValidateIntegrity()` - PG_VIEW_001/002/003)
+### Purpose
+Resolves CLR type full names → declaring assembly names (for cross-assembly dependencies).
 
-   **M4:** Constructor constraints (`Constraints.EmitDiagnostics()` - PG_CT_001/002)
+### Method: ResolveBatch(IReadOnlySet<string> clrKeys) → Dictionary<string, string>
 
-   **M5:** Scoping/naming:
-   - `Views.ValidateMemberScoping()` - PG_NAME_003/004
-   - `Scopes.ValidateEmitScopeInvariants()` - PG_INT_002/003
-   - `Scopes.ValidateScopeMismatches()` - PG_SCOPE_003/004
-   - `Names.ValidateClassSurfaceUniqueness()` - PG_NAME_005
+**Algorithm:**
+1. For each CLR key:
+   - Create placeholder `AssemblyName` with key as name
+   - Call `LoadContext.LoadFromAssemblyName()`
+   - MetadataLoadContext resolves via PathAssemblyResolver
+   - Extract `assembly.GetName().Name` as declaring assembly
+2. Return map: `clrKey → assemblyName`
 
-   **M6:** Finalization (`Finalization.Validate()` - PG_FIN_001..009)
+**Used by:** ImportPlanner for unresolved external types
 
-   **M7:** Type references:
-   - `Types.ValidateTypeMapCompliance()` - PG_TYPEMAP_001 (MUST RUN EARLY)
-   - `Types.ValidateExternalTypeResolution()` - PG_LOAD_001 (AFTER TypeMap)
-   - `Types.ValidatePrinterNameConsistency()` - PG_PRINT_001
+### Method: GroupByAssembly(Dictionary<string, string>) → Dictionary<string, List<string>>
 
-   **M8:** Public API (`ImportExport.ValidatePublicApiSurface()` - PG_API_001/002, BEFORE imports)
+**Purpose:** Groups types by their declaring assembly (for diagnostics).
 
-   **M9:** Import completeness (`ImportExport.ValidateImportCompleteness()` - PG_IMPORT_001)
+**Algorithm:**
+1. Invert map: `assemblyName → List<typeClrKeys>`
+2. Return grouped map
 
-   **M10:** Export completeness (`ImportExport.ValidateExportCompleteness()` - PG_EXPORT_001)
+---
 
-4. **Report results:** Error/warning/info counts, sanitized name count
+## Integration Flow
 
-5. **Print diagnostic summary:** Group by code, sort by frequency, show descriptions
-
-6. **Handle errors:** If errors > 0, write diagnostic files and fail build
-
-7. **Write outputs:** Detailed report + machine-readable summary JSON
-
-### Validation Module Structure
-
-Delegated to `Validation/` modules:
-- **Core.cs** - 8 core categories
-- **Names.cs** - 5 checks (collision, sanitization, uniqueness)
-- **Views.cs** - 4 checks (integrity, scoping)
-- **Scopes.cs** - 3 checks (EmitScope validation)
-- **Types.cs** - 3 checks (TypeMap, external resolution, printer consistency)
-- **ImportExport.cs** - 3 checks (API surface, import/export completeness)
-- **Constraints.cs** - 2 diagnostics (constructor constraint loss)
-- **Finalization.cs** - 9 checks (finalization sweep)
-- **Context.cs** - Diagnostic tracking
-- **Shared.cs** - Utilities
-
-**Diagnostic format:** `PG_CATEGORY_NNN` (e.g., PG_NAME_001, PG_VIEW_003)
-
-**Full details:** See `07-phasegate.md`
+```
+SymbolGraph (fully named)
+  ↓
+ImportGraph.Build()
+  → Scan all type references
+  → Build dependency graph
+  ↓
+ImportPlanner.PlanImports()
+  → Determine exports (public types)
+  → Determine imports (foreign types)
+  → Determine aliases (name collisions)
+  → Resolve unresolved types (cross-assembly)
+    → DeclaringAssemblyResolver.ResolveBatch()
+  ↓
+EmitOrderPlanner.PlanOrder()
+  → Topological sort (dependencies first)
+  → Alphabetical within level
+  ↓
+OverloadUnifier.UnifyOverloads()
+  → Erase to TS signatures
+  → Merge indistinguishable overloads
+  ↓
+InterfaceConstraintAuditor.Audit()
+  → Check new() constraints
+  → Record findings
+  ↓
+PhaseGate.Validate()
+  → 50+ validation checks
+  → Record ERROR/WARNING/INFO
+  → Block emission if errors
+  ↓
+EmissionPlan (if no errors)
+```
 
 ---
 
 ## Key Algorithms
 
-### Import Graph Construction
+### Open Generic CLR Key Construction
 
-**Build cross-namespace dependency graph:**
+**Problem:** Need stable keys for generic types without assembly-qualified type args.
 
-1. **Reverse index:** For each namespace, collect public type CLR names → `NamespaceTypeIndex`
-2. **Scan types:** For each public type: base class, interfaces, constraints, member signatures
-3. **Recursive collection:**
-   - Descend into generic type arguments
-   - Descend into array elements
-   - Erase pointers/byrefs
-   - Skip generic parameters (local)
-4. **Namespace resolution:** Lookup in NamespaceTypeIndex, add edge if foreign namespace
-5. **Aggregation:** `NamespaceDependencies` (edges) + `CrossNamespaceReferences` (detailed)
+**Solution:**
+1. Use OPEN generic form: `List\`1` (not `List\`1[[System.String]]`)
+2. Format: `{Namespace}.{SimpleName}\`{Arity}`
+3. Example: `System.Collections.Generic.List\`1`
 
-**Complexity:** O(N × M) where N = types, M = avg references per type
+**Benefits:**
+- Stable across different type instantiations
+- No assembly-qualified garbage
+- Matches TypeReferenceFactory.CreateNamed() logic
 
-### Topological Sort (NOT IMPLEMENTED)
+### Topological Sort for Emission Order
 
-Current implementation: Alphabetical namespace + kind/name sort (TypeScript allows forward refs)
+**Problem:** Must emit dependencies before dependents.
 
-**If needed:**
-1. Build dependency graph (type → referenced types)
-2. Initialize in-degree
-3. Zero in-degree → queue
-4. Dequeue → output → decrement dependents → enqueue if zero
-5. Cycle detection: types remain = cycle
+**Solution:**
+1. Build directed graph: namespace → dependencies
+2. DFS from roots (nodes with no dependencies)
+3. Emit when all dependencies emitted
+4. Break cycles: alphabetical order
+5. Within same level: alphabetical sort
 
-### Relative Path Computation
+**Benefits:** Deterministic, dependency-safe
 
-**Compute module path from source to target namespace:**
+### Cross-Assembly Resolution
 
-1. **Directory structure:**
-   - Root: `_root/` (no internal subdirectory)
-   - Named: `{Namespace}/internal/index.d.ts`
+**Problem:** Types used but not in current SymbolGraph (external assemblies).
 
-2. **Relative path:**
-   - Same level: `./` prefix
-   - Different level: `../` prefix
-   - Always target `internal/index`
+**Solution:**
+1. Collect unresolved CLR keys
+2. Call `DeclaringAssemblyResolver.ResolveBatch()`
+3. MetadataLoadContext resolves to declaring assemblies
+4. Group by assembly
+5. Log for future ambient stub generation
 
-3. **Special cases:**
-   - Root → Root: `./_root/index`
-   - Root → Named: `./{namespace}/internal/index`
-   - Named → Root: `../_root/index`
-   - Named → Named: `../{namespace}/internal/index`
-
-**Why `internal/index`:** Public API re-exports. Imports need full definitions.
-
-### Constraint Loss Detection
-
-**Detect when TypeScript loses C# `new()` constraints:**
-
-1. Get interface generic parameters (skip if none)
-2. Check `SpecialConstraints & GenericParameterConstraints.DefaultConstructor`
-3. If true: Create `InterfaceConstraintFinding`:
-   - `LossKind = ConstructorConstraintLoss`
-   - Record type/interface StableIds
-   - Record generic parameter name
-4. PhaseGate emits PG_CT_001 (ERROR)
-5. Metadata sidecar tracks for runtime binding
-
-**Why `new()` specifically:** TypeScript has no equivalent. Must track for runtime.
-
-**Other constraints not tracked:** `class`, `struct` (future expansion)
+**Benefits:** Enables partial BCL generation, identifies external dependencies
 
 ---
 
 ## Summary
 
-**Plan phase outputs:**
-1. **ImportGraph** - Complete namespace dependencies
-2. **ImportPlan** - TypeScript import/export statements with aliases
-3. **EmitOrder** - Deterministic emission order
-4. **PathPlanner** - Relative module paths
-5. **ConstraintFindings** - Constructor constraint losses
-6. **PhaseGate validation** - 50+ rules enforced
+**Plan phase responsibilities:**
+1. Build import dependency graph
+2. Plan imports, exports, aliases
+3. Resolve cross-assembly type references
+4. Determine stable emission order
+5. Unify indistinguishable overloads
+6. Audit interface constructor constraints
+7. Validate everything via PhaseGate (50+ rules)
 
-**PhaseGate categories:**
-- Name correctness (5 checks)
-- View integrity (4 checks)
-- EmitScope validation (3 checks)
-- Type references (3 checks)
-- Import/export completeness (3 checks)
-- Constraint tracking (2 diagnostics)
-- Finalization (9 checks)
-- Policy compliance
+**Output:** EmissionPlan (if validation passes) or diagnostics (if errors)
 
-**After Plan:**
-- Symbol graph validated
-- Import dependencies resolved
-- Emission order determined
-- All invariants hold
-- Ready for Emit phase
-
-**Next:** Emit phase (generate `.d.ts`, `.metadata.json`, `.bindings.json`)
-
-**See also:**
-- `07-phasegate.md` - Detailed PhaseGate validation
-- `05-phase-shape.md` - Symbol shaping before validation
-- `08-phase-emit.md` - File emission after validation
+**Key design decisions:**
+- Open generic CLR keys (no assembly-qualified args)
+- Topological sort for deterministic order
+- Cross-assembly resolution via MetadataLoadContext
+- Comprehensive validation before emission
+- DeclaringAssemblyResolver enables future type-forwarding
