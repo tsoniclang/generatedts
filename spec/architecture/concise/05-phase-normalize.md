@@ -1,99 +1,117 @@
-# Phase 5: Normalize - Name Reservation and Signature Unification
+# Phase NORMALIZE: Name Reservation and Overload Unification
 
 ## Overview
 
-Central name assignment phase between Shape (Phase 4) and Plan (Phase 6).
+Central name assignment phase. Runs after Shape, before Plan.
 
-**Responsibilities**:
-1. Name Reservation - assign final TypeScript names via Renamer
-2. Overload Unification - unify indistinguishable overloads
+**Responsibilities:**
+1. **Name Reservation** - Assign final TypeScript names via Renamer
+2. **Overload Unification** - Merge method overloads TS cannot distinguish
 
-**Key Design**:
-- Pure transformation - returns new graph with TsEmitName set
-- Dual-scope algorithm: class surface vs view surface
-- View-vs-class collision → `$view` suffix
-- Unifies overloads differing by ref/out or constraints
-- Fail-fast audit ensures completeness
-
-**Input**: SymbolGraph from Shape (EmitScope set, views planned)
-**Output**: SymbolGraph with TsEmitName set on all symbols
+**Input**: `SymbolGraph` (EmitScope set, views planned)
+**Output**: `SymbolGraph` (TsEmitName set on all symbols)
+**Mutability**: Pure transformation
 
 ---
 
 ## NameReservation.cs
 
-Orchestrates name reservation. ONLY place names are reserved.
+### Method: ReserveAllNames(BuildContext, SymbolGraph) → SymbolGraph
 
-### `ReserveAllNames(BuildContext, SymbolGraph) -> SymbolGraph`
+**Algorithm:**
 
-**Algorithm**:
-1. Reserve type names via `Renamer.ReserveTypeName()` (namespace scope)
-2. Reserve class surface members via `Reservation.ReserveMemberNamesOnly()`
-3. Rebuild class name sets (instance/static) for collision detection
-4. Reserve view members via `Reservation.ReserveViewMemberNamesOnly()` with collision check
-5. Audit completeness via `Audit.AuditReservationCompleteness()`
-6. Apply names via `Application.ApplyNamesToGraph()`
+1. **Reserve Type Names**:
+   - Iterate namespaces/types (deterministic order)
+   - Compute base name via `Shared.ComputeTypeRequestedBase()`
+   - Call `Renamer.ReserveTypeName()` with namespace scope
+   - Skip compiler-generated (names with `<` or `>`)
 
-**Dual-Scope Concept**:
+2. **Reserve Class Surface Members**:
+   - Call `Reservation.ReserveMemberNamesOnly()` per type
+   - Reserve methods, properties, fields, events, constructors
+   - Scope: `ScopeFactory.ClassSurface(type, isStatic)`
+   - Skip existing decisions (from earlier passes)
+   - Skip `ViewOnly` (handled separately)
+   - Skip `Omitted` (no names needed)
+
+3. **Rebuild Class Surface Name Sets**:
+   - After reservation, rebuild complete class-surface name sets
+   - Separate sets: instance + static
+   - Check ALL `ClassSurface` members (including pre-existing)
+   - Union set (`classAllNames`) for collision detection
+   - **Critical**: Include members renamed by earlier passes (HiddenMemberPlanner)
+
+4. **Reserve View Members**:
+   - Call `Reservation.ReserveViewMemberNamesOnly()` per type with views
+   - Pass `classAllNames` for collision detection
+   - Scope: `ScopeFactory.ViewSurface(type, interfaceStableId, isStatic)`
+   - Apply `$view` suffix if view name collides with class
+
+5. **Post-Reservation Audit**:
+   - Call `Audit.AuditReservationCompleteness()`
+   - Verify every emitted member has rename decision
+   - Throw if missing (fail-fast)
+
+6. **Apply Names to Graph**:
+   - Call `Application.ApplyNamesToGraph()`
+   - Set `TsEmitName` on all types/members
+   - Return new graph (pure)
+
+**Class Surface vs View Surface:**
 - **Class Surface**: Members on class declaration
   - Scope: `ScopeFactory.ClassSurface(type, isStatic)`
-  - Includes original, synthesized, shared interface members
+  - Unique within instance/static scope
 - **View Surface**: Members only on interface views
   - Scope: `ScopeFactory.ViewSurface(type, interfaceStableId, isStatic)`
   - Separate scope per interface
-  - Collision with class → `$view` suffix
+  - Can differ from class (using `$view` suffix)
 
-**Static vs Instance**: TypeScript has separate namespaces, so Renamer uses separate scopes.
+**Static vs Instance Scopes:**
+TypeScript separates instance/static namespaces:
+```typescript
+class Example {
+    static foo: string;  // Static scope
+    foo: number;         // Instance scope - NO COLLISION
+}
+```
+Renamer uses separate scopes: `#instance` vs `#static`
 
 ---
 
 ## Naming/Reservation.cs
 
-Core reservation logic (no mutation).
+### Method: ReserveMemberNamesOnly(BuildContext, TypeSymbol, RenameScope)
 
-### `ReserveMemberNamesOnly(BuildContext, TypeSymbol) -> (int Reserved, int Skipped)`
+**What it does**: Reserves names for class surface members (non-view).
 
-1. Creates base scope: `ScopeFactory.ClassBase(type)`
-2. Iterates members (methods, properties, fields, events, ctors) in deterministic order
-3. For each member:
-   - Skip if `EmitScope.ViewOnly` (handled separately)
-   - Skip if `EmitScope.Omitted`
-   - Throw if `EmitScope.Unspecified`
-   - Skip if already renamed (check with `Renamer.TryGetDecision()`)
-   - Compute requested base via `Shared.ComputeMethodBase()` or `Shared.RequestedBaseForMember()`
-   - Reserve via `Renamer.ReserveMemberName()`
-4. Returns (Reserved, Skipped) counts
+**Algorithm:**
+1. For each method/property/field/event/constructor:
+   - Skip if `EmitScope != ClassSurface` (views handled separately)
+   - Skip if `EmitScope == Omitted`
+   - Skip if already has decision (from HiddenMemberPlanner, IndexerPlanner)
+   - Compute requested base: `Shared.ComputeMemberRequestedBase()`
+   - Reserve: `Renamer.ReserveMemberName()`
 
-**Collision Resolution**: Renamer appends numeric suffixes (`toInt`, `toInt2`, `toInt3`)
+### Method: ReserveViewMemberNamesOnly(BuildContext, TypeSymbol, HashSet<string> classAllNames)
 
-### `ReserveViewMemberNamesOnly(BuildContext, SymbolGraph, TypeSymbol, HashSet<string> classAllNames) -> (int Reserved, int Skipped)`
+**What it does**: Reserves names for view-only members with collision detection.
 
-1. Return (0,0) if no ExplicitViews
-2. Iterate views (by interface StableId)
-3. For each ViewOnly member:
-   - Verify `EmitScope.ViewOnly`
-   - Find isStatic via `Shared.FindMemberIsStatic()`
-   - Compute requested base
-   - Peek final name via `Renamer.PeekFinalMemberName()`
-   - Check collision: peek in `classAllNames`?
-   - If collision: apply `$view` suffix (or `$view2`, `$view3` if taken)
-   - Reserve in view scope
+**Algorithm:**
+1. For each view in `type.ExplicitViews`:
+   - Extract interface StableId
+   - For each view member:
+     - Compute requested base: `Shared.ComputeMemberRequestedBase()`
+     - **Collision Detection**: Check if `classAllNames.Contains(requestedBase)`
+     - If collision: append `$view` suffix
+     - Reserve: `Renamer.ReserveMemberName()` with view scope
 
-**Why Separate View Scopes**: Class can implement same interface member differently via explicit implementation.
-
-**Example**:
-```csharp
-class Array : IEnumerable<T> {
-    public ArrayEnumerator GetEnumerator() { ... }  // Class surface
-    IEnumerator<T> IEnumerable<T>.GetEnumerator() { ... }  // ViewOnly
-}
-```
-→ TypeScript:
+**Why Collision Detection?**
+Prevents members on class surface from conflicting with view members:
 ```typescript
-class Array_1<T> {
-    getEnumerator(): ArrayEnumerator;  // Class
-    readonly asIEnumerable_1: {
-        getEnumerator$view(): IEnumerator_1<T>;  // View with $view suffix
+class Foo {
+    toString(): string;          // Class surface
+    As_IFormattable: {
+        toString$view(fmt): string;  // View - collision avoided
     };
 }
 ```
@@ -102,286 +120,185 @@ class Array_1<T> {
 
 ## Naming/Application.cs
 
-Apply reserved names to graph (pure transformation).
+### Method: ApplyNamesToGraph(BuildContext, SymbolGraph) → SymbolGraph
 
-### `ApplyNamesToGraph(BuildContext, SymbolGraph) -> SymbolGraph`
-Iterates namespaces, calls `ApplyNamesToNamespace()`, rebuilds indices.
+**What it does**: Retrieves final names from Renamer and applies to SymbolGraph.
 
-### Private: `ApplyNamesToNamespace()` → `ApplyNamesToType()` → `ApplyNamesToMembers()`
+**Algorithm:**
+1. For each namespace:
+   - For each type:
+     - Get final type name: `Renamer.GetFinalTypeName(type, NamespaceArea.Internal)`
+     - Set `type.TsEmitName`
+     - For each member:
+       - Determine scope (ClassSurface vs View)
+       - Get final member name: `Renamer.GetFinalMemberName(member.StableId, scope)`
+       - Set `member.TsEmitName`
+2. Return new graph with `TsEmitName` populated
 
-**ApplyNamesToMembers logic**:
-1. **ViewOnly members** (methods, properties):
-   - Get interface StableId from `member.SourceInterface`
-   - Create view scope: `ScopeFactory.ViewSurface()`
-   - Get name: `Renamer.GetFinalMemberName(stableId, viewScope)`
-2. **ClassSurface members**:
-   - Create class scope: `ScopeFactory.ClassSurface()`
-   - Get name: `Renamer.GetFinalMemberName(stableId, classScope)`
-3. Return new member with TsEmitName set
-
-**Critical**: Must use exact same scopes as reservation.
+**Scope Determination:**
+- `ClassSurface` members: Use `ScopeFactory.ClassSurface(type, member.IsStatic)`
+- `ViewOnly` members: Use `ScopeFactory.ViewSurface(type, member.SourceInterface, member.IsStatic)`
 
 ---
 
 ## Naming/Audit.cs
 
-Verify completeness - every emitted member has rename decision.
+### Method: AuditReservationCompleteness(BuildContext, SymbolGraph)
 
-### `AuditReservationCompleteness(BuildContext, SymbolGraph) -> void`
+**What it does**: Validates every emitted member has a rename decision.
 
-1. Iterate namespaces/types (skip compiler-generated)
-2. Verify type name reserved
-3. Call `AuditClassSurfaceMembers()` for class members
-4. Call `AuditViewSurfaceMembers()` for view members
-5. Collect errors (missing decisions)
-6. Throw if errors found (fail-fast)
+**Algorithm:**
+1. For each type:
+   - For each member (all scopes):
+     - Skip if `EmitScope == Omitted` (intentionally not emitted)
+     - Determine scope
+     - Check: `Renamer.HasFinalMemberName(member.StableId, scope)`
+     - If missing: log ERROR and throw
+2. Throw if any missing (fail-fast)
 
-### Private: `AuditClassSurfaceMembers()`
-- Filter to `EmitScope.ClassSurface`
-- Check decision exists with class scope
-- Add error if missing (PG_FIN_003)
-
-### Private: `AuditViewSurfaceMembers()`
-- Iterate ExplicitViews
-- For each ViewMember:
-  - Lookup in type's members for `isStatic`
-  - Create view scope: `ScopeFactory.ViewSurface()`
-  - Check decision exists
-  - Add error if missing
+**Purpose**: Catch bugs where Shape passes forget to reserve names.
 
 ---
 
 ## Naming/Shared.cs
 
-Utility functions for name computation.
+### Method: ComputeTypeRequestedBase(TypeSymbol, Policy) → string
 
-### `ComputeTypeRequestedBase(string clrName) -> string`
-**Transformations**:
-- `+` → `_` (nested types)
-- `` ` `` → `_` (generic arity)
-- Invalid chars (`<>[]`) → `_`
-- Apply `TypeScriptReservedWords.Sanitize()`
+**What it does**: Computes requested TypeScript name for a type (before collision resolution).
 
-**Examples**:
-- `List`1` → `List_1`
-- `Dictionary`2+KeyCollection` → `Dictionary_2_KeyCollection`
+**Algorithm:**
+1. Start with `type.ClrSimpleName`
+2. Apply generic arity suffix: `List\`1` → `List_1`
+3. Apply policy transforms (PascalCase, camelCase, snake_case, etc.)
+4. Sanitize TypeScript reserved words (add `_` suffix)
+5. Return requested base name
 
-### `ComputeMethodBase(MethodSymbol) -> string`
-**Operator Mapping**:
-- `op_Equality` → `equals`
-- `op_Addition` → `add`
-- Unmapped → `operator_` prefix
-- Applies reserved word sanitization
+**Example:** `Dictionary\`2` → `Dictionary_2`
 
-**Regular Methods**:
-- Accessors (`get_`, `set_`, etc.) use CLR name as-is
-- Others use `SanitizeMemberName()`
+### Method: ComputeMemberRequestedBase(MemberSymbol, Policy) → string
 
-### `SanitizeMemberName(string) -> string`
-- Replace invalid chars (`<>[]+ `) → `_`
-- Apply reserved word sanitization
+**What it does**: Computes requested TypeScript name for a member.
 
-### `RequestedBaseForMember(string clrName) -> string`
-Centralized for class and view members. Delegates to `SanitizeMemberName()`.
+**Algorithm:**
+1. Start with `member.ClrName`
+2. Strip explicit interface prefix if present: `IDisposable.Dispose` → `Dispose`
+3. Apply policy transforms (camelCase for members)
+4. Sanitize TypeScript reserved words
+5. Return requested base name
 
-### `IsCompilerGenerated(string) -> bool`
-Names containing `<` or `>` (e.g., `<Module>`, `<>c__DisplayClass`)
-
-### `FindMemberIsStatic(TypeSymbol, ViewMember) -> bool`
-Lookup ViewMember in type's collection to get IsStatic flag.
-
-### `GetTypeReferenceName(TypeReference) -> string`
-Handles `NamedTypeReference`, `NestedTypeReference`, fallback to ToString().
+**Example:** `ToString` → `toString` (camelCase)
 
 ---
 
 ## OverloadUnifier.cs
 
-Unify overloads differing only in ways TypeScript can't distinguish.
+### Method: UnifyOverloads(BuildContext, SymbolGraph) → SymbolGraph
 
-**Problem**: C# allows overloads by ref/out modifiers or generic constraints. TypeScript doesn't.
+**What it does**: Merges method overloads that TypeScript cannot distinguish.
 
-**Solution**: Group by erasure key, pick widest signature, omit narrower ones.
+**Algorithm:**
+1. For each type:
+   - Group methods by `(ClrName, EmitScope, IsStatic)`
+   - For each overload group:
+     - Build TS signature (erase ref/out/constraints)
+     - Group by TS signature
+     - If multiple CLR sigs map to same TS sig → UNIFY
+     - Keep first, mark rest as `EmitScope.Omitted`
+2. Return new graph with overloads unified
 
-### `UnifyOverloads(BuildContext, SymbolGraph) -> SymbolGraph`
-Iterates types, calls `UnifyTypeOverloads()`, rebuilds indices.
+**Unification Logic:**
+- Methods differing only by ref/out → keep one
+- Methods with same TS signature but different constraints → keep one
+- Preserved method gets merged parameter info (union of all variants)
 
-### Private: `UnifyTypeOverloads(TypeSymbol) -> (TypeSymbol, int)`
-**Algorithm**:
-1. Group methods by `ComputeErasureKey()` (name|arity|paramCount)
-2. Keep groups with 2+ methods
-3. For each group:
-   - Call `SelectWidestSignature()`
-   - Mark others as `EmitScope.Omitted`
-4. Return updated type and count
-
-### Private: `ComputeErasureKey(MethodSymbol) -> string`
-Format: `"name|arity|paramCount"`
-
-Example:
-- `void Write(ref int value)` → `"write|0|1"`
-- `void Write(int value)` → `"write|0|1"` (collision!)
-
-### Private: `SelectWidestSignature(List<MethodSymbol>) -> MethodSymbol`
-**Preference Order**:
-1. Fewer ref/out parameters
-2. Fewer generic constraints
-3. First in declaration order (StableId)
-
-**Scoring**:
-- `RefOutCount` = count ref/out params
-- `ConstraintCount` = sum of constraints
-- Sort: RefOut ASC, Constraints ASC, StableId ASC
-
-**Example**:
+**Example:**
 ```csharp
-void Write(int value)            // RefOut=0, Constraints=0 ← SELECTED
-void Write(ref int value)        // RefOut=1, Constraints=0
-void Write<T>(T value) where T:struct  // RefOut=0, Constraints=1
+void Method(int x);
+void Method(ref int x);   // Same TS signature → UNIFY
 ```
-
-### Private: `CountRefOutParameters()`, `CountGenericConstraints()`
-Self-explanatory.
 
 ---
 
-## SignatureNormalization.cs
+## Integration Flow
 
-Create canonical signatures for member matching. Used by:
-- `BindingEmitter`, `MetadataEmitter`, `StructuralConformance`, `ViewPlanner`
-
-### `NormalizeMethod(MethodSymbol) -> string`
-Format: `"MethodName|arity=N|(param1:kind,param2:kind)|->ReturnType|static=bool"`
-
-**Example**: `"Parse|arity=0|(string:in,int:out)|->int|static=true"`
-
-**Parameter Kinds**: `in`, `out`, `ref`, `params`
-**Optionality**: `?` suffix if HasDefaultValue
-
-### `NormalizeProperty(PropertySymbol) -> string`
-Format: `"PropertyName|(indexParams)|->PropertyType|static=bool|accessor=get/set/getset"`
-
-**Examples**:
-- `"Count|->int|static=false|accessor=get"`
-- `"Item|(int)|->T|static=false|accessor=getset"`
-
-### `NormalizeField(FieldSymbol) -> string`
-Format: `"FieldName|->FieldType|static=bool|const=bool"`
-
-**Example**: `"MaxValue|->int|static=true|const=true"`
-
-### `NormalizeEvent(EventSymbol) -> string`
-Format: `"EventName|->DelegateType|static=bool"`
-
-**Example**: `"Click|->EventHandler|static=false"`
-
-### `NormalizeConstructor(ConstructorSymbol) -> string`
-Format: `"constructor|(params)|static=bool"`
-
-**Example**: `"constructor|(int:in,string:in)|static=false"`
-
-### Private: `NormalizeTypeName(string) -> string`
-- Remove whitespace
-- Normalize generic backtick: `` ` `` → `_`
-- `List`1<T>` → `List_1<T>`
+```
+Shape Phase Output (SymbolGraph with EmitScope set)
+  ↓
+NameReservation.ReserveAllNames()
+  ├─► Reserve type names (namespace scope)
+  ├─► Reserve class surface members (class scope)
+  ├─► Rebuild class surface name sets (for collision detection)
+  ├─► Reserve view members (view scope, with $view suffix if collision)
+  ├─► Audit completeness (fail if missing decisions)
+  └─► Apply names to graph (set TsEmitName)
+  ↓
+SymbolGraph (TsEmitName set on all symbols)
+  ↓
+OverloadUnifier.UnifyOverloads()
+  └─► Merge indistinguishable overloads (mark rest Omitted)
+  ↓
+SymbolGraph (ready for Plan phase)
+```
 
 ---
 
 ## Key Algorithms
 
-### Dual-Scope Naming
+### Collision Detection with $view Suffix
 
-**Class Surface Scope**:
-- Key: `ns:TypeStableId#instance` or `#static`
-- Collision resolution: numeric suffixes (`toInt`, `toInt2`)
+**Problem**: View member names may collide with class surface names.
 
-**View Surface Scope**:
-- Key: `ns:TypeStableId:InterfaceStableId#instance` or `#static`
-- Separate per interface
-- Collision resolution: `$view` first, then numeric (`toInt$view`, `toInt$view2`)
+**Solution**:
+1. Build `classAllNames` set (all ClassSurface member names)
+2. For each view member:
+   - Compute `requestedBase`
+   - If `classAllNames.Contains(requestedBase)` → append `$view`
+3. Reserve with modified name
 
-### Collision Detection
-
-**Class Surface Collisions**: Numeric suffixes by Renamer.
-
-**View-vs-Class Collisions**:
-1. Peek final name in view scope
-2. Check if peek in `classAllNames`
-3. If collision: apply `$view` suffix
-4. If `$view` taken in view scope: `$view2`, `$view3`, etc.
-
-**Algorithm**:
-```csharp
-var peek = Renamer.PeekFinalMemberName(viewScope, "toInt", false);
-if (classAllNames.Contains(peek)) {
-    var finalRequested = "toInt$view";
-    while (Renamer.IsNameTaken(viewScope, finalRequested, false)) {
-        suffix++;
-        finalRequested = "toInt$view" + suffix;
-    }
-    Renamer.ReserveMemberName(stableId, finalRequested, viewScope, ...);
+**Example:**
+```typescript
+class Foo {
+    toString(): string;          // Class surface
+    As_IFormattable: {
+        toString$view(fmt): string;  // View - collision avoided
+    };
 }
 ```
 
-### CamelCase Transformation
+### Dual-Scope Algorithm
 
-Performed by Renamer (not Normalize phase).
+**Class Surface Scope**:
+- Format: `type:System.Decimal#instance` or `type:System.Decimal#static`
+- Unique within class instance/static scope
 
-**Rules**:
-- First char lowercase (unless all-caps acronym)
-- Preserve internal capitalization
-- Acronym handling: `URL` → `url`, `HTTPClient` → `httpClient`
+**View Surface Scope**:
+- Format: `view:CoreLib:System.Decimal:CoreLib:IConvertible#instance`
+- Separate scope per interface
+- Allows different names for same member across views
 
-### Reserved Word Sanitization
-
-Via `TypeScriptReservedWords.Sanitize()`:
-- Keywords: `break`, `case`, `class`, `delete`, `function`, `if`, `return`, `void`, etc.
-- Strict mode: `implements`, `interface`, `let`, `private`, `static`, etc.
-- Future: `async`, `await`
-- **Sanitization**: Append `_` suffix
-- Examples: `delete` → `delete_`, `in` → `in_`, `static` → `static_`
-
----
-
-## Pipeline Integration
-
-```
-Shape (Phase 4)
-  ↓ Sets EmitScope, plans views
-Normalize (Phase 5) ← HERE
-  ↓ Reserves names, sets TsEmitName, unifies overloads
-Plan (Phase 6)
-  ↓ Uses TsEmitName for emission
-```
-
-**Input Invariants**:
-- EmitScope set on all members (Unspecified = error)
-- ViewOnly members have SourceInterface set
-
-**Output Invariants**:
-- TsEmitName set on all emitted members
-- All emitted members have rename decision
-- Colliding overloads unified
-
-**PhaseGate Validation** (after Normalize):
-- `PG_FIN_001`: TsEmitName set on emitted members
-- `PG_FIN_002`: TsEmitName has no invalid chars
-- `PG_FIN_003`: All emitted members have rename decision
+**Benefits**:
+- No artificial suffixes for most members
+- Views can have different names than class
+- Static/instance separation works correctly
 
 ---
 
 ## Summary
 
-**Normalize Phase**:
-1. **Reserves Names**: Via central Renamer
-2. **Dual-Scope Algorithm**: Class vs view surface
-3. **Collision Detection**: `$view` suffix for view-vs-class
-4. **Overload Unification**: Widest signature wins
-5. **Completeness Validation**: Audit ensures all decisions made
+**Normalize phase responsibilities:**
+1. Reserve all type names (namespace scope)
+2. Reserve all class surface member names (class scope, instance/static separate)
+3. Reserve all view member names (view scope, collision detection with `$view`)
+4. Audit completeness (fail if any emitted member lacks decision)
+5. Apply names to graph (set TsEmitName)
+6. Unify indistinguishable overloads (erase ref/out, mark duplicates Omitted)
 
-**Design Principles**:
-- Centralized reservation (only Normalize reserves)
-- Pure transformation (no mutation)
-- Fail-fast validation (audit throws on missing decisions)
-- Deterministic ordering (reproducibility)
-- Scope consistency (same scopes in reservation, application, audit)
+**Output**: SymbolGraph with TsEmitName set, ready for Plan phase
+
+**Key design decisions:**
+- Dual-scope algorithm (class vs view)
+- Separate static/instance scopes
+- `$view` suffix for collision avoidance
+- Fail-fast completeness audit
+- Pure functional transformation
+- Overload unification based on TS assignability
