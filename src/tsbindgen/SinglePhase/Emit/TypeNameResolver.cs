@@ -1,5 +1,6 @@
 using tsbindgen.SinglePhase.Model;
 using tsbindgen.SinglePhase.Model.Types;
+using tsbindgen.SinglePhase.Plan;
 using tsbindgen.SinglePhase.Renaming;
 
 namespace tsbindgen.SinglePhase.Emit;
@@ -7,16 +8,21 @@ namespace tsbindgen.SinglePhase.Emit;
 /// <summary>
 /// Single source of truth for resolving TypeScript identifiers from TypeReferences.
 /// Uses the Renamer to ensure imports and declarations use identical names.
+/// TS2693 FIX: Also uses ImportPlan to qualify value-imported types with namespace alias.
 /// </summary>
 public sealed class TypeNameResolver
 {
     private readonly BuildContext _ctx;
     private readonly SymbolGraph _graph;
+    private readonly ImportPlan? _importPlan;
+    private readonly string? _currentNamespace;
 
-    public TypeNameResolver(BuildContext ctx, SymbolGraph graph)
+    public TypeNameResolver(BuildContext ctx, SymbolGraph graph, ImportPlan? importPlan = null, string? currentNamespace = null)
     {
         _ctx = ctx;
         _graph = graph;
+        _importPlan = importPlan;
+        _currentNamespace = currentNamespace;
     }
 
     /// <summary>
@@ -42,6 +48,7 @@ public sealed class TypeNameResolver
     /// Wrapper for ResolveTypeName to provide consistent API.
     /// CRITICAL: Uses TypeMap to short-circuit built-in types BEFORE graph lookup.
     /// This prevents PG_LOAD_001 false positives for primitives.
+    /// TS2693 FIX: Qualifies value-imported types with namespace alias.
     /// </summary>
     public string For(NamedTypeReference named)
     {
@@ -51,7 +58,20 @@ public sealed class TypeNameResolver
             return builtinType;
         }
 
-        // 2. Look up TypeSymbol in graph using StableId
+        // 2. TS2693 FIX: Check if this type needs qualification with namespace alias
+        //    This happens when the type is used as a value (base class/interface)
+        if (_importPlan != null && _currentNamespace != null)
+        {
+            var clrFullName = named.FullName;
+            if (_importPlan.ValueImportQualifiedNames.TryGetValue((_currentNamespace, clrFullName), out var qualifiedName))
+            {
+                // This type was imported as a value and needs qualification
+                // Return qualified name: "System_Internal.Exception"
+                return qualifiedName;
+            }
+        }
+
+        // 3. Look up TypeSymbol in graph using StableId
         var stableId = $"{named.AssemblyName}:{named.FullName}";
 
         if (!_graph.TypeIndex.TryGetValue(stableId, out var typeSymbol))
@@ -82,7 +102,7 @@ public sealed class TypeNameResolver
             return result.Sanitized;
         }
 
-        // 3. Get final TypeScript name from Renamer (single source of truth)
+        // 4. Get final TypeScript name from Renamer (single source of truth)
         var finalName = _ctx.Renamer.GetFinalTypeName(typeSymbol);
 
         return finalName;

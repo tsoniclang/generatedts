@@ -61,7 +61,8 @@ public static class InternalIndexEmitter
     private static string GenerateNamespaceDeclaration(BuildContext ctx, SymbolGraph graph, ImportPlan importPlan, NamespaceEmitOrder nsOrder)
     {
         // Create TypeNameResolver - single source of truth for type names
-        var resolver = new TypeNameResolver(ctx, graph);
+        // TS2693 FIX: Pass ImportPlan and current namespace for qualified name resolution
+        var resolver = new TypeNameResolver(ctx, graph, importPlan, nsOrder.Namespace.Name);
 
         var sb = new StringBuilder();
 
@@ -94,13 +95,26 @@ public static class InternalIndexEmitter
             // Sort imports by module specifier for stable output
             foreach (var import in imports.OrderBy(i => i.ImportPath))
             {
-                // Build type list with aliases if needed
-                var typeImports = import.TypeImports
-                    .OrderBy(ti => ti.TypeName)
-                    .Select(ti => ti.Alias != null ? $"{ti.TypeName} as {ti.Alias}" : ti.TypeName);
+                // TS2693 FIX: Use namespace imports for value imports to make them accessible inside namespace blocks
+                // TypeScript limitation: named value imports aren't accessible inside namespace declarations
+                var valueImports = import.TypeImports.Where(ti => ti.IsValueImport).ToList();
+                var typeOnlyImports = import.TypeImports.Where(ti => !ti.IsValueImport).ToList();
 
-                var typeList = string.Join(", ", typeImports);
-                sb.AppendLine($"import type {{ {typeList} }} from \"{import.ImportPath}\";");
+                // Emit namespace import for value imports (accessible inside namespace blocks)
+                if (valueImports.Count > 0)
+                {
+                    sb.AppendLine($"import * as {import.NamespaceAlias} from \"{import.ImportPath}\";");
+                }
+
+                // Emit type-only imports (for type annotations - these work in namespaces)
+                if (typeOnlyImports.Count > 0)
+                {
+                    var typeOnlyList = string.Join(", ", typeOnlyImports
+                        .OrderBy(ti => ti.TypeName)
+                        .Select(ti => ti.Alias != null ? $"{ti.TypeName} as {ti.Alias}" : ti.TypeName));
+
+                    sb.AppendLine($"import type {{ {typeOnlyList} }} from \"{import.ImportPath}\";");
+                }
             }
 
             sb.AppendLine(); // Blank line after imports

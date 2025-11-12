@@ -116,9 +116,14 @@ public static class ImportPlanner
 
                 var alias = DetermineAlias(ctx, ns.Name, targetNamespace, tsName, aliases);
 
+                // TS2693 FIX: Determine if this type needs a value import (not just type import)
+                // Base classes and interfaces used in extends/implements need to be imported as values
+                var isValueImport = IsTypeUsedAsValue(importGraph, ns.Name, targetNamespace, clrName);
+
                 typeImports.Add(new TypeImport(
                     TypeName: tsName,
-                    Alias: alias));
+                    Alias: alias,
+                    IsValueImport: isValueImport));
 
                 if (alias != null)
                 {
@@ -129,12 +134,41 @@ public static class ImportPlanner
             if (typeImports.Count == 0)
                 continue;
 
+            // Generate namespace alias for this import module
+            // Format: "System" → "System_Internal", "System.Collections.Generic" → "System_Collections_Generic_Internal"
+            var namespaceAlias = GenerateNamespaceAlias(targetNamespace);
+
             var importStatement = new ImportStatement(
                 ImportPath: importPath,
                 TargetNamespace: targetNamespace,
-                TypeImports: typeImports);
+                TypeImports: typeImports,
+                NamespaceAlias: namespaceAlias);
 
             imports.Add(importStatement);
+
+            // TS2693 FIX: Build qualified name mapping for value imports
+            // This allows printers to qualify type names with namespace alias
+            foreach (var ti in typeImports.Where(t => t.IsValueImport))
+            {
+                // Get the CLR name for this type (need to map back from TS name)
+                var clrName = referencedTypeClrNames.FirstOrDefault(c =>
+                {
+                    var tsNameForClr = graph.TryGetType(c, out var ts) && ts != null
+                        ? ctx.Renamer.GetFinalTypeName(ts)
+                        : GetTypeScriptNameForExternalType(c);
+                    return tsNameForClr == ti.TypeName;
+                });
+
+                if (!string.IsNullOrEmpty(clrName))
+                {
+                    // TS2339 FIX: Qualified name must include the target namespace
+                    // because types are inside "export namespace X {}" blocks
+                    // Format: NamespaceAlias.TargetNamespace.TypeName
+                    // Example: "System_Internal.System.Exception"
+                    var qualifiedName = $"{namespaceAlias}.{targetNamespace}.{ti.TypeName}";
+                    plan.ValueImportQualifiedNames[(ns.Name, clrName)] = qualifiedName;
+                }
+            }
 
             ctx.Log("ImportPlanner", $"{ns.Name} imports {typeImports.Count} types from {targetNamespace}");
         }
@@ -208,6 +242,23 @@ public static class ImportPlanner
         return lastDot >= 0 ? namespaceName.Substring(lastDot + 1) : namespaceName;
     }
 
+    /// <summary>
+    /// TS2693 FIX: Generate a valid TypeScript identifier for namespace imports.
+    /// Converts namespace to a safe identifier by replacing dots with underscores.
+    /// Examples:
+    ///   "System" → "System_Internal"
+    ///   "System.Collections.Generic" → "System_Collections_Generic_Internal"
+    ///   "Microsoft.Win32" → "Microsoft_Win32_Internal"
+    /// </summary>
+    private static string GenerateNamespaceAlias(string namespaceName)
+    {
+        // Replace dots with underscores to make valid TS identifier
+        var safeName = namespaceName.Replace('.', '_');
+
+        // Append _Internal suffix to avoid collisions with type names
+        return $"{safeName}_Internal";
+    }
+
     private static ExportKind DetermineExportKind(Model.Symbols.TypeSymbol type)
     {
         return type.Kind switch
@@ -219,6 +270,25 @@ public static class ImportPlanner
             Model.Symbols.TypeKind.Delegate => ExportKind.Type, // Delegates emit as type aliases
             _ => ExportKind.Type
         };
+    }
+
+    /// <summary>
+    /// TS2693 FIX: Determines if a type is used as a value (not just a type).
+    /// Types used in extends/implements clauses need value imports (not 'import type').
+    /// Returns true if the type is referenced as BaseClass or Interface.
+    /// </summary>
+    private static bool IsTypeUsedAsValue(
+        ImportGraphData importGraph,
+        string sourceNamespace,
+        string targetNamespace,
+        string targetTypeClrName)
+    {
+        // Check if any cross-namespace reference for this type is BaseClass or Interface
+        return importGraph.CrossNamespaceReferences.Any(r =>
+            r.SourceNamespace == sourceNamespace &&
+            r.TargetNamespace == targetNamespace &&
+            r.TargetType == targetTypeClrName &&
+            (r.ReferenceKind == ReferenceKind.BaseClass || r.ReferenceKind == ReferenceKind.Interface));
     }
 
     /// <summary>
@@ -268,6 +338,13 @@ public sealed class ImportPlan
     public Dictionary<string, Dictionary<string, string>> ImportAliases { get; init; } = new();
 
     /// <summary>
+    /// TS2693 FIX: Maps (source namespace, target type CLR name) → qualified TypeScript name.
+    /// Used for value-imported types that must be qualified with namespace alias.
+    /// Example: ("Microsoft.CSharp.RuntimeBinder", "System.Exception") → "System_Internal.Exception"
+    /// </summary>
+    public Dictionary<(string SourceNamespace, string TargetTypeCLRName), string> ValueImportQualifiedNames { get; init; } = new();
+
+    /// <summary>
     /// Gets import statements for a specific namespace.
     /// Returns empty list if namespace has no imports.
     /// </summary>
@@ -285,14 +362,16 @@ public sealed class ImportPlan
 public sealed record ImportStatement(
     string ImportPath,
     string TargetNamespace,
-    List<TypeImport> TypeImports);
+    List<TypeImport> TypeImports,
+    string NamespaceAlias); // Alias for namespace imports (e.g., "System_Internal")
 
 /// <summary>
 /// Represents a single type import within an import statement.
 /// </summary>
 public sealed record TypeImport(
     string TypeName,
-    string? Alias);
+    string? Alias,
+    bool IsValueImport); // True for base classes/interfaces (needs 'import'), false for type-only (can use 'import type')
 
 /// <summary>
 /// Represents a TypeScript export statement.
