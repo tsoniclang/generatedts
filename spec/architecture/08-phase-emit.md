@@ -187,6 +187,100 @@ private static string EmitIntersectionTypeAlias(TypeSymbol type, TypeNameResolve
 - Creates type alias that intersects instance and views:
   - `export type List_1<T> = List_1$instance<T> & __List_1$views<T>;`
 
+### Method: FindMatchingInterface() - FIX D
+```csharp
+private static TypeReference? FindMatchingInterface(TypeSymbol type, TypeReference viewInterfaceRef)
+```
+**Lines:** 283-300
+
+**Purpose:** Find the matching interface in `type.Interfaces` that corresponds to the view's interface reference, with correct type arguments substituted.
+
+**Problem it solves:**
+```csharp
+// ViewPlanner creates ExplicitView with interface reference like:
+view.InterfaceReference = IEnumerable<T>  // Generic parameter T (open generic)
+
+// But class implements the interface with concrete type:
+class List<T> : IEnumerable<T> { }
+type.Interfaces = [ IEnumerable<T> ]  // Actual type argument matches class's T
+
+// WITHOUT FIX D:
+interface __List_1$views<T> {
+  readonly IEnumerable_1$view: IEnumerable_1<T>;  // Correct by luck
+}
+
+// But for classes with different type parameters:
+class Dictionary<TKey, TValue> : IEnumerable<KeyValuePair<TKey, TValue>> { }
+view.InterfaceReference = IEnumerable<T>  // Wrong! Should be KeyValuePair<TKey, TValue>
+
+// WITH FIX D:
+interface __Dictionary_2$views<TKey, TValue> {
+  readonly IEnumerable_1$view: IEnumerable_1<KeyValuePair<TKey, TValue>>;  // Correct!
+}
+```
+
+**Algorithm:**
+1. **Get view interface base name:**
+   - Call `GetInterfaceBaseName(viewInterfaceRef)` to extract interface name
+   - Example: `IEnumerable\`1` (without type arguments)
+
+2. **Search type's implemented interfaces:**
+   - For each `implementedInterface` in `type.Interfaces`:
+     - Get base name: `GetInterfaceBaseName(implementedInterface)`
+     - If base names match: return `implementedInterface`
+
+3. **Return:**
+   - Matched interface (with correct type arguments), or `null` if not found
+
+**Why needed:** ViewPlanner stores interface references with generic parameters from the interface's perspective, but when emitting companion views, we need the type arguments from the implementing class's perspective.
+
+**Example:**
+```csharp
+// Input:
+type = Dictionary<TKey, TValue> (implements IEnumerable<KeyValuePair<TKey, TValue>>)
+viewInterfaceRef = IEnumerable<T> (from ViewPlanner, generic param)
+
+// Processing:
+viewBaseName = "IEnumerable`1"
+type.Interfaces[0] = IEnumerable<KeyValuePair<TKey, TValue>>
+implBaseName = "IEnumerable`1"
+Match! Return IEnumerable<KeyValuePair<TKey, TValue>>
+
+// Used in EmitCompanionViewsInterface():
+var matchedInterface = FindMatchingInterface(type, view.InterfaceReference);
+// Result: IEnumerable<KeyValuePair<TKey, TValue>> (not IEnumerable<T>)
+```
+
+**Called by:** `EmitCompanionViewsInterface()` at line 267 for each view property
+
+**Impact:** Prevents generic parameter leaks in companion views. Without this, view properties would use orphaned generic parameters instead of the class's actual type arguments.
+
+### Method: GetInterfaceBaseName() - FIX D Helper
+```csharp
+private static string GetInterfaceBaseName(TypeReference typeRef)
+```
+**Lines:** 306-314
+
+**Purpose:** Extract the base name (without type arguments) from an interface reference for matching purposes.
+
+**Examples:**
+```csharp
+NamedTypeReference("IEnumerator`1", [T])           → "IEnumerator`1"
+NamedTypeReference("IEnumerable`1", [string])      → "IEnumerable`1"
+NestedTypeReference("Outer`1+Inner")               → "Inner"
+```
+
+**Algorithm:**
+- `NamedTypeReference named` → `named.Name` (just the name with arity marker)
+- `NestedTypeReference nested` → `nested.NestedName`
+- Other types → `typeRef.ToString()` or empty string
+
+**Why needed:** Interface matching must ignore type arguments and compare only the base generic definition. `IEnumerable<T>` and `IEnumerable<string>` both have base name `IEnumerable\`1`.
+
+**Used by:** `FindMatchingInterface()` to compare interface names
+
+**Note:** Returns name WITH backtick arity (e.g., `IEnumerable\`1`), not without (e.g., `IEnumerable`). This is critical for distinguishing generic arities.
+
 ### Method: NamespaceUsesSupportTypes()
 ```csharp
 private static bool NamespaceUsesSupportTypes(NamespaceSymbol ns)
