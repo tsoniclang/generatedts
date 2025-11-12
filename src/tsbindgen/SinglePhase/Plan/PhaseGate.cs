@@ -104,6 +104,14 @@ public static class PhaseGate
         // Validates imported types are actually exported by source namespaces
         ImportExport.ValidateExportCompleteness(ctx, graph, imports, validationContext);
 
+        // PhaseGate Hardening - M17: Heritage value imports (PG_IMPORT_002)
+        // Validates base classes and interfaces in heritage clauses use value imports (not type-only)
+        ImportExport.ValidateHeritageValueImports(ctx, graph, imports, validationContext);
+
+        // PhaseGate Hardening - M18: Qualified export paths (PG_EXPORT_002)
+        // Validates qualified names like 'System_Internal.System.Exception$instance' have valid export paths
+        ImportExport.ValidateQualifiedExportPaths(ctx, graph, imports, validationContext);
+
         // Report results
         ctx.Log("PhaseGate", $"Validation complete - {validationContext.ErrorCount} errors, {validationContext.WarningCount} warnings, {validationContext.InfoCount} info");
         ctx.Log("PhaseGate", $"Sanitized {validationContext.SanitizedNameCount} reserved word identifiers");

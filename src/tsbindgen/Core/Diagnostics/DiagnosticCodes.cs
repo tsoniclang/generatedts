@@ -84,6 +84,8 @@ public static class DiagnosticCodes
     public const string ImportedTypeNotExported        = "TBG851"; // PG_EXPORT_001
     public const string InvalidImportModulePath        = "TBG852"; // PG_MODULE_001
     public const string FacadeImportsMustUseInternalIndex = "TBG853"; // PG_FACADE_001
+    public const string HeritageTypeOnlyImport         = "TBG854"; // PG_IMPORT_002 - Base class/interface imported as type-only (needs value import)
+    public const string QualifiedExportPathInvalid     = "TBG855"; // PG_EXPORT_002 - Qualified name path doesn't exist in export structure
 
     public const string PublicApiReferencesNonEmittedType = "TBG860"; // PG_API_001
     public const string GenericConstraintReferencesNonEmittedType = "TBG861"; // PG_API_002

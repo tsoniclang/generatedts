@@ -216,6 +216,8 @@ internal static class Context
             DiagnosticCodes.TypeNamePrinterRenamerMismatch => "Type name mismatch (Printer vs Renamer)",
             DiagnosticCodes.MissingImportForForeignType => "Type used but not imported",
             DiagnosticCodes.ImportedTypeNotExported => "Import references unexported type",
+            DiagnosticCodes.HeritageTypeOnlyImport => "Heritage clause uses type-only import (needs value)",
+            DiagnosticCodes.QualifiedExportPathInvalid => "Qualified name path doesn't exist in exports",
             DiagnosticCodes.PublicApiReferencesNonEmittedType => "Public API exposes internal/non-emitted type",
             DiagnosticCodes.GenericConstraintReferencesNonEmittedType => "Generic constraint references non-emitted type",
             DiagnosticCodes.UnsupportedClrSpecialForm => "Unsupported special form (pointer/byref/fnptr)",

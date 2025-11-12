@@ -161,11 +161,27 @@ public static class ImportPlanner
 
                 if (!string.IsNullOrEmpty(clrName))
                 {
+                    // TS2339 FIX: Use instance class name for types with views
+                    // Types with views emit as: Exception$instance + type alias Exception
+                    // Heritage clauses need the INSTANCE CLASS (value), not type alias
+                    string emittedName = ti.TypeName;
+
+                    // Check if this type has views by looking it up in the graph
+                    if (graph.TryGetType(clrName, out var targetType) && targetType != null)
+                    {
+                        // If type has explicit views, use $instance suffix
+                        if (targetType.ExplicitViews.Length > 0 &&
+                            (targetType.Kind == Model.Symbols.TypeKind.Class || targetType.Kind == Model.Symbols.TypeKind.Struct))
+                        {
+                            emittedName = $"{ti.TypeName}$instance";
+                        }
+                    }
+
                     // TS2339 FIX: Qualified name must include the target namespace
                     // because types are inside "export namespace X {}" blocks
-                    // Format: NamespaceAlias.TargetNamespace.TypeName
-                    // Example: "System_Internal.System.Exception"
-                    var qualifiedName = $"{namespaceAlias}.{targetNamespace}.{ti.TypeName}";
+                    // Format: NamespaceAlias.TargetNamespace.InstanceClassName
+                    // Example: "System_Internal.System.Exception$instance"
+                    var qualifiedName = $"{namespaceAlias}.{targetNamespace}.{emittedName}";
                     plan.ValueImportQualifiedNames[(ns.Name, clrName)] = qualifiedName;
                 }
             }
@@ -274,8 +290,9 @@ public static class ImportPlanner
 
     /// <summary>
     /// TS2693 FIX: Determines if a type is used as a value (not just a type).
-    /// Types used in extends/implements clauses need value imports (not 'import type').
-    /// Returns true if the type is referenced as BaseClass or Interface.
+    /// Types used in extends/implements clauses AND generic constraints need value imports (not 'import type').
+    /// Returns true if the type is referenced as BaseClass, Interface, or GenericConstraint.
+    /// TS2344 FIX: Generic constraints are "type sites" that need value imports and qualified names.
     /// </summary>
     private static bool IsTypeUsedAsValue(
         ImportGraphData importGraph,
@@ -283,12 +300,14 @@ public static class ImportPlanner
         string targetNamespace,
         string targetTypeClrName)
     {
-        // Check if any cross-namespace reference for this type is BaseClass or Interface
+        // Check if any cross-namespace reference for this type is BaseClass, Interface, or GenericConstraint
         return importGraph.CrossNamespaceReferences.Any(r =>
             r.SourceNamespace == sourceNamespace &&
             r.TargetNamespace == targetNamespace &&
             r.TargetType == targetTypeClrName &&
-            (r.ReferenceKind == ReferenceKind.BaseClass || r.ReferenceKind == ReferenceKind.Interface));
+            (r.ReferenceKind == ReferenceKind.BaseClass ||
+             r.ReferenceKind == ReferenceKind.Interface ||
+             r.ReferenceKind == ReferenceKind.GenericConstraint));
     }
 
     /// <summary>

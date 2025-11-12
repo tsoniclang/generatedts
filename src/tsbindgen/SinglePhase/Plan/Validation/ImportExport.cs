@@ -376,4 +376,188 @@ internal static class ImportExport
 
         ctx.Log("PhaseGate", $"Validated {checkedImports} imports. Missing exports: {missingExports}");
     }
+
+    /// <summary>
+    /// PG_IMPORT_002: Validates that base classes and interfaces in heritage clauses are imported as values (not type-only).
+    /// Heritage clauses (extends/implements) require value imports, not 'import type'.
+    /// This catches regressions where IsValueImport flag was not set correctly.
+    /// </summary>
+    internal static void ValidateHeritageValueImports(BuildContext ctx, SymbolGraph graph, ImportPlan imports, ValidationContext validationCtx)
+    {
+        ctx.Log("PhaseGate", "Validating heritage clause value imports (PG_IMPORT_002)...");
+
+        int checkedTypes = 0;
+        int heritageTypeOnlyErrors = 0;
+
+        foreach (var ns in graph.Namespaces)
+        {
+            foreach (var type in ns.Types)
+            {
+                // Helper: Check if a heritage type reference is imported as value
+                void CheckHeritageReference(TypeReference? tr, string kind)
+                {
+                    if (tr == null) return;
+
+                    if (tr is NamedTypeReference named)
+                    {
+                        // Skip primitives
+                        if (TypeNameResolver.IsPrimitive(named.FullName))
+                            return;
+
+                        // Check if it's from the same namespace (no import needed)
+                        var stableId = $"{named.AssemblyName}:{named.FullName}";
+                        if (!graph.TypeIndex.TryGetValue(stableId, out var targetType))
+                        {
+                            // External type - skip (handled separately)
+                            return;
+                        }
+
+                        // Same namespace - skip
+                        if (targetType.Namespace == ns.Name)
+                            return;
+
+                        // Check if it's imported
+                        var tsName = ctx.Renamer.GetFinalTypeName(targetType);
+                        if (!imports.NamespaceImports.TryGetValue(ns.Name, out var importStatements))
+                        {
+                            // No imports at all - error already caught by PG_IMPORT_001
+                            return;
+                        }
+
+                        // Find the import statement for this type
+                        TypeImport? typeImport = null;
+                        foreach (var stmt in importStatements)
+                        {
+                            var ti = stmt.TypeImports.FirstOrDefault(t => t.TypeName == tsName || t.Alias == tsName);
+                            if (ti != null)
+                            {
+                                typeImport = ti;
+                                break;
+                            }
+                        }
+
+                        if (typeImport == null)
+                        {
+                            // Type not imported - error already caught by PG_IMPORT_001
+                            return;
+                        }
+
+                        // Check if it's imported as type-only (should be value import)
+                        if (!typeImport.IsValueImport)
+                        {
+                            validationCtx.RecordDiagnostic(
+                                DiagnosticCodes.HeritageTypeOnlyImport,
+                                "ERROR",
+                                $"{ns.Name}.{type.ClrName}: {kind} type '{tsName}' is imported as type-only, " +
+                                $"but heritage clauses require value imports (from {targetType.Namespace})");
+                            heritageTypeOnlyErrors++;
+                        }
+                    }
+                }
+
+                // Check base type
+                CheckHeritageReference(type.BaseType, "base class");
+
+                // Check interfaces
+                foreach (var iface in type.Interfaces)
+                    CheckHeritageReference(iface, "interface");
+
+                checkedTypes++;
+            }
+        }
+
+        ctx.Log("PhaseGate", $"Validated {checkedTypes} types. Heritage type-only import errors: {heritageTypeOnlyErrors}");
+    }
+
+    /// <summary>
+    /// PG_EXPORT_002: Validates that qualified names in ValueImportQualifiedNames have valid export paths.
+    /// For example, 'System_Internal.System.Exception$instance' requires:
+    /// 1. Namespace import 'System_Internal' exists
+    /// 2. Target namespace 'System' exports 'Exception' (or 'Exception$instance')
+    /// This catches regressions in instance name handling and qualified name construction.
+    /// </summary>
+    internal static void ValidateQualifiedExportPaths(BuildContext ctx, SymbolGraph graph, ImportPlan imports, ValidationContext validationCtx)
+    {
+        ctx.Log("PhaseGate", "Validating qualified export paths (PG_EXPORT_002)...");
+
+        int checkedQualifiedNames = 0;
+        int invalidPaths = 0;
+
+        foreach (var ((sourceNamespace, targetTypeCLRName), qualifiedName) in imports.ValueImportQualifiedNames)
+        {
+            // Parse qualified name: "System_Internal.System.Exception$instance"
+            // Format: NamespaceAlias.TargetNamespace.TypeName
+            var parts = qualifiedName.Split('.');
+            if (parts.Length < 3)
+            {
+                validationCtx.RecordDiagnostic(
+                    DiagnosticCodes.QualifiedExportPathInvalid,
+                    "ERROR",
+                    $"{sourceNamespace}: qualified name '{qualifiedName}' is malformed (expected format: NamespaceAlias.TargetNamespace.TypeName)");
+                invalidPaths++;
+                continue;
+            }
+
+            // Extract parts
+            var namespaceAlias = parts[0];
+            var targetNamespaceParts = parts.Skip(1).Take(parts.Length - 2).ToArray();
+            var targetNamespace = string.Join(".", targetNamespaceParts);
+            var typeName = parts[parts.Length - 1];
+
+            // Validate: Namespace import exists
+            if (!imports.NamespaceImports.TryGetValue(sourceNamespace, out var importStatements))
+            {
+                validationCtx.RecordDiagnostic(
+                    DiagnosticCodes.QualifiedExportPathInvalid,
+                    "ERROR",
+                    $"{sourceNamespace}: qualified name '{qualifiedName}' references namespace import '{namespaceAlias}', " +
+                    $"but no imports found for source namespace");
+                invalidPaths++;
+                continue;
+            }
+
+            var importStmt = importStatements.FirstOrDefault(s => s.NamespaceAlias == namespaceAlias);
+            if (importStmt == null)
+            {
+                validationCtx.RecordDiagnostic(
+                    DiagnosticCodes.QualifiedExportPathInvalid,
+                    "ERROR",
+                    $"{sourceNamespace}: qualified name '{qualifiedName}' references namespace import '{namespaceAlias}', " +
+                    $"but no import statement found with that alias");
+                invalidPaths++;
+                continue;
+            }
+
+            // Validate: Target namespace exports the type
+            if (!imports.NamespaceExports.TryGetValue(targetNamespace, out var exports))
+            {
+                validationCtx.RecordDiagnostic(
+                    DiagnosticCodes.QualifiedExportPathInvalid,
+                    "ERROR",
+                    $"{sourceNamespace}: qualified name '{qualifiedName}' references exports from '{targetNamespace}', " +
+                    $"but that namespace has no exports");
+                invalidPaths++;
+                continue;
+            }
+
+            // Check if type name is exported (might be without $instance suffix)
+            var baseTypeName = typeName.Replace("$instance", "");
+            var hasExport = exports.Any(e => e.ExportName == typeName || e.ExportName == baseTypeName);
+
+            if (!hasExport)
+            {
+                var availableExports = string.Join(", ", exports.Select(e => e.ExportName).Take(5));
+                validationCtx.RecordDiagnostic(
+                    DiagnosticCodes.QualifiedExportPathInvalid,
+                    "ERROR",
+                    $"{sourceNamespace}: qualified name '{qualifiedName}' references type '{typeName}' from '{targetNamespace}', " +
+                    $"but it's not exported. Available: {availableExports}{(exports.Count > 5 ? "..." : "")}");
+                invalidPaths++;
+            }
+
+            checkedQualifiedNames++;
+        }
+
+        ctx.Log("PhaseGate", $"Validated {checkedQualifiedNames} qualified names. Invalid paths: {invalidPaths}");
+    }
 }
