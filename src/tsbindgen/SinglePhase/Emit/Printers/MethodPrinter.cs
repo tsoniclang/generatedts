@@ -17,11 +17,21 @@ public static class MethodPrinter
     /// </summary>
     public static string Print(MethodSymbol method, TypeSymbol declaringType, TypeNameResolver resolver, BuildContext ctx)
     {
-        var sb = new StringBuilder();
-
         // Get the final TS name from Renamer using correct scope
         var scope = ScopeFactory.ClassSurface(declaringType, method.IsStatic);
         var finalName = ctx.Renamer.GetFinalMemberName(method.StableId, scope);
+
+        return PrintWithName(method, declaringType, finalName, resolver, ctx);
+    }
+
+    /// <summary>
+    /// TS2416/TS2420 FIX: Print a method signature with a custom name (for overload sets).
+    /// Used when emitting TypeScript overloads with CLR-cased names instead of Renamer names.
+    /// </summary>
+    /// <param name="emitAbstract">Optional: override whether to emit abstract keyword (for TS2512 fix)</param>
+    public static string PrintWithName(MethodSymbol method, TypeSymbol declaringType, string methodName, TypeNameResolver resolver, BuildContext ctx, bool? emitAbstract = null)
+    {
+        var sb = new StringBuilder();
 
         // Modifiers
         // IMPORTANT: Don't emit static/abstract modifiers for interface members
@@ -32,11 +42,13 @@ public static class MethodPrinter
         if (method.IsStatic && !isInterface)
             sb.Append("static ");
 
-        if (method.IsAbstract && !isInterface)
+        // TS2512 FIX: Use group-level abstract status if provided, otherwise use method's individual status
+        var shouldEmitAbstract = emitAbstract ?? method.IsAbstract;
+        if (shouldEmitAbstract && !isInterface)
             sb.Append("abstract ");
 
-        // Method name
-        sb.Append(finalName);
+        // Method name (provided by caller)
+        sb.Append(methodName);
 
         // Generic parameters: <T, U>
         if (method.GenericParameters.Length > 0)

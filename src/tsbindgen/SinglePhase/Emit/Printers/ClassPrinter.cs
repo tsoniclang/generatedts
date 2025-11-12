@@ -7,6 +7,7 @@ using tsbindgen.SinglePhase.Model.Symbols;
 using tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
 using tsbindgen.SinglePhase.Model.Types;
 using tsbindgen.SinglePhase.Renaming;
+using tsbindgen.SinglePhase.Emit.Shared;
 
 namespace tsbindgen.SinglePhase.Emit.Printers;
 
@@ -321,22 +322,27 @@ public static class ClassPrinter
         }
 
         // Fields - only emit ClassSurface members
+        // CLR-NAME CONTRACT: Use PascalCase CLR names
         foreach (var field in members.Fields.Where(f => !f.IsStatic && f.EmitScope == EmitScope.ClassSurface))
         {
-            var finalName = ctx.Renamer.GetFinalMemberName(field.StableId, typeScope);
+            // Apply CLR surface name policy
+            var emitName = NameUtilities.ApplyClrSurfaceNamePolicy(field.ClrName);
+
             sb.Append("    ");
             if (field.IsReadOnly)
                 sb.Append("readonly ");
-            sb.Append(finalName);
+            sb.Append(emitName);
             sb.Append(": ");
             sb.Append(TypeRefPrinter.Print(field.FieldType, resolver, ctx));
             sb.AppendLine(";");
         }
 
         // Properties - only emit ClassSurface members
+        // CLR-NAME CONTRACT: Use PascalCase CLR names (Count, not count)
         foreach (var prop in members.Properties.Where(p => !p.IsStatic && p.EmitScope == EmitScope.ClassSurface))
         {
-            var finalName = ctx.Renamer.GetFinalMemberName(prop.StableId, typeScope);
+            // Apply CLR surface name policy
+            var emitName = NameUtilities.ApplyClrSurfaceNamePolicy(prop.ClrName);
 
             // FIX D EXTENSION: Substitute generic parameters for properties from interfaces
             var propToEmit = SubstituteMemberIfNeeded(type, prop, ctx, graph);
@@ -344,27 +350,50 @@ public static class ClassPrinter
             sb.Append("    ");
             if (!propToEmit.HasSetter)
                 sb.Append("readonly ");
-            sb.Append(finalName);
+            sb.Append(emitName);
             sb.Append(": ");
             sb.Append(TypeRefPrinter.Print(propToEmit.PropertyType, resolver, ctx));
             sb.AppendLine(";");
         }
 
         // Methods - only emit ClassSurface members
-        // CRITICAL: Skip abstract methods in concrete classes (TypeScript: abstract methods only in abstract classes)
+        // TS2416/TS2420 FIX: Emit methods as TypeScript overload sets (grouped by CLR name)
+        // TS2512 FIX: Ensure all overloads in a group have consistent abstract/non-abstract status
         var shouldSkipAbstract = !type.IsAbstract;
-        foreach (var method in members.Methods.Where(m => !m.IsStatic && m.EmitScope == EmitScope.ClassSurface))
+        var instanceMethods = members.Methods
+            .Where(m => !m.IsStatic && m.EmitScope == EmitScope.ClassSurface)
+            .ToList();
+
+        // Group by CLR base name for overload emission
+        var methodGroups = GroupMethodsByClrName(instanceMethods, isStatic: false);
+
+        foreach (var (clrName, overloads) in methodGroups.OrderBy(kvp => kvp.Key))
         {
-            // Skip abstract methods in concrete classes - they're inherited declarations only
-            if (shouldSkipAbstract && method.IsAbstract)
-                continue;
+            // Get the CLR-based emit name (preserves casing like "Equals", "GetHashCode")
+            var emitName = GetClrEmitName(clrName);
 
-            sb.Append("    ");
+            // TS2512 FIX: Compute single abstract status for entire overload group
+            // If ALL overloads are abstract, mark the group as abstract
+            // Otherwise, emit all as non-abstract (TypeScript requires consistency)
+            var groupIsAbstract = overloads.All(m => m.IsAbstract) && type.IsAbstract;
 
-            // FIX D EXTENSION: Substitute generic parameters for methods from interfaces
-            var methodToEmit = SubstituteMemberIfNeeded(type, method, ctx, graph);
-            sb.Append(MethodPrinter.Print(methodToEmit, type, resolver, ctx));
-            sb.AppendLine(";");
+            // Emit each overload signature
+            foreach (var method in overloads)
+            {
+                // Skip abstract methods in concrete classes - they're inherited declarations only
+                if (shouldSkipAbstract && method.IsAbstract)
+                    continue;
+
+                sb.Append("    ");
+
+                // FIX D EXTENSION: Substitute generic parameters for methods from interfaces
+                var methodToEmit = SubstituteMemberIfNeeded(type, method, ctx, graph);
+
+                // TS2416/TS2420 FIX: Use CLR-cased name instead of Renamer's lowercase name
+                // TS2512 FIX: Pass group-level abstract status to ensure consistency
+                sb.Append(MethodPrinter.PrintWithName(methodToEmit, type, emitName, resolver, ctx, emitAbstract: groupIsAbstract));
+                sb.AppendLine(";");
+            }
         }
 
         // Static members
@@ -400,12 +429,15 @@ public static class ClassPrinter
         }
 
         // Const fields (as static readonly) - only emit ClassSurface or StaticSurface members
+        // CLR-NAME CONTRACT: Use PascalCase CLR names
         foreach (var field in members.Fields.Where(f => f.IsConst &&
             (f.EmitScope == EmitScope.ClassSurface || f.EmitScope == EmitScope.StaticSurface)))
         {
-            var finalName = ctx.Renamer.GetFinalMemberName(field.StableId, staticTypeScope);
+            // Apply CLR surface name policy
+            var emitName = NameUtilities.ApplyClrSurfaceNamePolicy(field.ClrName);
+
             sb.Append("    static readonly ");
-            sb.Append(finalName);
+            sb.Append(emitName);
             sb.Append(": ");
 
             var fieldType = SubstituteClassGenericsInTypeRef(field.FieldType, type.GenericParameters);
@@ -415,14 +447,17 @@ public static class ClassPrinter
 
         // Static properties - only emit ClassSurface or StaticSurface members
         // NOTE: If property type references class generics, widen to 'unknown' (TypeScript limitation)
+        // CLR-NAME CONTRACT: Use PascalCase CLR names
         foreach (var prop in members.Properties.Where(p => p.IsStatic &&
             (p.EmitScope == EmitScope.ClassSurface || p.EmitScope == EmitScope.StaticSurface)))
         {
-            var finalName = ctx.Renamer.GetFinalMemberName(prop.StableId, staticTypeScope);
+            // Apply CLR surface name policy
+            var emitName = NameUtilities.ApplyClrSurfaceNamePolicy(prop.ClrName);
+
             sb.Append("    static ");
             if (!prop.HasSetter)
                 sb.Append("readonly ");
-            sb.Append(finalName);
+            sb.Append(emitName);
             sb.Append(": ");
 
             var propType = SubstituteClassGenericsInTypeRef(prop.PropertyType, type.GenericParameters);
@@ -432,19 +467,34 @@ public static class ClassPrinter
 
         // Static methods - only emit ClassSurface or StaticSurface members
         // FIX: Lift class-level generic parameters to method-level to avoid TS2302
-        foreach (var method in members.Methods.Where(m => m.IsStatic &&
-            (m.EmitScope == EmitScope.ClassSurface || m.EmitScope == EmitScope.StaticSurface)))
+        // TS2416/TS2420 FIX: Group by CLR base name, emit TypeScript overload sets
+        // TS2512 FIX: Ensure all overloads in a group have consistent abstract/non-abstract status
+        var staticMethods = members.Methods
+            .Where(m => m.IsStatic && (m.EmitScope == EmitScope.ClassSurface || m.EmitScope == EmitScope.StaticSurface))
+            .ToList();
+
+        var staticMethodGroups = GroupMethodsByClrName(staticMethods, isStatic: true);
+
+        foreach (var (clrName, overloads) in staticMethodGroups.OrderBy(kvp => kvp.Key))
         {
-            // Skip abstract static methods in concrete classes
-            if (shouldSkipAbstract && method.IsAbstract)
-                continue;
+            var emitName = GetClrEmitName(clrName);
 
-            // Lift class generic parameters into this method
-            var liftedMethod = LiftClassGenericsToMethod(method, type, ctx);
+            // TS2512 FIX: Compute single abstract status for entire overload group
+            var groupIsAbstract = overloads.All(m => m.IsAbstract) && type.IsAbstract;
 
-            sb.Append("    ");
-            sb.Append(MethodPrinter.Print(liftedMethod, type, resolver, ctx));
-            sb.AppendLine(";");
+            foreach (var method in overloads)
+            {
+                // Skip abstract static methods in concrete classes
+                if (shouldSkipAbstract && method.IsAbstract)
+                    continue;
+
+                // Lift class generic parameters into this method
+                var liftedMethod = LiftClassGenericsToMethod(method, type, ctx);
+
+                sb.Append("    ");
+                sb.Append(MethodPrinter.PrintWithName(liftedMethod, type, emitName, resolver, ctx, emitAbstract: groupIsAbstract));
+                sb.AppendLine(";");
+            }
         }
     }
 
@@ -453,25 +503,41 @@ public static class ClassPrinter
         var members = type.Members;
 
         // Properties - only emit ClassSurface members, skip static (TypeScript doesn't support static interface members)
+        // CLR-NAME CONTRACT: Use PascalCase CLR names (Dispose, not dispose)
         foreach (var prop in members.Properties.Where(p => !p.IsStatic && p.EmitScope == EmitScope.ClassSurface))
         {
-            var propScope = ScopeFactory.ClassSurface(type, prop.IsStatic);
-            var finalName = ctx.Renamer.GetFinalMemberName(prop.StableId, propScope);
+            // Apply CLR surface name policy (preserves PascalCase, sanitizes reserved words)
+            var emitName = NameUtilities.ApplyClrSurfaceNamePolicy(prop.ClrName);
+
             sb.Append("    ");
             if (!prop.HasSetter)
                 sb.Append("readonly ");
-            sb.Append(finalName);
+            sb.Append(emitName);
             sb.Append(": ");
             sb.Append(TypeRefPrinter.Print(prop.PropertyType, resolver, ctx));
             sb.AppendLine(";");
         }
 
         // Methods - only emit ClassSurface members, skip static (TypeScript doesn't support static interface members)
-        foreach (var method in members.Methods.Where(m => !m.IsStatic && m.EmitScope == EmitScope.ClassSurface))
+        // CLR-NAME CONTRACT: Group by CLR name, emit as TypeScript overload sets
+        var interfaceMethods = members.Methods
+            .Where(m => !m.IsStatic && m.EmitScope == EmitScope.ClassSurface)
+            .ToList();
+
+        var methodGroups = GroupMethodsByClrName(interfaceMethods, isStatic: false);
+
+        foreach (var (clrName, overloads) in methodGroups.OrderBy(kvp => kvp.Key))
         {
-            sb.Append("    ");
-            sb.Append(MethodPrinter.Print(method, type, resolver, ctx));
-            sb.AppendLine(";");
+            // Get CLR-based emit name (PascalCase, sanitized)
+            var emitName = NameUtilities.ApplyClrSurfaceNamePolicy(clrName);
+
+            // Emit each overload signature (interfaces have no abstract keyword)
+            foreach (var method in overloads)
+            {
+                sb.Append("    ");
+                sb.Append(MethodPrinter.PrintWithName(method, type, emitName, resolver, ctx));
+                sb.AppendLine(";");
+            }
         }
     }
 
@@ -1083,5 +1149,31 @@ public static class ClassPrinter
         }
 
         return resolvedName;
+    }
+
+    /// <summary>
+    /// TS2416/TS2420 FIX: Get the TypeScript emit name for a method using CLR casing.
+    /// Sanitizes reserved words but does NOT apply member style transform (lowercase).
+    /// This preserves CLR method names like "Equals", "GetHashCode", "Add" on the surface.
+    /// DEPRECATED: Use NameUtilities.ApplyClrSurfaceNamePolicy instead.
+    /// </summary>
+    private static string GetClrEmitName(string clrName)
+    {
+        return NameUtilities.ApplyClrSurfaceNamePolicy(clrName);
+    }
+
+    /// <summary>
+    /// TS2416/TS2420 FIX: Group methods by CLR base name for overload emission.
+    /// Groups are partitioned by isStatic.
+    /// Returns: Dictionary[clrBaseName -> List of methods with that CLR name]
+    /// </summary>
+    private static Dictionary<string, List<MethodSymbol>> GroupMethodsByClrName(
+        IEnumerable<MethodSymbol> methods,
+        bool isStatic)
+    {
+        return methods
+            .Where(m => m.IsStatic == isStatic)
+            .GroupBy(m => m.ClrName)
+            .ToDictionary(g => g.Key, g => g.OrderBy(m => m.StableId.ToString()).ToList());
     }
 }
