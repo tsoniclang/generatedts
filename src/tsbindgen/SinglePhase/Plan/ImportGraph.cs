@@ -49,13 +49,8 @@ public static class ImportGraph
 
             foreach (var type in ns.Types.Where(t => t.Accessibility == Accessibility.Public))
             {
-                // Add to set-based index (for backwards compatibility)
-                typeNames.Add(type.ClrFullName);
-
-                // Add to fast lookup map: CLR full name → namespace
-                // CRITICAL: ClrFullName is in backtick form (e.g., "IEnumerable`1")
-                // This matches NamedTypeReference.FullName format
-                graphData.ClrFullNameToNamespace[type.ClrFullName] = ns.Name;
+                // TS2304 FIX: Index this type AND all nested types recursively
+                IndexTypeRecursively(type, ns.Name, typeNames, graphData);
             }
 
             graphData.NamespaceTypeIndex[ns.Name] = typeNames;
@@ -63,6 +58,27 @@ public static class ImportGraph
 
         ctx.Log("ImportGraph", $"Indexed {graphData.NamespaceTypeIndex.Count} namespaces");
         ctx.Log("ImportGraph", $"Fast lookup map: {graphData.ClrFullNameToNamespace.Count} types");
+    }
+
+    /// <summary>
+    /// TS2304 FIX: Recursively index a type and all its nested types.
+    /// Ensures nested types are findable for cross-namespace imports.
+    /// </summary>
+    private static void IndexTypeRecursively(
+        TypeSymbol type,
+        string namespaceName,
+        HashSet<string> typeNames,
+        ImportGraphData graphData)
+    {
+        // Index this type
+        typeNames.Add(type.ClrFullName);
+        graphData.ClrFullNameToNamespace[type.ClrFullName] = namespaceName;
+
+        // Recursively index nested types (ONLY PUBLIC nested types)
+        foreach (var nestedType in type.NestedTypes.Where(t => t.Accessibility == Accessibility.Public))
+        {
+            IndexTypeRecursively(nestedType, namespaceName, typeNames, graphData);
+        }
     }
 
     private static void AnalyzeNamespaceDependencies(
