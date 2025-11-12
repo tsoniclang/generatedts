@@ -1,275 +1,307 @@
-# Pipeline Flow
+# Pipeline Flow: Sequential Phase Execution
 
-**Entry**: `SinglePhaseBuilder.Build()` (`src/tsbindgen/SinglePhase/SinglePhaseBuilder.cs`)
+## Overview
 
-## Execution Sequence
+Pipeline executes in **strict sequential order** through 5 main phases. Each phase is **pure** (returns new immutable data) except Emit which has file I/O side effects.
+
+**Entry Point**: `SinglePhaseBuilder.Build()`
+
+## Sequential Execution
 
 ```
-BuildContext.Create()
-  ↓ LOAD
-  ↓ NORMALIZE
-  ↓ SHAPE (16 passes)
-  ↓ NAME RESERVATION
-  ↓ PLAN
-  ↓ OVERLOAD UNIFICATION
-  ↓ CONSTRAINT AUDIT
-  ↓ PHASEGATE VALIDATION
-  ↓ EMIT (if no errors)
+1. BuildContext.Create()
+2. PHASE 1: LOAD
+3. PHASE 2: NORMALIZE (Build Indices)
+4. PHASE 3: SHAPE (18 transformation passes)
+5. PHASE 3.5: NAME RESERVATION
+6. PHASE 4: PLAN
+7. PHASE 4.5: OVERLOAD UNIFICATION
+8. PHASE 4.6: INTERFACE CONSTRAINT AUDIT
+9. PHASE 4.7: PHASEGATE VALIDATION
+10. PHASE 5: EMIT (if no errors)
 ```
 
 ---
 
 ## PHASE 1: LOAD
 
+**Purpose**: Reflect over .NET assemblies to build initial SymbolGraph
+
 **Input**: `string[]` assemblyPaths
-**Output**: `SymbolGraph` (pure CLR, TsEmitName=null, EmitScope undetermined)
+**Output**: `SymbolGraph` (pure CLR, no TypeScript concepts)
+**Mutability**: Pure (immutable)
 
-- Load transitive closure (seed + dependencies)
-- Reflect via `ReflectionReader.ReadAssemblies()`
-- Substitute closed generic interface members
+**Operations**:
+1. Create `MetadataLoadContext` with reference paths
+2. Load transitive closure (seed + dependencies)
+3. Reflect via `ReflectionReader.ReadAssemblies()`
+4. Substitute closed generic interface members
+5. Build SymbolGraph:
+   - Namespaces, types, members
+   - Type references (base, interfaces, generic args)
 
-**Files**: `src/tsbindgen/SinglePhase/Load/*.cs`
+**Files**: `Load/AssemblyLoader.cs`, `Load/ReflectionReader.cs`, `Load/InterfaceMemberSubstitution.cs`, `Load/DeclaringAssemblyResolver.cs`
+
+**State**: `TsEmitName` null, `EmitScope` undetermined, interfaces not flattened
 
 ---
 
 ## PHASE 2: NORMALIZE
 
-**Input**: `SymbolGraph`
+**Purpose**: Build lookup tables for cross-reference resolution
+
+**Input**: `SymbolGraph` (from Phase 1)
 **Output**: `SymbolGraph` (with indices)
+**Mutability**: Pure (immutable)
 
-- `graph.WithIndices()` → NamespaceIndex, TypeIndex (includes nested types)
-- Build GlobalInterfaceIndex, InterfaceDeclIndex
+**Operations**:
+1. `graph.WithIndices()`:
+   - `NamespaceIndex`: namespace name → NamespaceSymbol
+   - `TypeIndex`: CLR full name → TypeSymbol
+2. Build `GlobalInterfaceIndex` (interface inheritance)
+3. Build `InterfaceDeclIndex` (member declarations)
 
-**Files**: `src/tsbindgen/SinglePhase/Shape/GlobalInterfaceIndex.cs`, `InterfaceDeclIndex.cs`
+**Files**: `Model/SymbolGraph.cs`, `Shape/GlobalInterfaceIndex.cs`, `Shape/InterfaceDeclIndex.cs`
 
 ---
 
-## PHASE 3: SHAPE (16 Passes)
+## PHASE 3: SHAPE (18 Passes)
+
+**Purpose**: Transform CLR → TypeScript semantics
 
 **Input**: `SymbolGraph` (indexed)
-**Output**: `SymbolGraph` (TS-ready, EmitScope set, TsEmitName=null)
+**Output**: `SymbolGraph` (TS-ready, unnamed)
+**Mutability**: Pure (each pass returns new graph)
 
-**Purpose**: CLR → TS semantics (flatten interfaces, synthesize members, resolve diamonds, deduplicate, determine EmitScope)
+**Transformations**: Interface flattening, explicit impl synthesis, diamond resolution, overload handling, deduplication, EmitScope determination
 
-### 16 Passes (Sequential)
+### Shape Passes (Sequential Order)
 
-1. **GlobalInterfaceIndex.Build()** - Interface inheritance lookup (side effect → BuildContext)
-2. **InterfaceDeclIndex.Build()** - Member declaration lookup (side effect → BuildContext)
-3. **StructuralConformance.Analyze()** - Synthesize ViewOnly for structural conformance
-4. **InterfaceInliner.Inline()** - Flatten interface hierarchies (copy inherited members)
-5. **ExplicitImplSynthesizer.Synthesize()** - Synthesize ViewOnly for explicit impls
-6. **DiamondResolver.Resolve()** - Resolve diamond inheritance
-7. **BaseOverloadAdder.AddOverloads()** - Add base overloads for interface compat
-8. **StaticSideAnalyzer.Analyze()** - Analyze static members/ctors (side effect)
-9. **IndexerPlanner.Plan()** - Mark indexers for omission
-10. **HiddenMemberPlanner.Plan()** - Rename hidden members (C# `new`) → Renamer decisions
-11. **FinalIndexersPass.Run()** - Remove leaked indexer properties
-12. **ClassSurfaceDeduplicator.Deduplicate()** - Pick winner, demote rest to ViewOnly
-13. **ConstraintCloser.Close()** - Complete generic constraint closures
-14. **OverloadReturnConflictResolver.Resolve()** - Resolve conflicting return types
-15. **ViewPlanner.Plan()** - Plan explicit interface views (one per interface)
-16. **MemberDeduplicator.Deduplicate()** - Final deduplication
+1. **GlobalInterfaceIndex.Build()** - Interface inheritance lookup
+2. **InterfaceDeclIndex.Build()** - Member declaration lookup
+3. **InterfaceInliner.Inline()** - Flatten interface hierarchies (copy inherited members)
+4. **InternalInterfaceFilter.Filter()** - Remove internal BCL interfaces
+5. **StructuralConformance.Analyze()** - Synthesize ViewOnly for non-conforming interfaces
+6. **ExplicitImplSynthesizer.Synthesize()** - Synthesize ViewOnly for explicit impls
+7. **InterfaceResolver.Resolve()** - Resolve declaring interface for members
+8. **DiamondResolver.Resolve()** - Resolve diamond inheritance conflicts
+9. **BaseOverloadAdder.AddOverloads()** - Add base class overloads
+10. **OverloadReturnConflictResolver.Resolve()** - Resolve return type conflicts
+11. **MemberDeduplicator.Deduplicate()** - Remove duplicates
+12. **ViewPlanner.Plan()** - Plan explicit interface views
+13. **ClassSurfaceDeduplicator.Deduplicate()** - Demote duplicates to ViewOnly
+14. **HiddenMemberPlanner.Plan()** - Handle C# 'new' keyword
+15. **IndexerPlanner.Plan()** - Mark indexers Omitted
+16. **FinalIndexersPass.Run()** - Remove leaked indexers
+17. **StaticSideAnalyzer.Analyze()** - Analyze static members
+18. **ConstraintCloser.Close()** - Complete generic constraints
 
-**Dependencies**:
-- StructuralConformance BEFORE InterfaceInliner (needs original hierarchy)
-- InterfaceInliner BEFORE ExplicitImplSynthesizer (needs flattened)
-- IndexerPlanner BEFORE FinalIndexersPass
-- ClassSurfaceDeduplicator BEFORE ConstraintCloser
-- OverloadReturnConflictResolver BEFORE ViewPlanner
-- ViewPlanner BEFORE MemberDeduplicator
+**Files**: `Shape/*.cs` (18 files)
 
-**Files**: `src/tsbindgen/SinglePhase/Shape/*.cs`
+**State After**: `EmitScope` determined, transformations complete, `TsEmitName` still null
 
 ---
 
 ## PHASE 3.5: NAME RESERVATION
 
-**Input**: `SymbolGraph` (TS-ready, unnamed)
-**Output**: `SymbolGraph` (TsEmitName assigned)
+**Purpose**: Assign all TypeScript names via SymbolRenamer
 
-- For types: Apply syntax transforms → `Renamer.ReserveTypeName()`
-- For members: Skip if renamed by earlier passes; syntax transforms (`` ` `` → `_`, `+` → `_`); reserved word sanitization (`_` suffix); `Renamer.ReserveMemberName()` with scope
-- Audit completeness (fail if missing rename decision)
-- `Application.ApplyNamesToGraph()` → set TsEmitName
+**Input**: `SymbolGraph` (TS-ready but unnamed)
+**Output**: `SymbolGraph` (fully named)
+**Mutability**: Side effect (populates Renamer) + pure (returns new graph)
+
+**Operations**:
+1. For each type: Apply transforms, reserve via `Renamer.ReserveTypeName()`
+2. For each member:
+   - Skip already renamed (by earlier passes)
+   - Apply syntax transforms (`` ` `` → `_`, `+` → `_`)
+   - Sanitize reserved words (add `_` suffix)
+   - Reserve via `Renamer.ReserveMemberName()` with correct scope
+3. Audit completeness (fail if any emitted member lacks decision)
+4. Apply names to graph (`Application.ApplyNamesToGraph()`)
+
+**Files**: `Normalize/NameReservation.cs`, `Normalize/Naming/*.cs`
 
 **Scopes**:
-- Types: `ScopeFactory.Namespace(name, NamespaceArea.Internal)`
+- Type names: `ScopeFactory.Namespace(ns, NamespaceArea.Internal)`
 - Class surface: `ScopeFactory.ClassSurface(type, isStatic)`
-- Views: `ScopeFactory.View(type, interfaceStableId)`
+- View members: `ScopeFactory.View(type, interfaceStableId)`
 
-**Files**: `src/tsbindgen/SinglePhase/Normalize/NameReservation.cs`, `Normalize/Naming/*.cs`
+**State After**: All symbols have `TsEmitName` assigned
 
 ---
 
 ## PHASE 4: PLAN
 
+**Purpose**: Build import graph, plan emission order
+
 **Input**: `SymbolGraph` (fully named)
 **Output**: `EmissionPlan` (SymbolGraph + ImportPlan + EmitOrder)
+**Mutability**: Pure (immutable)
 
-- Build ImportGraph (cross-namespace deps)
-- `ImportPlanner.PlanImports()` → imports, exports, aliases
-- `EmitOrderPlanner.PlanOrder()` → stable emission order
+**Operations**:
+1. Build `ImportGraph` (cross-namespace dependencies)
+2. Plan imports/exports via `ImportPlanner.PlanImports()`
+3. Determine stable order via `EmitOrderPlanner.PlanOrder()`
 
-**Files**: `src/tsbindgen/SinglePhase/Plan/ImportGraph.cs`, `ImportPlanner.cs`, `EmitOrderPlanner.cs`
+**Files**: `Plan/ImportGraph.cs`, `Plan/ImportPlanner.cs`, `Plan/EmitOrderPlanner.cs`
 
 ---
 
 ## PHASE 4.5: OVERLOAD UNIFICATION
 
+**Purpose**: Merge method overloads into single declaration
+
 **Input**: `SymbolGraph`
 **Output**: `SymbolGraph` (overloads unified)
+**Mutability**: Pure (immutable)
 
-- Group by name/scope, merge compatible returns, preserve distinct overloads for different returns
+**Operations**: Group by name/scope, merge compatible returns, preserve distinct signatures
 
-**Files**: `src/tsbindgen/SinglePhase/Plan/OverloadUnifier.cs`
+**Files**: `Plan/OverloadUnifier.cs`
 
 ---
 
-## PHASE 4.6: CONSTRAINT AUDIT
+## PHASE 4.6: INTERFACE CONSTRAINT AUDIT
+
+**Purpose**: Audit constructor constraints per (Type, Interface) pair
 
 **Input**: `SymbolGraph`
 **Output**: `ConstraintFindings`
+**Mutability**: Pure (immutable)
 
-- Audit constructor constraints per (Type, Interface) pair
+**Operations**: Check each (Type, Interface) for constructor constraints, record findings
 
-**Files**: `src/tsbindgen/SinglePhase/Plan/InterfaceConstraintAuditor.cs`
+**Files**: `Plan/InterfaceConstraintAuditor.cs`
 
 ---
 
 ## PHASE 4.7: PHASEGATE VALIDATION
 
+**Purpose**: Validate pipeline output before emission
+
 **Input**: `SymbolGraph` + `ImportPlan` + `ConstraintFindings`
-**Output**: Side effect → `ctx.Diagnostics` (ERROR/WARNING/INFO)
+**Output**: Side effect (records diagnostics)
+**Mutability**: Side effect only
 
-- 26 validation checks
-- Any ERROR blocks Phase 5 → `Success = false`
+**Operations**: Run 50+ validation checks, record ERROR/WARNING/INFO diagnostics
 
-**Files**: `src/tsbindgen/SinglePhase/Plan/PhaseGate.cs`, `Plan/Validation/*.cs` (26 validators)
+**Files**: `Plan/PhaseGate.cs`, `Plan/Validation/*.cs`
+
+**Critical**: Any ERROR blocks Phase 5, Build returns `Success = false`
 
 ---
 
 ## PHASE 5: EMIT
 
+**Purpose**: Generate output files
+
 **Input**: `EmissionPlan` (validated)
-**Output**: File I/O
+**Output**: File I/O (*.d.ts, *.json, *.js)
+**Mutability**: Side effects only
 
-**Gate**: Only executes if `!ctx.Diagnostics.HasErrors()`
+**Operations**:
+1. Emit `_support/types.d.ts` (marker types)
+2. For each namespace (in emission order):
+   - `<ns>/internal/index.d.ts` (internal declarations)
+   - `<ns>/index.d.ts` (public facade)
+   - `<ns>/metadata.json` (CLR info)
+   - `<ns>/bindings.json` (CLR → TS name mappings)
+   - `<ns>/index.js` (ES module stub)
 
-- `SupportTypesEmit` → `_support/types.d.ts`
-- Per namespace (emission order):
-  - `InternalIndexEmitter` → `<ns>/internal/index.d.ts`
-  - `FacadeEmitter` → `<ns>/index.d.ts`
-  - `MetadataEmitter` → `<ns>/metadata.json`
-  - `BindingEmitter` → `<ns>/bindings.json`
-  - `ModuleStubEmitter` → `<ns>/index.js`
+**Files**: `Emit/SupportTypesEmitter.cs`, `Emit/InternalIndexEmitter.cs`, `Emit/FacadeEmitter.cs`, `Emit/MetadataEmitter.cs`, `Emit/BindingEmitter.cs`, `Emit/ModuleStubEmitter.cs`
 
-**Files**: `src/tsbindgen/SinglePhase/Emit/*.cs`
-
----
-
-## Data Flow
-
-```
-string[] assemblies
-  │
-  ↓ LOAD
-SymbolGraph (CLR only, TsEmitName=null, EmitScope undetermined)
-  │
-  ↓ NORMALIZE
-SymbolGraph (indexed, TsEmitName=null)
-  │
-  ↓ SHAPE (16 passes)
-SymbolGraph (TS-ready, EmitScope set, TsEmitName=null)
-  │
-  ↓ NAME RESERVATION
-SymbolGraph (fully named, TsEmitName set)
-  │
-  ↓ PLAN
-EmissionPlan (Graph + ImportPlan + EmitOrder)
-  │
-  ↓ OVERLOAD UNIFICATION
-SymbolGraph (overloads merged)
-  │
-  ↓ CONSTRAINT AUDIT
-ConstraintFindings
-  │
-  ↓ PHASEGATE
-ctx.Diagnostics (ERROR/WARNING/INFO)
-  │
-  ├─ Has errors? → Return Success=false
-  │
-  ↓ No errors
-EMIT → Files (*.d.ts, *.json, *.js)
-```
+**Critical**: Only executes if `ctx.Diagnostics.HasErrors() == false`
 
 ---
 
-## Data Transformations Table
+## Data Transformations
 
-| Phase | Input → Output | Pure? | Key Transform |
-|-------|----------------|-------|---------------|
-| **LOAD** | `string[]` → `SymbolGraph` | ✓ | Reflection → Graph |
-| **NORMALIZE** | `SymbolGraph` → `SymbolGraph` | ✓ | Build indices |
-| **SHAPE** | `SymbolGraph` → `SymbolGraph` | ✓ | 16 passes: CLR → TS, set EmitScope |
-| **NAME RESERVATION** | `SymbolGraph` → `SymbolGraph` | ✓* | Reserve names, set TsEmitName |
-| **PLAN** | `SymbolGraph` → `EmissionPlan` | ✓ | Import graph, emission order |
-| **OVERLOAD UNIFICATION** | `SymbolGraph` → `SymbolGraph` | ✓ | Merge overloads |
-| **CONSTRAINT AUDIT** | `SymbolGraph` → `ConstraintFindings` | ✓ | Audit constraints |
-| **PHASEGATE** | Multi-input → Side effect | ✗ | 26 validators → ctx.Diagnostics |
-| **EMIT** | `EmissionPlan` → File I/O | ✗ | Generate files |
-
-*Side effect: Populates Renamer; Pure: Returns new graph
+| Phase | Input | Output | Mutability | Key Transformations |
+|-------|-------|--------|------------|---------------------|
+| **1. LOAD** | `string[]` | `SymbolGraph` | Pure | Reflection → SymbolGraph |
+| **2. NORMALIZE** | `SymbolGraph` | `SymbolGraph` | Pure | Build indices |
+| **3. SHAPE** | `SymbolGraph` | `SymbolGraph` | Pure | 18 passes: flatten, synthesize, deduplicate |
+| **3.5. NAME RESERVATION** | `SymbolGraph` | `SymbolGraph` | Side effect + pure | Reserve names, set TsEmitName |
+| **4. PLAN** | `SymbolGraph` | `EmissionPlan` | Pure | Import graph, emission order |
+| **4.5. OVERLOAD UNIFICATION** | `SymbolGraph` | `SymbolGraph` | Pure | Merge overloads |
+| **4.6. CONSTRAINT AUDIT** | `SymbolGraph` | `ConstraintFindings` | Pure | Audit constraints |
+| **4.7. PHASEGATE** | `SymbolGraph` + `ImportPlan` + `ConstraintFindings` | Side effect | Side effect | 50+ validation checks |
+| **5. EMIT** | `EmissionPlan` | File I/O | Side effects | Generate files |
 
 ---
 
-## Critical Sequencing
+## Critical Sequencing Rules
 
-**Shape Dependencies**:
-- StructuralConformance BEFORE InterfaceInliner (needs hierarchy)
-- InterfaceInliner BEFORE ExplicitImplSynthesizer (needs flattened)
-- IndexerPlanner BEFORE FinalIndexersPass (mark before remove)
-- ClassSurfaceDeduplicator BEFORE ConstraintCloser (affects constraints)
-- OverloadReturnConflictResolver BEFORE ViewPlanner (conflicts first)
-- ViewPlanner BEFORE MemberDeduplicator (plan before dedup)
+### Shape Pass Dependencies
 
-**Name Reservation**: AFTER Shape (EmitScope set), BEFORE Plan (PhaseGate needs TsEmitName)
+**MUST execute in order**:
+- **InterfaceInliner BEFORE InternalInterfaceFilter**: Filter needs flattened list
+- **InternalInterfaceFilter BEFORE StructuralConformance**: Don't synthesize for internal interfaces
+- **StructuralConformance BEFORE ExplicitImplSynthesizer**: Conformance needs original hierarchy
+- **InterfaceInliner BEFORE ExplicitImplSynthesizer**: Synthesis needs flattened interfaces
+- **IndexerPlanner BEFORE FinalIndexersPass**: Mark before removing
+- **ClassSurfaceDeduplicator BEFORE ConstraintCloser**: Dedup may affect constraints
+- **OverloadReturnConflictResolver BEFORE ViewPlanner**: Conflicts resolved before planning
+- **ViewPlanner BEFORE MemberDeduplicator**: Views planned before final dedup
 
-**PhaseGate**: AFTER transformations + naming, BEFORE Emit
+### Name Reservation Timing
 
-**Emit**: ONLY if `!ctx.Diagnostics.HasErrors()`
+**MUST occur**:
+- **AFTER** all Shape passes (EmitScope determined)
+- **BEFORE** Plan phase (PhaseGate needs TsEmitName)
+
+### PhaseGate Position
+
+**MUST occur**:
+- **AFTER** all transformations
+- **AFTER** names assigned
+- **BEFORE** Emit
+
+### Emit Gating
+
+**ONLY executes if**: `ctx.Diagnostics.HasErrors() == false`
+
+If errors exist: Build returns `Success = false` immediately
 
 ---
 
 ## Immutability Pattern
 
-Every phase (except Emit): `TOutput PhaseFunction(BuildContext ctx, TInput input)` - immutable input, returns new output
+Every phase (except Emit) follows:
 
-**Benefits**: No mutations, parallelizable, debuggable, clear flow
-
-**Example**:
 ```csharp
-public static SymbolGraph Inline(BuildContext ctx, SymbolGraph graph) {
-    var newNamespaces = graph.Namespaces
-        .Select(ns => ns with { Types = FlattenTypes(ns.Types) })
-        .ToImmutableArray();
-    return graph with { Namespaces = newNamespaces };
+public static TOutput PhaseFunction(BuildContext ctx, TInput input)
+{
+    // input is immutable - read only
+    var transformed = ApplyTransformation(input);
+    return transformed;  // New immutable output
 }
 ```
 
+**Example**:
+```csharp
+public static SymbolGraph Inline(BuildContext ctx, SymbolGraph graph)
+{
+    // graph never modified
+    var newNamespaces = graph.Namespaces
+        .Select(ns => ns with { Types = FlattenTypes(ns.Types) })
+        .ToImmutableArray();
+
+    return graph with { Namespaces = newNamespaces };  // New graph
+}
+```
+
+**Benefits**: No hidden mutations, safe parallelization (future), easy debugging, clear data flow
+
 ---
 
-## Output Files Per Namespace
+## Summary
 
-1. **index.d.ts** - TS declarations (namespaces, classes, interfaces, enums, delegates, generics, branded types)
-2. **metadata.json** - CLR info (virtual/override, static, ref/out, intentional omissions)
-3. **bindings.json** - CLR name → TS name mappings
-4. **typelist.json** - Actually emitted (completeness verification)
-5. **snapshot.json** - Post-transform state (verification)
+**Flow**: BuildContext → Load (Reflection) → Normalize (Indices) → Shape (18 transforms) → Name Reservation (SymbolRenamer) → Plan (Imports + Order) → Overload Unification → Constraint Audit → PhaseGate (Validation) → Emit (Files)
 
----
+**Principles**: Sequential execution, immutable data, pure functions, side effects isolated to Renamer and Emit
 
-## Related Docs
+**Validation**: PhaseGate enforces 50+ invariants before any files generated
 
-- [pipeline.md](../pipeline.md) - Full reference
-- [overview.md](../overview.md) - Architecture
-- [scopes.md](../../scopes.md) - Renamer scopes
+**Result**: Type-safe TypeScript declarations with 100% data integrity

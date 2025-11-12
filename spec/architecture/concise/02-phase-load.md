@@ -13,7 +13,7 @@ Pure CLR reflection phase. No TypeScript concepts yet. Outputs `SymbolGraph` wit
 
 ---
 
-## File: DeclaringAssemblyResolver.cs (FIX E Phase 1 - jumanji7)
+## File: DeclaringAssemblyResolver.cs
 
 **Purpose:** Resolves external type references to declaring assemblies using MetadataLoadContext. Foundation for cross-assembly type resolution and type-forwarding support.
 
@@ -30,8 +30,8 @@ Pure CLR reflection phase. No TypeScript concepts yet. Outputs `SymbolGraph` wit
 5. Return map: `clrKey → assemblyName`
 
 **Impact:**
-- Foundation for FIX E cross-assembly resolution
-- Enables future type-forwarding support (Phase 2)
+- Enables cross-assembly type resolution
+- Foundation for type-forwarding support
 - Used in Plan phase by ImportGraph
 
 ---
@@ -217,7 +217,7 @@ Recursive pattern matching:
 
 **GetGenericDefinitionName(fullName)**
 - Finds backtick: extract arity digits
-- Converts: `"System.IComparable<int>"` → `"System.IComparable`1"`
+- Converts: `"System.IComparable<int>"` → `"System.IComparable\`1"`
 
 ---
 
@@ -245,14 +245,14 @@ Order: ByRef → Pointer → Array → GenericParameter → Named
 
 **CreateNamed(type)**
 1. Extract assemblyName
-2. **CRITICAL - Open generic form fix (jumanji7):**
+2. **CRITICAL - Open generic form:**
    ```csharp
    var fullName = type.IsGenericType && type.IsConstructedGenericType
        ? type.GetGenericTypeDefinition().FullName  // "System.IEquatable`1"
-       : type.FullName;                            // NOT "System.IEquatable`1[[...]]]"
+       : type.FullName;                            // NOT "System.IEquatable`1[[...]]"
    ```
    - Prevents assembly-qualified type args in FullName
-   - Breaks StableId lookup if not fixed
+   - Required for correct StableId lookup
    - Related to ImportGraph.GetOpenGenericClrKey()
 3. Extract namespace, name
 4. **HARDENING:** Guarantee non-empty Name:
@@ -409,11 +409,11 @@ Recursive pattern matching:
 3. Extract types/members (reflection)
 4. Build type references (memoization + cycle detection)
 5. Build substitution maps (closed generic interfaces)
-6. **FIX E (jumanji7):** Return LoadContext for cross-assembly resolution
+6. Return LoadContext for cross-assembly resolution
 
 **Output:**
 - `SymbolGraph` with pure CLR metadata (no TypeScript concepts)
-- `MetadataLoadContext` (jumanji7) - passed to Plan phase for DeclaringAssemblyResolver
+- `MetadataLoadContext` - passed to Plan phase for DeclaringAssemblyResolver
 
 **Key design decisions:**
 - **MetadataLoadContext isolation:** Reflection on BCL without version conflicts
