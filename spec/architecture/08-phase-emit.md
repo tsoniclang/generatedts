@@ -1071,7 +1071,7 @@ private static void EmitMembers(StringBuilder sb, TypeSymbol type, TypeNameResol
 - Calls `EmitStaticMembers()` for static members
 - Uses `ScopeFactory.ClassInstance(type)` for member name resolution
 
-### Method: EmitStaticMembers() (**Updated in jumanji7**)
+### Method: EmitStaticMembers()
 ```csharp
 private static void EmitStaticMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -1101,7 +1101,7 @@ class List<T> {
 }
 ```
 
-**jumanji7 solution:**
+**Solution:**
 - **Static fields/properties**: Widen type to `unknown` (TypeScript limitation - cannot be made generic)
 - **Static methods**: Lift class generics to method generics (makes method generic instead)
 
@@ -1124,7 +1124,7 @@ private static string PrintGenericParameter(GenericParameterSymbol gp, TypeNameR
 - Single constraint: `T extends IFoo`
 - Multiple constraints: `T extends IFoo & IBar` (intersection)
 
-### Method: LiftClassGenericsToMethod() (**NEW in jumanji7**)
+### Method: LiftClassGenericsToMethod()
 
 ```csharp
 private static MethodSymbol LiftClassGenericsToMethod(MethodSymbol method, TypeSymbol declaringType, BuildContext ctx)
@@ -1234,7 +1234,7 @@ class Array_1<T> {
 ctx.Log("GenericLift", $"Lifted {liftedGenerics.Count} class generics into method {type.ClrName}.{method.ClrName}");
 ```
 
-### Method: SubstituteClassGenericsInTypeRef() (**NEW in jumanji7**)
+### Method: SubstituteClassGenericsInTypeRef()
 
 ```csharp
 private static TypeReference SubstituteClassGenericsInTypeRef(
@@ -1331,7 +1331,7 @@ class List_1<T> {
 - Safest approach: widen entire type to `unknown`
 - Alternative: Could use `any`, but `unknown` is safer (forces type checking at use site)
 
-### Method: ReferencesClassGeneric() (**NEW in jumanji7**)
+### Method: ReferencesClassGeneric()
 
 ```csharp
 private static bool ReferencesClassGeneric(TypeReference typeRef, HashSet<string> classGenericNames)
