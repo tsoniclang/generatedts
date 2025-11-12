@@ -386,6 +386,472 @@ After:
   }
 ```
 
+### FIX D: Generic Parameter Substitution (InterfaceInliner)
+
+**Purpose:** When flattening interface hierarchies, generic parameters must be substituted correctly. If a derived interface extends a generic base with specific type arguments, those type arguments must replace the base's generic parameters in all inherited members.
+
+**Problem Without FIX D:**
+```csharp
+// C# definition:
+interface IBase<T> { T GetValue(); }
+interface IDerived : IBase<string> { }
+
+// WITHOUT FIX D - Generic parameter not substituted:
+interface IDerived {
+  GetValue(): T;  // ERROR: T is orphaned (not declared in IDerived)
+}
+
+// WITH FIX D - Correctly substituted:
+interface IDerived {
+  GetValue(): string;  // CORRECT
+}
+```
+
+**What FIX D Handles:**
+1. **Direct generic substitution:** `ICollection<T>` → `ICollection<string>`
+2. **Nested generic substitution:** `ICollection<KeyValuePair<TKey, TValue>>`
+3. **Chained generic substitution:** Grandparent generics substituted through parent
+4. **Method-level generic protection:** Ensures method's own type parameters aren't substituted
+
+**Integration in InlineInterface():**
+```csharp
+// Lines 83-87: Build substitution map for each base interface
+var substitutionMap = BuildSubstitutionMapForInterface(baseIface, baseIfaceRef);
+
+// Compose with parent substitution (for chained generics)
+substitutionMap = ComposeSubstitutions(parentSubstitution, substitutionMap);
+
+// Lines 90-92: Apply substitution to all inherited members
+var substitutedMethods = SubstituteMethodMembers(baseIface.Members.Methods, substitutionMap);
+var substitutedProperties = SubstitutePropertyMembers(baseIface.Members.Properties, substitutionMap);
+var substitutedEvents = SubstituteEventMembers(baseIface.Members.Events, substitutionMap);
+```
+
+---
+
+#### `BuildSubstitutionMapForInterface(TypeSymbol baseIface, TypeReference baseIfaceRef)`
+
+**Signature:** `private static Dictionary<string, TypeReference> BuildSubstitutionMapForInterface(TypeSymbol baseIface, TypeReference baseIfaceRef)`
+
+**Lines:** 232-261
+
+**Purpose:** Builds a dictionary mapping interface generic parameter names to actual type arguments from the reference.
+
+**Example:**
+```csharp
+// Input:
+baseIface = ICollection<T> (TypeSymbol with generic param "T")
+baseIfaceRef = ICollection<KeyValuePair<TKey, TValue>> (TypeReference with type arg)
+
+// Output:
+{ "T" -> KeyValuePair<TKey, TValue> }
+```
+
+**Algorithm:**
+1. **Check type reference kind:**
+   - If not `NamedTypeReference`: return empty map (can't have type arguments)
+
+2. **Check for type arguments:**
+   - If `TypeArguments.Count == 0`: return empty map (non-generic interface)
+
+3. **Validate arity match:**
+   - If `GenericParameters.Length != TypeArguments.Count`: return empty map (defensive)
+
+4. **Build mapping:**
+   - For `i` in `0..GenericParameters.Length`:
+     - `param = baseIface.GenericParameters[i]`
+     - `arg = namedRef.TypeArguments[i]`
+     - `map[param.Name] = arg`
+
+5. **Return map**
+
+**Why needed:** Interface references carry actual type arguments (e.g., `string`), but interface symbols use generic parameters (e.g., `T`). This method creates the mapping to substitute `T` with `string` in all inherited members.
+
+**Handles non-generic interfaces:** Returns empty map, no substitution needed.
+
+---
+
+#### `ComposeSubstitutions(Dictionary<string, TypeReference> parent, Dictionary<string, TypeReference> current)`
+
+**Signature:** `private static Dictionary<string, TypeReference> ComposeSubstitutions(Dictionary<string, TypeReference> parent, Dictionary<string, TypeReference> current)`
+
+**Lines:** 267-289
+
+**Purpose:** Composes two substitution maps for chained generics (grandparent → parent → child).
+
+**Example:**
+```csharp
+// Scenario: IDictionary<TKey, TValue> : ICollection<KeyValuePair<TKey, TValue>> : IEnumerable<KeyValuePair<TKey, TValue>>
+// When processing IEnumerable (grandparent):
+
+parent = { "T" -> KeyValuePair<TKey, TValue> }  // From ICollection
+current = { "T" -> T }  // IEnumerable's own generic param
+
+// Composed result:
+{ "T" -> KeyValuePair<TKey, TValue> }
+```
+
+**Algorithm:**
+1. **Check for empty parent:**
+   - If `parent.Count == 0`: return `current` (no composition needed)
+
+2. **Apply parent substitution to current values:**
+   - For each `(key, value)` in `current`:
+     - `composed[key] = InterfaceMemberSubstitution.SubstituteTypeReference(value, parent)`
+     - This recursively substitutes any generic parameters in the value
+
+3. **Add parent-only mappings:**
+   - For each `(key, value)` in `parent`:
+     - If `key` not in `composed`: `composed[key] = value`
+
+4. **Return composed map**
+
+**Why needed:** When flattening deep interface hierarchies, generic substitutions must be transitively applied. If grandparent uses `T` but parent substitutes it with `KeyValuePair<K,V>`, the grandparent's members must get `KeyValuePair<K,V>`, not `T`.
+
+**Example - Multi-level chain:**
+```csharp
+// IEnumerable<T> defines: T Current { get; }
+// ICollection<T> : IEnumerable<T>
+// IList<string> : ICollection<string>
+
+// When inlining IList<string>:
+// - Parent map: { "T" -> string }
+// - Current map: { "T" -> T } (from IEnumerable)
+// - Composed: { "T" -> string }
+// Result: IList<string> gets "string Current { get; }" (not "T Current")
+```
+
+---
+
+#### `SubstituteMethodMembers(ImmutableArray<MethodSymbol> methods, Dictionary<string, TypeReference> substitutionMap)`
+
+**Signature:** `private static IReadOnlyList<MethodSymbol> SubstituteMethodMembers(ImmutableArray<MethodSymbol> methods, Dictionary<string, TypeReference> substitutionMap)`
+
+**Lines:** 295-344
+
+**Purpose:** Apply generic parameter substitution to method members from base interfaces.
+
+**CRITICAL:** Only substitutes **type-level** generic parameters. Does NOT substitute **method-level** generic parameters.
+
+**Example - Type-level substitution:**
+```csharp
+// Base interface:
+interface IBase<T> {
+  T GetValue();  // T is type-level generic
+}
+
+// Derived interface:
+interface IDerived : IBase<string> { }
+
+// Substitution map: { "T" -> string }
+// Result: string GetValue();
+```
+
+**Example - Method-level protection:**
+```csharp
+// Base interface:
+interface IBase<T> {
+  U Transform<U>(T input);  // T is type-level, U is method-level
+}
+
+// Derived interface:
+interface IDerived : IBase<string> { }
+
+// Substitution map: { "T" -> string }
+// Result: U Transform<U>(string input);  // T substituted, U preserved
+```
+
+**Algorithm:**
+1. **Check for empty map:**
+   - If `substitutionMap.Count == 0`: return methods unchanged
+
+2. **For each method:**
+
+   a. **Build method-level generic parameter exclusion set:**
+   ```csharp
+   var methodLevelParams = new HashSet<string>(
+       method.GenericParameters.Select(gp => gp.Name));
+   ```
+
+   b. **Filter substitution map to exclude method-level generics:**
+   ```csharp
+   var filteredMap = substitutionMap
+       .Where(kv => !methodLevelParams.Contains(kv.Key))
+       .ToDictionary(kv => kv.Key, kv => kv.Value);
+   ```
+
+   c. **If filtered map is empty:** Add method unchanged (all params are method-level)
+
+   d. **Substitute return type:**
+   ```csharp
+   var newReturnType = InterfaceMemberSubstitution.SubstituteTypeReference(
+       method.ReturnType, filteredMap);
+   ```
+
+   e. **Substitute parameters:**
+   ```csharp
+   var newParameters = method.Parameters
+       .Select(p => p with { Type = SubstituteTypeReference(p.Type, filteredMap) })
+       .ToImmutableArray();
+   ```
+
+   f. **Create substituted method symbol:**
+   ```csharp
+   substitutedMethods.Add(method with {
+       ReturnType = newReturnType,
+       Parameters = newParameters
+   });
+   ```
+
+3. **Return substituted methods**
+
+**Why method-level protection is critical:**
+```csharp
+// WITHOUT protection:
+interface IBase<T> {
+  T Parse<T>(string input);  // Method declares own T
+}
+interface IDerived : IBase<int> { }
+
+// WRONG (without protection):
+int Parse<int>(string input);  // ERROR: <int> conflicts with method's generic param
+
+// CORRECT (with protection):
+int Parse<T>(string input);  // Method's T preserved, return type T substituted
+```
+
+**Delegates to:** `InterfaceMemberSubstitution.SubstituteTypeReference()` for recursive substitution
+
+---
+
+#### `SubstitutePropertyMembers(ImmutableArray<PropertySymbol> properties, Dictionary<string, TypeReference> substitutionMap)`
+
+**Signature:** `private static IReadOnlyList<PropertySymbol> SubstitutePropertyMembers(ImmutableArray<PropertySymbol> properties, Dictionary<string, TypeReference> substitutionMap)`
+
+**Lines:** 349-381
+
+**Purpose:** Apply generic parameter substitution to property members from base interfaces.
+
+**Example:**
+```csharp
+// Base interface:
+interface IBase<T> {
+  T Value { get; set; }
+  T this[int index] { get; }  // Indexer
+}
+
+// Derived interface:
+interface IDerived : IBase<string> { }
+
+// Substitution map: { "T" -> string }
+// Result:
+// - string Value { get; set; }
+// - string this[int index] { get; }
+```
+
+**Algorithm:**
+1. **Check for empty map:**
+   - If `substitutionMap.Count == 0`: return properties unchanged
+
+2. **For each property:**
+
+   a. **Substitute property type:**
+   ```csharp
+   var newPropertyType = InterfaceMemberSubstitution.SubstituteTypeReference(
+       prop.PropertyType, substitutionMap);
+   ```
+
+   b. **Substitute index parameters (for indexers):**
+   ```csharp
+   var newIndexParameters = prop.IndexParameters
+       .Select(p => p with {
+           Type = SubstituteTypeReference(p.Type, substitutionMap)
+       })
+       .ToImmutableArray();
+   ```
+
+   c. **Create substituted property symbol:**
+   ```csharp
+   substitutedProperties.Add(prop with {
+       PropertyType = newPropertyType,
+       IndexParameters = newIndexParameters
+   });
+   ```
+
+3. **Return substituted properties**
+
+**Handles indexers:** Both the property type (return value) AND index parameters are substituted.
+
+**Example - Indexer with generic parameter:**
+```csharp
+// Base interface:
+interface IBase<T> {
+  T this[T key] { get; }  // Both return type and parameter use T
+}
+
+// Derived interface:
+interface IDerived : IBase<string> { }
+
+// Substitution map: { "T" -> string }
+// Result: string this[string key] { get; }
+```
+
+**Simpler than methods:** Properties don't have property-level generic parameters, so no exclusion logic needed.
+
+---
+
+#### `SubstituteEventMembers(ImmutableArray<EventSymbol> events, Dictionary<string, TypeReference> substitutionMap)`
+
+**Signature:** `private static IReadOnlyList<EventSymbol> SubstituteEventMembers(ImmutableArray<EventSymbol> events, Dictionary<string, TypeReference> substitutionMap)`
+
+**Lines:** 386-409
+
+**Purpose:** Apply generic parameter substitution to event members from base interfaces.
+
+**Example:**
+```csharp
+// Base interface:
+interface IBase<T> {
+  event EventHandler<T> ValueChanged;
+}
+
+// Derived interface:
+interface IDerived : IBase<string> { }
+
+// Substitution map: { "T" -> string }
+// Result: event EventHandler<string> ValueChanged;
+```
+
+**Algorithm:**
+1. **Check for empty map:**
+   - If `substitutionMap.Count == 0`: return events unchanged
+
+2. **For each event:**
+
+   a. **Substitute event handler type:**
+   ```csharp
+   var newHandlerType = InterfaceMemberSubstitution.SubstituteTypeReference(
+       evt.EventHandlerType, substitutionMap);
+   ```
+
+   b. **Create substituted event symbol:**
+   ```csharp
+   substitutedEvents.Add(evt with {
+       EventHandlerType = newHandlerType
+   });
+   ```
+
+3. **Return substituted events**
+
+**Simplest substitution:** Events only have one type to substitute (handler type).
+
+**Example - Generic delegate:**
+```csharp
+// Base interface:
+interface IBase<T> {
+  event Action<T, int> SomeEvent;  // First arg uses T, second is concrete
+}
+
+// Derived interface:
+interface IDerived : IBase<string> { }
+
+// Substitution map: { "T" -> string }
+// Result: event Action<string, int> SomeEvent;
+```
+
+**Recursive substitution:** `SubstituteTypeReference()` handles nested generics in delegate types automatically.
+
+---
+
+### FIX D Complete Example
+
+**Scenario:** Three-level interface hierarchy with generic substitution
+
+```csharp
+// C# BCL interfaces:
+interface IEnumerable<T> {
+  IEnumerator<T> GetEnumerator();
+}
+
+interface ICollection<T> : IEnumerable<T> {
+  int Count { get; }
+  void Add(T item);
+}
+
+interface IList<T> : ICollection<T> {
+  T this[int index] { get; set; }
+}
+
+// Concrete implementation:
+class MyStringList : IList<string> { }
+```
+
+**Inlining IList<string> with FIX D:**
+
+**Step 1: Process ICollection<string> (parent)**
+- Build substitution map: `{ "T" -> string }`
+- Substitute ICollection members:
+  - `int Count { get; }` (no generics, unchanged)
+  - `void Add(T item)` → `void Add(string item)`
+- Queue IEnumerable<string> (grandparent) with substitution map
+
+**Step 2: Process IEnumerable<string> (grandparent)**
+- Parent substitution: `{ "T" -> string }`
+- Build current substitution: `{ "T" -> T }` (IEnumerable's param)
+- Compose substitutions: `{ "T" -> string }` (parent overrides current)
+- Substitute IEnumerable members:
+  - `IEnumerator<T> GetEnumerator()` → `IEnumerator<string> GetEnumerator()`
+
+**Step 3: Collect all members in IList<string>**
+- Own members: `string this[int index] { get; set; }`
+- From ICollection: `int Count { get; }`, `void Add(string item)`
+- From IEnumerable: `IEnumerator<string> GetEnumerator()`
+
+**Step 4: Deduplicate and finalize**
+- Remove duplicates by signature
+- Clear `Interfaces` array (no more extends)
+
+**Result:**
+```typescript
+interface IList_1<T> {
+  // Own members:
+  [index: int]: string;
+
+  // From ICollection (substituted):
+  readonly Count: int;
+  Add(item: string): void;
+
+  // From IEnumerable (substituted):
+  GetEnumerator(): IEnumerator_1<string>;
+}
+```
+
+**Without FIX D:** All inherited members would have orphaned `T` parameters, causing TypeScript errors.
+
+---
+
+### Integration Notes
+
+**Called by:** `InterfaceInliner.InlineInterface()` during BFS traversal of interface hierarchy
+
+**Call sequence:**
+1. For each base interface reference in queue:
+   - `BuildSubstitutionMapForInterface()` - Create param→arg mapping
+   - `ComposeSubstitutions()` - Compose with parent substitution
+   - `SubstituteMethodMembers()` - Substitute method signatures
+   - `SubstitutePropertyMembers()` - Substitute property types
+   - `SubstituteEventMembers()` - Substitute event handler types
+   - Add substituted members to collection
+   - Queue grandparents with composed substitution map
+
+**Dependencies:**
+- `InterfaceMemberSubstitution.SubstituteTypeReference()` - Recursive type reference substitution
+- Uses immutable records (`with` expressions) for all transformations
+
+**Related to ClassPrinter FIX D:** ClassPrinter has similar substitution logic for class members that come from interfaces/base classes. InterfaceInliner handles interface→interface inheritance, ClassPrinter handles interface/base→class inheritance.
+
+**Impact:** Eliminates orphaned generic parameter errors in flattened interfaces. Essential for deep generic hierarchies like `IDictionary<K,V> : ICollection<KeyValuePair<K,V>> : IEnumerable<KeyValuePair<K,V>>`.
+
 ---
 
 ## Pass 4.5: InternalInterfaceFilter
