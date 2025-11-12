@@ -736,4 +736,172 @@ internal static class Names
 
         return char.ToLowerInvariant(name[0]) + name.Substring(1);
     }
+
+    /// <summary>
+    /// PG_NAME_SURF_001: Validate CLR surface name policy alignment.
+    /// For any class that implements an interface, assert that for each interface member,
+    /// a class member with the same printed name exists under the CLR-name policy.
+    /// This catches cases where the printer would emit mismatched names (Dispose vs dispose).
+    /// </summary>
+    internal static void ValidateClrSurfaceNamePolicy(BuildContext ctx, SymbolGraph graph, ValidationContext validationCtx)
+    {
+        ctx.Log("[PG]", "PG_NAME_SURF_001: Validating CLR surface name policy alignment...");
+
+        int totalClassesChecked = 0;
+        int mismatches = 0;
+
+        foreach (var ns in graph.Namespaces)
+        {
+            foreach (var type in ns.Types)
+            {
+                // Only check classes and structs that implement interfaces
+                if ((type.Kind != TypeKind.Class && type.Kind != TypeKind.Struct) || type.Interfaces.Length == 0)
+                    continue;
+
+                totalClassesChecked++;
+
+                // Build set of class surface + view member names using CLR-name policy
+                // Views represent explicit interface implementations
+                var classSurfaceNames = new HashSet<string>();
+
+                // Add class surface members
+                foreach (var method in type.Members.Methods.Where(m => !m.IsStatic && m.EmitScope == EmitScope.ClassSurface))
+                {
+                    var clrName = Emit.Shared.NameUtilities.ApplyClrSurfaceNamePolicy(method.ClrName);
+                    classSurfaceNames.Add(clrName);
+                }
+                foreach (var prop in type.Members.Properties.Where(p => !p.IsStatic && p.EmitScope == EmitScope.ClassSurface))
+                {
+                    var clrName = Emit.Shared.NameUtilities.ApplyClrSurfaceNamePolicy(prop.ClrName);
+                    classSurfaceNames.Add(clrName);
+                }
+
+                // Add view members (explicit interface implementations)
+                foreach (var view in type.ExplicitViews)
+                {
+                    foreach (var viewMember in view.ViewMembers)
+                    {
+                        var clrName = Emit.Shared.NameUtilities.ApplyClrSurfaceNamePolicy(viewMember.ClrName);
+                        classSurfaceNames.Add(clrName);
+                    }
+                }
+
+                // Check each interface the class implements
+                foreach (var ifaceRef in type.Interfaces)
+                {
+                    // Resolve interface type using TypeIndex
+                    if (ifaceRef is not NamedTypeReference namedRef)
+                        continue;
+
+                    if (!graph.TypeIndex.TryGetValue(namedRef.FullName, out var ifaceType))
+                        continue;
+
+                    if (ifaceType.Kind != TypeKind.Interface)
+                        continue;
+
+                    // Check each interface member
+                    foreach (var ifaceMethod in ifaceType.Members.Methods.Where(m => !m.IsStatic))
+                    {
+                        var ifaceClrName = Emit.Shared.NameUtilities.ApplyClrSurfaceNamePolicy(ifaceMethod.ClrName);
+                        if (!classSurfaceNames.Contains(ifaceClrName))
+                        {
+                            validationCtx.RecordDiagnostic(
+                                DiagnosticCodes.SurfaceNamePolicyMismatch,
+                                "ERROR",
+                                $"Class {type.ClrFullName} implements {ifaceType.ClrFullName} but missing member '{ifaceClrName}' (interface method '{ifaceMethod.ClrName}')");
+                            mismatches++;
+                        }
+                    }
+
+                    foreach (var ifaceProp in ifaceType.Members.Properties.Where(p => !p.IsStatic))
+                    {
+                        // Skip indexers - they're intentionally omitted from TypeScript emission
+                        if (ifaceProp.IsIndexer)
+                            continue;
+
+                        var ifaceClrName = Emit.Shared.NameUtilities.ApplyClrSurfaceNamePolicy(ifaceProp.ClrName);
+                        if (!classSurfaceNames.Contains(ifaceClrName))
+                        {
+                            validationCtx.RecordDiagnostic(
+                                DiagnosticCodes.SurfaceNamePolicyMismatch,
+                                "ERROR",
+                                $"Class {type.ClrFullName} implements {ifaceType.ClrFullName} but missing member '{ifaceClrName}' (interface property '{ifaceProp.ClrName}')");
+                            mismatches++;
+                        }
+                    }
+                }
+            }
+        }
+
+        ctx.Log("[PG]", $"PG_NAME_SURF_001: Checked {totalClassesChecked} classes, found {mismatches} mismatches");
+    }
+
+    /// <summary>
+    /// PG_NAME_SURF_002: Validate no numeric suffixes on surface members.
+    /// Fails if any printed surface or view member ends with numeric suffix (equals2, getHashCode3, etc.).
+    /// This ensures the CLR-name contract is being followed and no numeric disambiguation leaks to output.
+    /// </summary>
+    internal static void ValidateNoNumericSuffixesOnSurface(BuildContext ctx, SymbolGraph graph, ValidationContext validationCtx)
+    {
+        ctx.Log("[PG]", "PG_NAME_SURF_002: Validating no numeric suffixes on surface...");
+
+        int totalMembersChecked = 0;
+        int numericSuffixes = 0;
+
+        foreach (var ns in graph.Namespaces)
+        {
+            foreach (var type in ns.Types)
+            {
+                // Check class surface members
+                foreach (var method in type.Members.Methods.Where(m => m.EmitScope == EmitScope.ClassSurface))
+                {
+                    totalMembersChecked++;
+                    var clrName = Emit.Shared.NameUtilities.ApplyClrSurfaceNamePolicy(method.ClrName);
+                    if (Emit.Shared.NameUtilities.HasNumericSuffix(clrName))
+                    {
+                        validationCtx.RecordDiagnostic(
+                            DiagnosticCodes.NumericSuffixOnSurface,
+                            "ERROR",
+                            $"Method {type.ClrFullName}.{method.ClrName} emits with numeric suffix '{clrName}'");
+                        numericSuffixes++;
+                    }
+                }
+
+                foreach (var prop in type.Members.Properties.Where(p => p.EmitScope == EmitScope.ClassSurface))
+                {
+                    totalMembersChecked++;
+                    var clrName = Emit.Shared.NameUtilities.ApplyClrSurfaceNamePolicy(prop.ClrName);
+                    if (Emit.Shared.NameUtilities.HasNumericSuffix(clrName))
+                    {
+                        validationCtx.RecordDiagnostic(
+                            DiagnosticCodes.NumericSuffixOnSurface,
+                            "ERROR",
+                            $"Property {type.ClrFullName}.{prop.ClrName} emits with numeric suffix '{clrName}'");
+                        numericSuffixes++;
+                    }
+                }
+
+                // Check view members
+                foreach (var view in type.ExplicitViews)
+                {
+                    foreach (var viewMember in view.ViewMembers)
+                    {
+                        totalMembersChecked++;
+                        var clrName = Emit.Shared.NameUtilities.ApplyClrSurfaceNamePolicy(viewMember.ClrName);
+                        if (Emit.Shared.NameUtilities.HasNumericSuffix(clrName))
+                        {
+                            var memberKindStr = viewMember.Kind.ToString().ToLowerInvariant();
+                            validationCtx.RecordDiagnostic(
+                                DiagnosticCodes.NumericSuffixOnSurface,
+                                "ERROR",
+                                $"View {memberKindStr} {type.ClrFullName}.{view.ViewPropertyName}.{viewMember.ClrName} emits with numeric suffix '{clrName}'");
+                            numericSuffixes++;
+                        }
+                    }
+                }
+            }
+        }
+
+        ctx.Log("[PG]", $"PG_NAME_SURF_002: Checked {totalMembersChecked} members, found {numericSuffixes} numeric suffixes");
+    }
 }

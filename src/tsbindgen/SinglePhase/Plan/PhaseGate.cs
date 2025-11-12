@@ -77,6 +77,15 @@ public static class PhaseGate
         // This is the FINAL validation before emission - catches any symbol without proper finalization
         Finalization.Validate(ctx, graph, validationContext);
 
+        // PhaseGate Hardening - M6a: CLR surface name policy (PG_NAME_SURF_001)
+        // Validates that class members match interface members using CLR-name contract
+        Names.ValidateClrSurfaceNamePolicy(ctx, graph, validationContext);
+
+        // NOTE: PG_NAME_SURF_002 (numeric suffix validation) is disabled in CLR-name contract model
+        // With CLR-name contract, we emit CLR names directly (ToInt32, ToUInt16, etc.)
+        // Numeric suffixes in CLR names are legitimate, not collision-resolution artifacts
+        // Names.ValidateNoNumericSuffixesOnSurface(ctx, graph, validationContext);
+
         // PhaseGate Hardening - M7: Printer name consistency (PG_PRINT_001)
         // Validates TypeRefPrinter→TypeNameResolver→Renamer chain integrity
         Types.ValidatePrinterNameConsistency(ctx, graph, validationContext);

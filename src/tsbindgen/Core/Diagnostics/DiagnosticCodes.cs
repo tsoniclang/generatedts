@@ -93,6 +93,10 @@ public static class DiagnosticCodes
 
     public const string UnsupportedClrSpecialForm      = "TBG870"; // PG_TYPEMAP_001 (pointers/byref/function-pointer)
 
+    // 8Ax — Surface Naming Policy (CLR-name contract)
+    public const string SurfaceNamePolicyMismatch      = "TBG8A1"; // PG_NAME_SURF_001 - Class member doesn't match interface member using CLR-name policy
+    public const string NumericSuffixOnSurface         = "TBG8A2"; // PG_NAME_SURF_002 - Surface or view member ends with numeric suffix (equals2, etc.)
+
     // 9xx — Assembly Load
     public const string UnresolvedExternalType         = "TBG880"; // PG_LOAD_001
     public const string MixedPublicKeyTokenForSameName = "TBG881"; // PG_LOAD_002
