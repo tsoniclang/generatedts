@@ -1298,6 +1298,247 @@ _ => false
 
 ---
 
+## FIX D: Interface and Base Class Generic Parameter Substitution
+
+**Purpose:** Substitutes generic parameters when members come from interfaces or base classes with different generic parameter names. Prevents "orphaned generic parameter" errors where class surface methods reference type parameters not declared in the class.
+
+**Problem solved:**
+```csharp
+// C# interface with generic T
+interface IEnumerable<T> {
+    T First();
+}
+
+// Class implements with concrete type string
+class MyCollection : IEnumerable<string> {
+    // WITHOUT FIX D: Member still references "T" (orphaned - not declared in MyCollection)
+    T First();  // ❌ ERROR: T is not defined
+
+    // WITH FIX D: T is substituted with string
+    string First();  // ✅ CORRECT
+}
+```
+
+**Files**: ClassPrinter.cs (15 methods), InterfaceInliner.cs (5 methods)
+**Lines**: ~450 lines total
+**Impact**: Eliminates orphaned generic parameter references in emitted TypeScript
+
+### Entry Points (2 methods)
+
+#### `SubstituteMemberIfNeeded(TypeSymbol type, MethodSymbol method, BuildContext ctx, SymbolGraph graph)`
+
+**Purpose**: Determines if method needs generic parameter substitution and dispatches to appropriate handler.
+
+**Algorithm:**
+1. **Check Source Interface**: If `method.SourceInterface != null` → call `SubstituteInterfaceMethod()`
+2. **Check Orphaned Generics**: If method references generics not in type → call `SubstituteBaseClassMethod()`
+3. **Return original**: No substitution needed
+
+**Example:**
+```csharp
+// Method from IEnumerable<string> interface
+method.SourceInterface = IEnumerable`1
+→ SubstituteInterfaceMethod() called
+→ T substituted with string
+```
+
+#### `SubstituteMemberIfNeeded(TypeSymbol type, PropertySymbol prop, BuildContext ctx, SymbolGraph graph)`
+
+**Purpose**: Property equivalent of method substitution.
+
+**Algorithm:**
+1. **Check Source Interface**: If `prop.SourceInterface != null` → call `SubstituteInterfaceProperty()`
+2. **Check Orphaned Generics**: If property type references generics not in type → call `SubstituteBaseClassProperty()`
+3. **Return original**: No substitution needed
+
+### Interface Substitution (2 methods)
+
+#### `SubstituteInterfaceMethod(TypeSymbol type, MethodSymbol method, BuildContext ctx, SymbolGraph graph)`
+
+**Purpose**: Substitutes generic parameters for methods from interfaces.
+
+**Algorithm:**
+1. **Match interface**: Call `FindMatchingInterfaceForMember(type, method.SourceInterface)`
+   - Matches `IEnumerable\`1` (open) to `IEnumerable<string>` (constructed)
+2. **Find interface symbol**: Get interface TypeSymbol from graph to access generic parameter names
+3. **Build substitution map**: Call `BuildSubstitutionMapForClass(matchedInterface, ifaceSymbol)`
+   - Creates mapping: `{"T" → string}`
+4. **Filter method generics**: Exclude method-level generic parameters from substitution
+5. **Substitute types**: Apply to return type and all parameters
+6. **Return transformed method**
+
+**Example:**
+```csharp
+// Input: T First() from IEnumerable<string>
+// matchedInterface: IEnumerable<string>
+// substitutionMap: {"T" → string}
+// Output: string First()
+```
+
+#### `SubstituteInterfaceProperty(TypeSymbol type, PropertySymbol prop, BuildContext ctx, SymbolGraph graph)`
+
+**Purpose**: Property equivalent of interface method substitution.
+
+**Algorithm**: Similar to `SubstituteInterfaceMethod` but only substitutes property type (no parameters).
+
+### Base Class Substitution (2 methods)
+
+#### `SubstituteBaseClassMethod(TypeSymbol type, MethodSymbol method, BuildContext ctx, SymbolGraph graph)`
+
+**Purpose**: Substitutes generic parameters for methods inherited from base classes.
+
+**Algorithm:**
+1. **Find base class symbol**: Get base TypeSymbol from graph
+2. **Build substitution map**: Map base class generic params → actual type args
+3. **Substitute types**: Apply to return type and parameters
+4. **Return transformed method**
+
+**Example:**
+```csharp
+// Base class: List<T> with method T GetItem(int index)
+// Derived class: MyList : List<string>
+// Substitution map: {"T" → string}
+// Output: string GetItem(int index)
+```
+
+#### `SubstituteBaseClassProperty(TypeSymbol type, PropertySymbol prop, BuildContext ctx, SymbolGraph graph)`
+
+**Purpose**: Property equivalent of base class method substitution.
+
+### Orphaned Generic Detection (3 methods)
+
+#### `HasOrphanedGenericParameters(TypeSymbol type, MethodSymbol method)`
+
+**Purpose**: Checks if method references generic parameters not declared in the type.
+
+**Algorithm:**
+1. Build set of type's generic parameter names
+2. Build set of method's generic parameter names (method-level generics)
+3. Call `ContainsOrphanedGenericParameter()` on return type and all parameters
+4. Return true if any orphaned generics found
+
+**Example:**
+```csharp
+// Type MyList (no generics)
+// Method: T GetItem(int index) where T from base class
+// → HasOrphanedGenericParameters returns true (T is orphaned)
+```
+
+#### `HasOrphanedGenericParametersInProperty(TypeSymbol type, PropertySymbol prop)`
+
+**Purpose**: Property equivalent of orphaned generic detection.
+
+#### `ContainsOrphanedGenericParameter(TypeReference typeRef, HashSet<string> typeGenericParams, HashSet<string> methodGenericParams)`
+
+**Purpose**: Recursively checks if TypeReference contains generic parameters not in type or method.
+
+**Algorithm by TypeReference kind:**
+- **GenericParameterReference**: Check if name is in typeGenericParams or methodGenericParams
+- **NamedTypeReference**: Recurse into type arguments
+- **NestedTypeReference**: Recurse into full reference type arguments
+- **ArrayTypeReference**: Recurse into element type
+- **PointerTypeReference/ByRefTypeReference**: Recurse into pointee/referenced type
+
+### Interface Matching (2 methods)
+
+#### `FindMatchingInterfaceForMember(TypeSymbol type, TypeReference sourceInterface)`
+
+**Purpose**: Matches an open generic interface reference to the class's actual (constructed) interface implementation.
+
+**Algorithm:**
+1. Get interface base name: `IEnumerable` from `IEnumerable\`1`
+2. Search type's interface list for matching base name
+3. Return first match (constructed interface with actual type arguments)
+
+**Example:**
+```csharp
+// Class implements: IEnumerable<string>, ICollection<string>
+// SourceInterface: IEnumerable`1 (open)
+// → Finds and returns: IEnumerable<string> (constructed)
+```
+
+#### `GetInterfaceBaseName(TypeReference typeRef)`
+
+**Purpose**: Extracts base name without generic arity.
+
+**Examples:**
+- `IEnumerable\`1` → `IEnumerable`
+- `Dictionary\`2` → `Dictionary`
+
+### Substitution Map Building (1 method)
+
+#### `BuildSubstitutionMapForClass(TypeReference actualInterface, TypeSymbol interfaceSymbol)`
+
+**Purpose**: Builds mapping from interface generic parameter names to actual type arguments.
+
+**Algorithm:**
+1. Get actual type arguments from constructed interface: `IEnumerable<string>` → `[string]`
+2. Get generic parameter names from interface symbol: `IEnumerable\`1<T>` → `["T"]`
+3. Zip together: `{"T" → string}`
+
+**Example:**
+```csharp
+// actualInterface: Dictionary<string, int>
+// interfaceSymbol: IDictionary`2<TKey, TValue>
+// Result: {"TKey" → string, "TValue" → int}
+```
+
+### Symbol Lookup (3 methods)
+
+#### `FindInterfaceSymbol(SymbolGraph graph, TypeReference interfaceRef)`
+
+**Purpose**: Finds interface TypeSymbol in graph by CLR full name.
+
+**Algorithm:**
+1. Get CLR full name from reference
+2. Search all namespaces for matching interface
+3. Return TypeSymbol (null if not found)
+
+**Used for**: Getting interface's generic parameter names for substitution map building.
+
+#### `FindTypeSymbol(SymbolGraph graph, TypeReference typeRef)`
+
+**Purpose**: Finds any TypeSymbol in graph by CLR full name.
+
+**Used for**: Finding base class symbols for base class substitution.
+
+#### `GetTypeFullName(TypeReference typeRef)`
+
+**Purpose**: Helper to extract CLR full name from TypeReference.
+
+**Handles**: NamedTypeReference, NestedTypeReference
+
+### Signature Changes
+
+**PrintClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, SymbolGraph graph, bool instanceSuffix = false)**
+- **Added parameter**: `SymbolGraph graph` (needed for FIX D lookups)
+
+**PrintStruct(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, SymbolGraph graph, bool instanceSuffix = false)**
+- **Added parameter**: `SymbolGraph graph`
+
+**EmitMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, SymbolGraph graph)**
+- **Added parameter**: `SymbolGraph graph`
+- **Calls**: `SubstituteMemberIfNeeded()` for all methods and properties before emitting
+
+### Integration
+
+**Called from**: `EmitMembers()` before emitting each method/property
+
+```csharp
+// In EmitMembers:
+foreach (var method in members.Methods) {
+    var methodToEmit = SubstituteMemberIfNeeded(type, method, ctx, graph); // FIX D
+    sb.Append(MethodPrinter.Print(methodToEmit, type, resolver, ctx));
+}
+
+foreach (var prop in members.Properties) {
+    var propToEmit = SubstituteMemberIfNeeded(type, prop, ctx, graph); // FIX D
+    // ... emit property
+}
+```
+
+---
+
 ## File: Printers/MethodPrinter.cs
 
 ### Purpose
