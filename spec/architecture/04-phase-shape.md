@@ -388,6 +388,289 @@ After:
 
 ---
 
+## Pass 4.5: InternalInterfaceFilter
+
+**File:** `InternalInterfaceFilter.cs`
+
+### Purpose
+Filter internal BCL interfaces from type interface lists. Internal interfaces are BCL implementation details that aren't publicly accessible but appear in reflection metadata. Removing them prevents TypeScript errors for interfaces that aren't meant for public consumption.
+
+**Why needed?** BCL types often implement internal interfaces like `IValueTupleInternal`, `IDebuggerDisplay`, or `ISimdVector<TSelf, T>` that exist in metadata but aren't accessible to user code. These cause TS2304 errors ("Cannot find name") when emitted.
+
+### Public API
+
+#### `InternalInterfaceFilter.FilterGraph(BuildContext ctx, SymbolGraph graph)`
+**Signature:** `public static SymbolGraph FilterGraph(BuildContext ctx, SymbolGraph graph)`
+
+**What it does:**
+- Iterates through all types in all namespaces
+- For each type: calls `FilterInterfaces(ctx, type)` to remove internal interfaces
+- Returns new `SymbolGraph` with filtered interface lists
+- Logs total count of removed interfaces
+
+**Algorithm:**
+1. For each namespace in `graph.Namespaces`:
+   - For each type in `ns.Types`:
+     - Count before: `beforeCount = type.Interfaces.Length`
+     - Filter: `filtered = FilterInterfaces(ctx, type)`
+     - Count after: `afterCount = filtered.Interfaces.Length`
+     - Track removed: `totalRemoved += (beforeCount - afterCount)`
+     - Add filtered type to namespace types list
+   - Create new namespace: `ns with { Types = filteredTypes.ToImmutableArray() }`
+2. Log summary: `"Removed {totalRemoved} internal interfaces across {namespaceCount} namespaces"`
+3. Return new graph: `graph with { Namespaces = filteredNamespaces.ToImmutableArray() }`
+
+**Called by:** Shape phase (early pass, before interface indexes built)
+
+**Impact:** Eliminates TS2304 errors for internal interfaces (Fix F: -74 errors in BCL validation)
+
+#### `InternalInterfaceFilter.FilterInterfaces(BuildContext ctx, TypeSymbol type)`
+**Signature:** `public static TypeSymbol FilterInterfaces(BuildContext ctx, TypeSymbol type)`
+
+**What it does:**
+- Filters internal interfaces from a single type's interface list
+- Returns new TypeSymbol with filtered interfaces (or original if no internal interfaces)
+
+**Algorithm:**
+1. Check empty: `if (type.Interfaces.Length == 0) return type`
+2. For each interface in `type.Interfaces`:
+   - Check: `if (IsInternalInterface(iface))`
+     - If internal: increment `removedCount`, log removal
+     - If public: add to `filtered` list
+3. If nothing removed: `if (removedCount == 0) return type`
+4. Return updated type: `type with { Interfaces = filtered.ToImmutableArray() }`
+
+**Logging:** Each removal logged with interface name and declaring type for traceability
+
+### Private Methods
+
+#### `IsInternalInterface(TypeReference typeRef)`
+**Returns:** `bool` - True if type reference represents an internal interface
+
+**Algorithm:**
+1. Get full CLR name: `fullName = GetFullName(typeRef)` (with namespace and backtick)
+2. Check explicit list: `if (ExplicitInternalInterfaces.Contains(fullName)) return true`
+3. Get simple name: `name = GetInterfaceName(typeRef)` (without namespace)
+4. Check patterns: For each `pattern` in `InternalPatterns`:
+   - `if (name.Contains(pattern, StringComparison.Ordinal)) return true`
+5. Return false (not internal)
+
+**Two-stage matching:**
+- **Explicit list** - Full name matches (e.g., `"System.Runtime.Intrinsics.ISimdVector\`2"`)
+- **Pattern matching** - Simple name contains pattern (e.g., `"Internal"` matches `IValueTupleInternal`)
+
+**CRITICAL:** Pattern matching uses simple name ONLY, not full name, to avoid false positives like filtering `System.Runtime` namespace.
+
+#### `GetFullName(TypeReference typeRef)`
+**Returns:** `string` - Full CLR name with namespace and backtick arity
+
+**Examples:**
+- `NamedTypeReference` → `"System.Collections.Generic.IEnumerable\`1"`
+- `NestedTypeReference` → `"System.Collections.Immutable.ImmutableArray\`1+Builder"`
+
+**Handles:**
+- `NamedTypeReference named` → `named.FullName`
+- `NestedTypeReference nested` → `nested.FullReference.FullName`
+- Other types → `""` (not applicable)
+
+#### `GetInterfaceName(TypeReference typeRef)`
+**Returns:** `string` - Display name without namespace (for logging and pattern matching)
+
+**Examples:**
+- `IValueTupleInternal` (not `System.IValueTupleInternal`)
+- `IDebuggerDisplay` (not `System.Diagnostics.IDebuggerDisplay`)
+
+**Handles:**
+- `NamedTypeReference named` → `named.Name`
+- `NestedTypeReference nested` → `nested.FullReference.Name`
+- Other types → `""` (not applicable)
+
+### Pattern Lists
+
+#### InternalPatterns HashSet
+**Purpose:** Common patterns in internal interface names
+
+**Patterns:**
+```csharp
+{
+    "Internal",              // IValueTupleInternal, ITupleInternal, IImmutableDictionaryInternal_2
+    "Debugger",              // IDebuggerDisplay
+    "ParseAndFormatInfo",    // IBinaryIntegerParseAndFormatInfo_1, IBinaryFloatParseAndFormatInfo_1
+    "Runtime",               // IRuntimeAlgorithm
+    "StateMachineBox",       // IStateMachineBoxAwareAwaiter
+    "SecurePooled",          // ISecurePooledObjectUser
+    "BuiltInJson",           // IBuiltInJsonTypeInfoResolver
+    "DeferredDisposable"     // IDeferredDisposable
+}
+```
+
+**Comparison:** `StringComparer.Ordinal` for exact substring matching
+
+**Why patterns?** Many internal interfaces follow naming conventions. Pattern matching handles new/undiscovered internal interfaces automatically.
+
+#### ExplicitInternalInterfaces HashSet
+**Purpose:** Internal interfaces that don't match simple patterns
+
+**Entries:**
+```csharp
+{
+    "System.Runtime.Intrinsics.ISimdVector`2",         // ISimdVector_2<TSelf, T>
+    "System.IUtfChar`1",                               // IUtfChar_1<TSelf>
+    "System.Collections.Immutable.IStrongEnumerator`1", // IStrongEnumerator_1<T>
+    "System.Collections.Immutable.IStrongEnumerable`2", // IStrongEnumerable_2<TKey, TValue>
+    "System.Runtime.CompilerServices.ITaskAwaiter",     // ITaskAwaiter
+    "System.Collections.Immutable.IImmutableArray"      // IImmutableArray
+}
+```
+
+**Format:** Full CLR names with backtick arity (e.g., `` `2 `` for two type parameters)
+
+**Why explicit list?** These interfaces have generic names (e.g., `ITaskAwaiter`) that don't contain obvious internal patterns.
+
+### Integration Point
+
+**Called in:** Shape phase, early pass (before building interface indexes)
+
+**Why early?** Cleaner to filter before indexes built rather than filter during index building or emit.
+
+**Immutable transformation:** Returns new graph with filtered types; original graph unchanged.
+
+### Examples
+
+#### Example 1: Pattern Match
+
+**Before filtering:**
+```csharp
+// Tuple_8<T1, T2, T3, T4, T5, T6, T7, TRest>
+class Tuple_8<...> : IComparable, IStructuralComparable, IStructuralEquatable,
+                      IValueTupleInternal, ITupleInternal
+{
+    // ...
+}
+```
+
+**After filtering:**
+```csharp
+// Tuple_8<T1, T2, T3, T4, T5, T6, T7, TRest>
+class Tuple_8<...> : IComparable, IStructuralComparable, IStructuralEquatable
+{
+    // IValueTupleInternal and ITupleInternal removed (matched "Internal" pattern)
+}
+```
+
+**Impact:** Prevents TS2304 errors for `IValueTupleInternal` and `ITupleInternal`
+
+#### Example 2: Explicit Match
+
+**Before filtering:**
+```csharp
+// Vector_1<T>
+class Vector_1<T> : ISimdVector_2<Vector_1<T>, T>, IEquatable_1<Vector_1<T>>
+{
+    // ...
+}
+```
+
+**After filtering:**
+```csharp
+// Vector_1<T>
+class Vector_1<T> : IEquatable_1<Vector_1<T>>
+{
+    // ISimdVector_2 removed (explicit list match)
+}
+```
+
+**Impact:** Prevents TS2304 error for `ISimdVector_2<TSelf, T>` (internal SIMD interface)
+
+#### Example 3: Multiple Interfaces
+
+**Before filtering:**
+```csharp
+// ImmutableArray_1<T>
+struct ImmutableArray_1<T> : IEnumerable_1<T>, IEnumerable,
+                              IReadOnlyList_1<T>, IReadOnlyCollection_1<T>,
+                              IStrongEnumerable_2<ImmutableArray_1<T>, T>,
+                              IImmutableArray,
+                              IEquatable_1<ImmutableArray_1<T>>
+{
+    // ...
+}
+```
+
+**After filtering:**
+```csharp
+// ImmutableArray_1<T>
+struct ImmutableArray_1<T> : IEnumerable_1<T>, IEnumerable,
+                              IReadOnlyList_1<T>, IReadOnlyCollection_1<T>,
+                              IEquatable_1<ImmutableArray_1<T>>
+{
+    // IStrongEnumerable_2 and IImmutableArray removed (explicit list)
+}
+```
+
+**Impact:** Prevents TS2304 errors for 2 internal Immutable Collections interfaces
+
+### Validation Results (Fix F)
+
+**Metrics from BCL validation:**
+- Total errors before: 2,991
+- Total errors after: 2,916
+- **Reduction: -75 errors (-2.5%)**
+- TS2304 errors before: 99
+- TS2304 errors after: 24
+- **TS2304 reduction: -75 errors (-75.8%)**
+
+**Breakdown:**
+- 74 internal interface errors eliminated
+- 1 unrelated error also fixed
+
+**Affected namespaces:**
+- System.Collections.Immutable (heaviest: 13 removals from ImmutableArray_1)
+- System.Runtime.Intrinsics
+- System.Diagnostics
+- System.Numerics
+- Others (tuples, async state machines, etc.)
+
+### Design Notes
+
+#### Why Not Filter During Reflection?
+**Question:** Why filter in Shape phase instead of reflection?
+
+**Answer:**
+- Reflection reads ALL metadata faithfully (CLR truth)
+- Shape phase transforms CLR → TypeScript semantics
+- Internal interface filtering is a TypeScript-specific concern
+- Keeps reflection pure and unaware of TypeScript
+
+#### Why Not Filter During Emit?
+**Question:** Why filter before indexes instead of during emit?
+
+**Answer:**
+- Cleaner graph for all downstream passes
+- Interface indexes don't need to handle filtered interfaces
+- Emit logic simpler (doesn't need filtering logic)
+- Single place to filter (Shape) instead of everywhere
+
+#### False Positive Prevention
+**Question:** Why check patterns on simple name, not full name?
+
+**Original bug:** Checking `"Runtime"` pattern against full names like `"System.Runtime.InteropServices.ISerializable"` caused false positives.
+
+**Fix:** Pattern matching uses simple name ONLY:
+- `ISerializable` (simple name) doesn't contain "Runtime" → NOT filtered ✅
+- `System.Runtime.InteropServices.ISerializable` (full name) contains "Runtime" → Would be filtered ❌
+
+**Result:** Eliminated 341 false positive errors (Fix F v2)
+
+#### Extensibility
+**Adding new internal interfaces:**
+1. If follows pattern (e.g., contains "Internal") → automatically filtered
+2. If generic name → add to `ExplicitInternalInterfaces` list with full CLR name
+
+**Example:** New interface `System.Foo.IBarInternal` → automatically filtered by "Internal" pattern
+
+---
+
 ## Pass 5: ExplicitImplSynthesizer
 
 **File:** `ExplicitImplSynthesizer.cs`
