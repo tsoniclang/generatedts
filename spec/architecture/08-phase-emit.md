@@ -977,17 +977,39 @@ private static void EmitMembers(StringBuilder sb, TypeSymbol type, TypeNameResol
 - Calls `EmitStaticMembers()` for static members
 - Uses `ScopeFactory.ClassInstance(type)` for member name resolution
 
-### Method: EmitStaticMembers()
+### Method: EmitStaticMembers() (**Updated in jumanji7**)
 ```csharp
 private static void EmitStaticMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
 ```
 **What it does:**
-- Emits static members:
-  - Fields (static, non-const, ClassSurface or StaticSurface)
-  - Const fields (as `static readonly`, ClassSurface or StaticSurface)
-  - Properties (static, ClassSurface or StaticSurface)
-  - Methods (static, ClassSurface or StaticSurface)
+- Emits static members with special handling for generic classes:
+  - **Fields** (static, non-const, ClassSurface or StaticSurface):
+    - **NEW**: Calls `SubstituteClassGenericsInTypeRef()` to widen types referencing class generics to `unknown`
+    - Prevents TS2302 error (static members cannot reference class type parameters)
+  - **Const fields** (as `static readonly`, ClassSurface or StaticSurface):
+    - **NEW**: Also substitutes class generics with `unknown`
+  - **Properties** (static, ClassSurface or StaticSurface):
+    - **NEW**: Substitutes class generics with `unknown`
+  - **Methods** (static, ClassSurface or StaticSurface):
+    - **NEW**: Calls `LiftClassGenericsToMethod()` to move class generic parameters to method level
+    - Prevents TS2302 error (TypeScript doesn't support static methods using class type parameters)
 - Uses `ScopeFactory.ClassStatic(type)` for member name resolution
+
+**Why generic handling is needed:**
+
+TypeScript does NOT allow static members to reference class-level type parameters:
+
+```typescript
+// ❌ INVALID TypeScript (TS2302 error)
+class List<T> {
+    static defaultValue: T;           // ERROR: Static member cannot reference class type parameter
+    static createDefault(): T { ... } // ERROR: Static member cannot reference class type parameter
+}
+```
+
+**jumanji7 solution:**
+- **Static fields/properties**: Widen type to `unknown` (TypeScript limitation - cannot be made generic)
+- **Static methods**: Lift class generics to method generics (makes method generic instead)
 
 ### Method: EmitInterfaceMembers()
 ```csharp
@@ -1007,6 +1029,272 @@ private static string PrintGenericParameter(GenericParameterSymbol gp, TypeNameR
 - Emits generic parameter with constraints
 - Single constraint: `T extends IFoo`
 - Multiple constraints: `T extends IFoo & IBar` (intersection)
+
+### Method: LiftClassGenericsToMethod() (**NEW in jumanji7**)
+
+```csharp
+private static MethodSymbol LiftClassGenericsToMethod(MethodSymbol method, TypeSymbol declaringType, BuildContext ctx)
+```
+
+**Purpose:** Lifts class-level generic parameters to method-level for static methods. Solves TS2302 error (static members cannot reference class type parameters).
+
+**Problem it solves:**
+
+```csharp
+// C# code (valid):
+class Array<T> {
+    public static void Sort<TKey>(T[] keys, TKey[] items) { ... }
+}
+
+// TypeScript (INVALID - TS2302):
+class Array_1<T> {
+    static sort<TKey>(keys: T[], items: TKey[]): void;  // ❌ ERROR: Cannot reference 'T' in static method
+}
+
+// TypeScript (VALID after lifting):
+class Array_1<T> {
+    static sort<T, TKey>(keys: T[], items: TKey[]): void;  // ✅ OK: 'T' is now a method generic
+}
+```
+
+**Algorithm:**
+
+1. **Early exit if no class generics:**
+   ```csharp
+   if (declaringType.GenericParameters.Length == 0)
+       return method;  // Nothing to lift
+   ```
+
+2. **Collect class generic parameters:**
+   ```csharp
+   var classGenerics = declaringType.GenericParameters.ToList();
+   ```
+
+3. **Check for name collisions with existing method generics:**
+   ```csharp
+   var existingMethodGenericNames = new HashSet<string>(
+       method.GenericParameters.Select(gp => gp.Name)
+   );
+   ```
+
+4. **Rename colliding class generics:**
+   - For each class generic parameter:
+     - If name collides with method generic: `T` → `T1`, `T2`, etc.
+     - Build substitution map: `oldName → GenericParameterReference(newName)`
+     - Example: Class has `T`, method has `T` → lift as `T1` to avoid collision
+
+5. **Combine generics:**
+   ```csharp
+   var combinedGenerics = liftedGenerics
+       .Concat(method.GenericParameters)
+       .ToImmutableArray();
+   ```
+   - **Order**: Lifted class generics FIRST, then method generics
+   - Ensures class generic positions match class declaration order
+
+6. **Substitute renamed generics in signatures:**
+   - If any generics were renamed (substitution map not empty):
+     - Substitute in return type: `SubstituteTypeReference(method.ReturnType, substitutionMap)`
+     - Substitute in parameters: For each param, substitute param type
+   - Uses `Load.InterfaceMemberSubstitution.SubstituteTypeReference()`
+
+7. **Return transformed method:**
+   ```csharp
+   return method with {
+       GenericParameters = combinedGenerics,
+       ReturnType = newReturnType,
+       Parameters = newParameters
+   };
+   ```
+
+**Examples:**
+
+**Example 1: Simple lifting (no collision)**
+```csharp
+// Input: class Array<T> { static void Sort(T[] array) }
+// Class generics: [T]
+// Method generics: []
+// Output: static sort<T>(array: T[]): void
+```
+
+**Example 2: Collision renaming**
+```csharp
+// Input: class Comparer<T> { static int Compare<T>(T x, T y) }
+// Class generics: [T]           (outer T)
+// Method generics: [T]          (inner T, shadows outer)
+// Collision: Both named 'T'
+// Output: static compare<T1, T>(x: T1, y: T): int
+//         (class T lifted as T1, method T keeps name T)
+```
+
+**Example 3: Multiple class generics**
+```csharp
+// Input: class Dictionary<TKey, TValue> { static Dictionary<TKey, TValue> Create() }
+// Class generics: [TKey, TValue]
+// Method generics: []
+// Output: static create<TKey, TValue>(): Dictionary_2<TKey, TValue>
+```
+
+**Logging:**
+```csharp
+ctx.Log("GenericLift", $"Lifted {liftedGenerics.Count} class generics into method {type.ClrName}.{method.ClrName}");
+```
+
+### Method: SubstituteClassGenericsInTypeRef() (**NEW in jumanji7**)
+
+```csharp
+private static TypeReference SubstituteClassGenericsInTypeRef(
+    TypeReference typeRef,
+    ImmutableArray<GenericParameterSymbol> classGenerics)
+```
+
+**Purpose:** Substitutes class-level generic parameter references with `unknown` type. Used for static fields/properties that cannot be made generic in TypeScript.
+
+**Problem it solves:**
+
+```typescript
+// TypeScript does NOT support this:
+class List<T> {
+    static empty: T;        // ❌ TS2302: Static member cannot reference class type parameter 'T'
+    static default: T[];    // ❌ TS2302: Cannot reference 'T'
+}
+
+// TypeScript DOES support this (widened to unknown):
+class List_1<T> {
+    static empty: unknown;        // ✅ OK: Widened type
+    static default: unknown[];    // ✅ OK: Array of unknown (still TS2302, but safer)
+}
+```
+
+**Algorithm:**
+
+1. **Early exit if no class generics:**
+   ```csharp
+   if (classGenerics.Length == 0)
+       return typeRef;  // Nothing to substitute
+   ```
+
+2. **Build class generic name set:**
+   ```csharp
+   var classGenericNames = new HashSet<string>(classGenerics.Select(gp => gp.Name));
+   ```
+
+3. **Check if type references any class generic:**
+   ```csharp
+   if (ReferencesClassGeneric(typeRef, classGenericNames))
+   {
+       // Widen to 'unknown'
+       return new NamedTypeReference {
+           AssemblyName = "TypeScript",
+           Namespace = "",
+           Name = "unknown",
+           FullName = "unknown",
+           Arity = 0,
+           TypeArguments = ImmutableArray<TypeReference>.Empty,
+           IsValueType = false
+       };
+   }
+   ```
+
+4. **Return original if no class generics referenced:**
+   ```csharp
+   return typeRef;
+   ```
+
+**Examples:**
+
+**Example 1: Simple substitution**
+```csharp
+// Field type: T
+// Class generics: [T]
+// Result: unknown
+```
+
+**Example 2: Array substitution**
+```csharp
+// Field type: T[]
+// Class generics: [T]
+// Result: unknown  (entire type widened, not unknown[])
+```
+
+**Example 3: Complex type substitution**
+```csharp
+// Field type: Dictionary<TKey, TValue>
+// Class generics: [TKey, TValue]
+// Result: unknown  (entire type widened)
+```
+
+**Example 4: No substitution (doesn't reference class generics)**
+```csharp
+// Field type: string
+// Class generics: [T]
+// Result: string  (unchanged, doesn't reference T)
+```
+
+**Why widen entire type:**
+- TypeScript cannot express "array of some class generic"
+- Widening to `unknown[]` would still cause TS2302
+- Safest approach: widen entire type to `unknown`
+- Alternative: Could use `any`, but `unknown` is safer (forces type checking at use site)
+
+### Method: ReferencesClassGeneric() (**NEW in jumanji7**)
+
+```csharp
+private static bool ReferencesClassGeneric(TypeReference typeRef, HashSet<string> classGenericNames)
+```
+
+**Purpose:** Recursively checks if a TypeReference contains any class-level generic parameters.
+
+**Algorithm by TypeReference kind:**
+
+```csharp
+GenericParameterReference gp =>
+    classGenericNames.Contains(gp.Name)
+    // Direct match: T references class generic T
+
+ArrayTypeReference arr =>
+    ReferencesClassGeneric(arr.ElementType, classGenericNames)
+    // Recurse: T[] contains T
+
+PointerTypeReference ptr =>
+    ReferencesClassGeneric(ptr.PointeeType, classGenericNames)
+    // Recurse: T* contains T
+
+ByRefTypeReference byref =>
+    ReferencesClassGeneric(byref.ReferencedType, classGenericNames)
+    // Recurse: ref T contains T
+
+NamedTypeReference named =>
+    named.TypeArguments.Any(arg => ReferencesClassGeneric(arg, classGenericNames))
+    // Recurse: List<T> contains T, Dictionary<string, T> contains T
+
+NestedTypeReference nested =>
+    nested.FullReference.TypeArguments.Any(arg => ReferencesClassGeneric(arg, classGenericNames))
+    // Recurse: Outer<T>.Inner contains T
+
+_ => false
+    // Unknown types: assume no class generics
+```
+
+**Examples:**
+
+| Type Reference | Class Generics | Result | Reason |
+|---|---|---|---|
+| `T` | `{T}` | `true` | Direct match |
+| `string` | `{T}` | `false` | Doesn't reference T |
+| `T[]` | `{T}` | `true` | Element type is T |
+| `List<T>` | `{T}` | `true` | Type arg is T |
+| `List<string>` | `{T}` | `false` | Type arg is string, not T |
+| `Dictionary<TKey, string>` | `{TKey, TValue}` | `true` | First type arg is TKey |
+| `Dictionary<string, int>` | `{TKey, TValue}` | `false` | No type args reference class generics |
+| `Nullable<T>` | `{T}` | `true` | Type arg is T |
+| `ref T` | `{T}` | `true` | Referenced type is T |
+
+**Why recursive:**
+- Generic type arguments can nest: `List<Dictionary<TKey, TValue>>`
+- Arrays can be generic: `T[]`
+- Pointers/refs wrap types: `ref T`, `T*`
+- Must check all levels to find class generic references
 
 ---
 
