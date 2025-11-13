@@ -253,7 +253,7 @@ method Bar<U>(U x) { }  // ERROR: TBG213 (both erase to "Bar(T): void")
 - Catches duplicates that slipped through ClassSurfaceDeduplicator
 - **Error codes**: TBG105 (DuplicatePropertyNamePostDedup)
 
-#### 6. ValidateClrSurfaceNamePolicy() - **PG_NAME_SURF_001** ⭐ **NEW IN JUMANJI8**
+#### 6. ValidateClrSurfaceNamePolicy() - **PG_NAME_SURF_001**
 
 **What it validates**:
 - Class members match interface members using CLR-name policy
@@ -327,7 +327,7 @@ class FileStream implements IDisposable {
 
 ---
 
-#### 7. ValidateNoNumericSuffixesOnSurface() - **PG_NAME_SURF_002** ⭐ **NEW IN JUMANJI8**
+#### 7. ValidateNoNumericSuffixesOnSurface() - **PG_NAME_SURF_002**
 
 **What it validates**:
 - No numeric suffixes on emitted surface or view member names
@@ -690,9 +690,9 @@ PhaseGate performs **comprehensive validation** through 50+ checks:
 - Generic constraint tracking
 - Finalization completeness
 - Policy compliance
-- **NEW CLR-name contract enforcement** ⭐
+- CLR-name contract enforcement
 
-**NEW in jumanji8**:
+**CLR-Name Contract Validators**:
 - **ValidateClrSurfaceNamePolicy()** - PG_NAME_SURF_001 (TBG8A1) - 81% reduction in TS2420 errors
 - **ValidateNoNumericSuffixesOnSurface()** - PG_NAME_SURF_002 (TBG8A2) - Currently DISABLED
 

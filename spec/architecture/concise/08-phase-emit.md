@@ -75,7 +75,7 @@ Main entry point. Emits internal declarations for all namespaces.
 ## File: Shared/NameUtilities.cs
 
 ### Purpose
-**NEW IN JUMANJI8**: Implements **CLR-name contract** - consistent naming policy across all emission surfaces. Ensures interfaces and classes emit matching member names to prevent TS2420 errors.
+Implements **CLR-name contract** - consistent naming policy across all emission surfaces. Ensures interfaces and classes emit matching member names to prevent TS2420 errors.
 
 **Key Principle**: Use CLR names (PascalCase from reflection), sanitize reserved words, NEVER use numeric suffixes.
 
@@ -466,7 +466,7 @@ Returns final TypeScript identifier from Renamer.
 - Bindings (.bindings.json) for runtime binding
 - Stubs (.js) to prevent execution
 
-**NEW in jumanji8**:
+**Key Features**:
 - **NameUtilities.cs**: CLR-name contract implementation (81% reduction in TS2420 errors)
 - **TS2693 fix**: ApplyInstanceSuffixForSameNamespaceViews() for same-namespace view references
 - **TS2863 fix**: Filter 'any'/'unknown' from extends clause

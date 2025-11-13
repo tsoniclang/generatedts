@@ -199,7 +199,7 @@ Builds GenericTypeReference for constructed generic types (List<int>, Dictionary
 ## File: DeclaringAssemblyResolver.cs
 
 ### Purpose
-**NEW IN JUMANJI8**: Resolves declaring assembly for types across assembly boundaries. Handles cross-assembly dependencies and external type references.
+Resolves declaring assembly for types across assembly boundaries. Handles cross-assembly dependencies and external type references.
 
 ### Method: ResolveDeclaringAssembly()
 ```csharp
