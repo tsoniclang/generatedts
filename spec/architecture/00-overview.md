@@ -4,7 +4,45 @@
 
 ### What is tsbindgen?
 
-**tsbindgen** is a .NET reflection-based code generation tool that transforms .NET assemblies into TypeScript declaration files with metadata sidecars. It enables the Tsonic compiler (a TypeScript-to-C# transpiler) to understand and reference .NET Base Class Library (BCL) types with full IDE support and type safety.
+\**tsbindgen** is a .NET reflection-based code generation tool that transforms .NET assemblies into TypeScript declaration files with metadata sidecars. It enables the **Tsonic compiler** (a TypeScript-to-C# compiler targeting NativeAOT) to import and use .NET Base Class Library (BCL) types from TypeScript code with full IDE support and type safety.
+
+### The Tsonic Compiler (Consumer of tsbindgen Output)
+
+**Tsonic** is a TypeScript-to-C# compiler that produces NativeAOT executables:
+
+- **Purpose**: Enable developers to write .NET applications using TypeScript syntax
+- **Not a Node.js port**: Tsonic is .NET-first, using native .NET types directly
+- **Direct .NET interop**: TypeScript code can import .NET types like `import { File } from "System.IO"`
+- **NativeAOT output**: Compiles to single-file native executables via .NET CLI
+- **Type safety**: Full TypeScript type checking against .NET APIs
+
+**Example Tsonic Code**:
+```typescript
+import { File } from "System.IO";
+import { Console } from "System";
+
+const lines = File.ReadAllLines("data.txt");  // Returns ReadonlyArray<string>
+Console.WriteLine(`Read ${lines.length} lines`);
+```
+
+**Generated C#**:
+```csharp
+using System;
+using System.IO;
+
+var lines = File.ReadAllLines("data.txt");
+Console.WriteLine($"Read {lines.Length} lines");
+```
+
+### How tsbindgen Enables Tsonic
+
+For Tsonic to compile TypeScript code that references .NET types, it needs three companion artifacts for each .NET assembly:
+
+1. **Type declarations** (`*.d.ts`) - TypeScript ambient declarations for IDE IntelliSense and type checking
+2. **Metadata sidecars** (`*.metadata.json`) - CLR semantics TypeScript can't express (virtual/override, struct, ref parameters)
+3. **Binding manifests** (`*.bindings.json`) - Maps TypeScript names to CLR names for runtime binding
+
+**tsbindgen generates all three artifacts automatically from .NET assembly DLLs.**
 
 ### Purpose
 
@@ -15,21 +53,71 @@ The primary objective is to bridge the gap between TypeScript and .NET:
 - **Output**: TypeScript `.d.ts` files, JSON metadata sidecars, and binding mappings
 
 This enables TypeScript developers using the Tsonic compiler to:
-- Reference .NET types with IntelliSense support
-- Understand CLR-specific semantics (virtual, static, ref parameters)
+- Reference .NET types with IntelliSense support in their IDE
+- Import and use .NET BCL types like `List<T>`, `Dictionary<K,V>`, `File`, `Console`
+- Understand CLR-specific semantics (virtual, static, ref parameters, struct vs class)
 - Maintain type safety across the TypeScript→C# boundary
-- Get correct code generation through metadata
+- Get correct C# code generation through metadata
 
 ### Why Does This Exist?
 
 The Tsonic compiler needs to understand .NET BCL types to:
-1. **Type-check TypeScript code** against .NET APIs
+1. **Type-check TypeScript code** against .NET APIs during compilation
 2. **Generate correct C# code** with proper member calls and overload resolution
-3. **Respect CLR semantics** (inheritance, interfaces, generics, constraints)
-4. **Handle naming conflicts** (TypeScript reserved words, duplicate names)
+3. **Respect CLR semantics** (inheritance, interfaces, generics, constraints, struct vs class)
+4. **Handle naming conflicts** (TypeScript reserved words, duplicate names, overloads)
 5. **Support explicit interface implementations** (a .NET feature with no TypeScript equivalent)
 
 Manual maintenance of 4,000+ BCL types across 130 namespaces would be infeasible. tsbindgen automates this with 100% data integrity guarantees.
+
+### Relationship to Tsonic Project
+
+tsbindgen is a **critical dependency** of the Tsonic compiler:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│              Tsonic Compiler Pipeline                   │
+│                                                         │
+│  TypeScript Source                                      │
+│       ↓                                                 │
+│  [Parse via TypeScript Compiler API]                    │
+│       ↓                                                 │
+│  [Type Check Against .NET Declarations] ← tsbindgen .d.ts
+│       ↓                                                 │
+│  [Build IR with Type Info]                              │
+│       ↓                                                 │
+│  [Generate C# Code] ← tsbindgen .metadata.json          │
+│       ↓                                                 │
+│  [Compile to NativeAOT] ← tsbindgen .bindings.json      │
+│       ↓                                                 │
+│  Single-File Native Executable                          │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Tsonic consumes tsbindgen output from configured `typeRoots`**:
+
+```jsonc
+// tsonic.config.json
+{
+  "rootNamespace": "MyApp",
+  "entryPoint": "src/index.ts",
+  "dotnet": {
+    "typeRoots": [
+      "node_modules/@tsonic/dotnet-types/10.0.0/types",  // ← tsbindgen output
+      "../tsonic-runtime/src/Tsonic.Runtime/types"
+    ],
+    "packages": [
+      { "name": "Tsonic.Runtime", "version": "1.0.0" }
+    ]
+  }
+}
+```
+
+At compile time, Tsonic:
+1. Loads all `.d.ts` files into the TypeScript type checker
+2. Loads all `.metadata.json` files to drive C# code generation
+3. Loads all `.bindings.json` files to resolve TypeScript names to CLR names
+4. Generates C# code with correct assembly references and member calls
 
 ---
 

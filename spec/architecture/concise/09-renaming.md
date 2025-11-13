@@ -1,365 +1,521 @@
-# Renaming: Central Naming System
+# Renaming System
 
 ## Overview
 
-**SymbolRenamer** is the central naming authority for all TypeScript identifiers. Single source of truth for all rename decisions.
+The Renaming system is the **centralized naming authority** for the entire generation pipeline. All TypeScript identifiers flow through `SymbolRenamer`, which:
 
-**Responsibilities:**
-1. Reserve names in scopes (namespace, class, view)
-2. Apply style transforms (PascalCase, camelCase)
-3. Resolve conflicts via numeric suffixes
-4. Sanitize reserved words (class → class_)
-5. Track rename decisions with provenance
+- **Materializes final TS identifiers** for types and members
+- **Records every rename** with full provenance (`RenameDecision`)
+- **Provides deterministic suffix allocation** for collision resolution
+- **Separates static and instance member scopes** to prevent false collisions
+- **Supports dual-scope reservations** (class surface + view surface for same member)
+
+**Key Principle**: No component guesses names. All names are reserved during planning phases and looked up during emission.
 
 ---
 
-## SymbolRenamer.cs
+## File: SymbolRenamer.cs
 
-### Core Data Structures
+### Purpose
 
-**NameReservationTable:**
-```csharp
-class NameReservationTable
-{
-    Dictionary<string, RenameDecision> _decisions;  // StableId+Scope → Decision
-    Dictionary<string, HashSet<string>> _scopeNames; // Scope → Names used
-}
-```
+Central renaming service with dual-scope algorithm. Manages name reservations across multiple scope types (namespace, class surface, view surface) with separate static/instance tracking.
 
-**RenameDecision:**
-```csharp
-record RenameDecision
-{
-    StableId Id;              // What was renamed
-    string Requested;         // What was asked for
-    string Final;             // What was decided
-    string From;              // Original CLR name
-    string Reason;            // Why this decision
-    string DecisionSource;    // Which component decided
-    string Strategy;          // "None", "NumericSuffix", "Sanitize"
-    string ScopeKey;          // Which scope
-    bool? IsStatic;           // Static vs instance
-}
-```
+### Properties (Private Fields)
+
+- `_tablesByScope` - `Dictionary<string, NameReservationTable>` - Scope key → reservation table
+- `_decisions` - `Dictionary<(StableId Id, string ScopeKey), RenameDecision>` - Records all rename decisions keyed by StableId + scope
+- `_explicitOverrides` - `Dictionary<StableId, string>` - CLI/user-specified name overrides
+- `_typeStyleTransform` - `Func<string, string>` - Style transform for type names (e.g., PascalCase)
+- `_memberStyleTransform` - `Func<string, string>` - Style transform for member names (e.g., camelCase)
+
+**M5 CRITICAL FIX**: The `_decisions` dictionary was changed from keying by `StableId` alone to `(StableId, ScopeKey)` to support dual-scope reservations. This allows the same member to have different final names in class scope vs view scope.
+
+---
 
 ### Key Methods
 
-**ReserveTypeName(StableId, string requested, NamespaceScope, string reason)**
+#### ReserveTypeName(StableId, string requested, RenameScope, string reason, string decisionSource)
+
+Reserves a type name in a namespace scope. Applies the type style transform.
+
+**Algorithm**:
+1. Get or create reservation table for scope
+2. Apply explicit overrides (if any)
+3. Apply type style transform to requested name
+4. Sanitize for TS reserved words (adds trailing underscore)
+5. Try to reserve sanitized name
+6. If collision, apply numeric suffix strategy (name2, name3, etc.)
+7. Record decision in `_decisions` dictionary
+
+**Collision Handling**:
+- First call for "Foo" → "Foo"
+- Second call for "Foo" → "Foo2"
+- Third call for "Foo" → "Foo3"
+
+#### ReserveMemberName(StableId, string requested, RenameScope, string reason, bool isStatic, string decisionSource)
+
+Reserves a member name in a type scope. Static and instance members are tracked separately. Applies the member style transform.
+
+**Dual-Scope Reservation**:
+- Creates sub-scope: `{baseScope}#static` or `{baseScope}#instance`
+- Class members: `type:System.String#instance`, `type:System.String#static`
+- View members: `view:{TypeStableId}:{InterfaceStableId}#instance`
+
+**Algorithm**:
+1. Create effective scope with `#static` or `#instance` suffix
+2. Get or create reservation table for effective scope
+3. Apply explicit overrides (if any)
+4. Apply member style transform to requested name
+5. Sanitize for TS reserved words
+6. Try to reserve sanitized name
+7. If collision, check if explicit interface implementation:
+   - Extract interface short name from qualified member name
+   - Try: `{base}_{InterfaceName}` (e.g., `get_ICollection`)
+   - If still collides, apply numeric suffix
+8. If not explicit interface impl, apply standard numeric suffix
+9. Record decision in `_decisions` with scope key
+
+**Example**:
 ```csharp
-public void ReserveTypeName(
-    StableId id,
-    string requested,
-    NamespaceScope scope,
-    string reason)
+// Class surface member
+renamer.ReserveMemberName(
+    memberStableId,
+    "ToString",
+    ScopeFactory.ClassBase(typeSymbol),
+    "NameTransform(CamelCase)",
+    isStatic: false,
+    "MemberPlanner");
+// Reserves in scope: "type:System.String#instance"
+
+// View surface member (explicit interface impl)
+renamer.ReserveMemberName(
+    memberStableId,
+    "System.Collections.ICollection.Count",
+    ScopeFactory.ViewBase(typeSymbol, interfaceStableId),
+    "ExplicitInterfaceImplementation",
+    isStatic: false,
+    "ViewPlanner");
+// Reserves in scope: "view:{TypeStableId}:{InterfaceStableId}#instance"
 ```
 
-**Algorithm:**
-1. Check if already reserved → return (idempotent)
-2. Apply transforms (PascalCase, etc.)
-3. Sanitize reserved words
-4. Check collision in scope
-5. If collision: append numeric suffix (`Type2`, `Type3`, ...)
-6. Record decision
-7. Add to scope name set
+#### GetFinalTypeName(TypeSymbol type, NamespaceArea area) -> string
 
-**ReserveMemberName(StableId, string requested, RenameScope, string reason, bool isStatic)**
+Gets the final TS name for a type (SAFE API - use this). Automatically derives the correct namespace scope from the type.
+
+**Returns**: Final TS identifier
+
+**Throws**: `InvalidOperationException` if name was not reserved
+
+**Example**:
 ```csharp
-public void ReserveMemberName(
-    StableId id,
-    string requested,
-    RenameScope scope,
-    string reason,
-    bool isStatic)
+string tsName = renamer.GetFinalTypeName(typeSymbol);
+// Returns: "MyClass" or "MyClass2" (if collision)
 ```
 
-**Algorithm:**
-1. Check if already reserved → return
-2. Apply transforms (camelCase for members)
-3. Sanitize reserved words
-4. Determine full scope key (includes `#instance` or `#static`)
-5. Check collision
-6. If collision: numeric suffix
-7. Record decision
-8. Add to scope name set
+#### GetFinalMemberName(StableId, RenameScope) -> string
 
-**GetFinalTypeName(TypeSymbol, NamespaceArea) → string**
+Gets the final TS name for a member. **M5 FIX**: Now scope-aware - different scopes (class vs view) return different names.
 
-Returns final TypeScript name for type.
+**CRITICAL**: Scope must be a SURFACE scope (with `#static` or `#instance` suffix). Use `ScopeFactory.ClassSurface/ViewSurface` for lookups.
 
-**GetFinalMemberName(StableId, RenameScope) → string**
+**Returns**: Final TS identifier for this member in this scope
 
-Returns final TypeScript name for member.
+**Throws**: `InvalidOperationException` if name was not reserved in this scope
 
-**HasFinalTypeName(StableId, NamespaceScope) → bool**
+**Algorithm**:
+1. Validate scope format (must be surface scope)
+2. Look up decision by `(stableId, scope.ScopeKey)` tuple
+3. Return `decision.Final`
+4. If not found, list available scopes for diagnostics and throw
 
-Checks if type has decision.
+**Example**:
+```csharp
+// Class surface lookup
+string className = renamer.GetFinalMemberName(
+    memberStableId,
+    ScopeFactory.ClassSurface(typeSymbol, isStatic: false));
+// Returns: "toString" (if collision: "toString2")
 
-**HasFinalMemberName(StableId, RenameScope) → bool**
+// View surface lookup (different name possible)
+string viewName = renamer.GetFinalMemberName(
+    memberStableId,
+    ScopeFactory.ViewSurface(typeSymbol, interfaceStableId, isStatic: false));
+// Returns: "count_ICollection" (explicit interface impl name)
+```
 
-Checks if member has decision.
+#### TryGetDecision(StableId, RenameScope, out RenameDecision?) -> bool
+
+Tries to get the rename decision for a StableId in a specific scope. **M5 FIX**: Now requires scope parameter since members can be reserved in multiple scopes.
+
+**CRITICAL**: Scope must be a SURFACE scope (with `#static` or `#instance` suffix).
+
+**Returns**: True if decision found, false otherwise
+
+#### PeekFinalMemberName(RenameScope, string requestedBase, bool isStatic) -> string
+
+Peeks at what final name would be assigned in a scope without committing. Used for collision detection before reservation. Applies member style transform and sanitization, then finds next available suffix if needed.
+
+**Algorithm**:
+1. Create effective scope (`#static` or `#instance`)
+2. Apply member style transform
+3. Sanitize for reserved words
+4. If scope doesn't exist yet, return sanitized name
+5. If base name available, return it
+6. Otherwise, find next available suffix (2, 3, 4...) without mutating table
+7. Return projected name
+
+**Example**:
+```csharp
+string projectedName = renamer.PeekFinalMemberName(
+    ScopeFactory.ViewBase(typeSymbol, interfaceStableId),
+    "Count",
+    isStatic: false);
+// Returns: "count" or "count2" (without actually reserving)
+```
+
+#### IsNameTaken(RenameScope, string name, bool isStatic) -> bool
+
+Checks if a name is already reserved in a specific scope. Used for collision detection when reserving view members.
+
+**Returns**: True if name is taken, false if available
+
+#### ListReservedNames(RenameScope, bool isStatic) -> HashSet<string>
+
+Lists all reserved names in a scope. Returns the actual final names from the reservation table (after suffix resolution).
+
+**Example**:
+```csharp
+var reserved = renamer.ListReservedNames(
+    ScopeFactory.ClassBase(typeSymbol),
+    isStatic: false);
+// Returns: { "toString", "equals", "getHashCode" }
+```
 
 ---
 
-## RenameScope.cs
+### Private Methods
 
-### Scope Types
+#### ResolveNameWithConflicts()
 
-**NamespaceScope:**
+Core name resolution algorithm with collision handling.
+
+**Algorithm**:
+1. Check for explicit override → try to reserve
+2. Apply style transform (type or member specific)
+3. Sanitize TS reserved words (add trailing `_` if needed)
+4. Try to reserve sanitized name → if success, return it
+5. **Collision detected** → check if explicit interface implementation:
+   - If member name contains `.` (e.g., "System.Collections.ICollection.Count")
+   - Extract interface short name (e.g., "ICollection")
+   - Try: `{sanitized}_{InterfaceName}` (e.g., "count_ICollection")
+   - If still collides, apply numeric suffix to interface-suffixed name
+6. **Not explicit interface impl** → apply standard numeric suffix:
+   - Allocate next suffix from table (2, 3, 4...)
+   - Try to reserve `{base}{suffix}`
+   - Keep trying until successful (safety limit: 1000 attempts)
+7. Return final resolved name
+
+**Examples**:
 ```csharp
-record NamespaceScope(string Namespace, NamespaceArea Area)
-```
-- Format: `"ns:System.Collections.Generic:internal"`
+// Standard collision
+"Compare" → "compare" (first)
+"Compare" → "compare2" (second)
+"Compare" → "compare3" (third)
 
-**TypeScope:**
-```csharp
-record TypeScope(StableId TypeId, SurfaceKind Surface, bool IsStatic)
-```
-- Format: `"type:System.Decimal#instance"` or `"type:System.Decimal#static"`
+// Explicit interface implementation
+"System.Collections.ICollection.Count" → "count_ICollection"
+"System.Collections.ICollection.Count" (different type) → "count_ICollection2"
 
-**ViewScope:**
-```csharp
-record ViewScope(StableId TypeId, StableId InterfaceId, bool IsStatic)
+// Reserved word
+"switch" → "switch_"
+"switch" (collision) → "switch_2"
 ```
-- Format: `"view:CoreLib:System.Decimal:CoreLib:IConvertible#instance"`
-
-**Enum SurfaceKind:** `ClassSurface`, `ViewSurface`
 
 ---
 
-## ScopeFactory.cs
+## File: RenameScope.cs
+
+### Purpose
+
+Represents a naming scope where identifiers must be unique. Scopes prevent unrelated symbols from colliding.
+
+### Record: RenameScope (abstract)
+
+Base type for all scope types.
+
+**Properties**:
+- `ScopeKey` - `string` (required) - Human-readable scope identifier for debugging and dictionary keys
+
+### Record: NamespaceScope
+
+Scope for top-level types in a namespace.
+
+**Properties**:
+- `ScopeKey` - Inherited from `RenameScope`
+- `Namespace` - `string` (required) - Full namespace name
+- `IsInternal` - `bool` (required) - True for internal scope, false for facade scope
+
+**Purpose**: Internal and facade are treated as separate scopes to allow clean facade names without collisions from internal names.
+
+**Example ScopeKey**:
+- `"ns:System.Collections.Generic:internal"`
+- `"ns:System.Collections.Generic:public"`
+- `"ns:(global):internal"`
+
+### Record: TypeScope
+
+Scope for members within a type. Static and instance members use separate sub-scopes.
+
+**Properties**:
+- `ScopeKey` - Inherited from `RenameScope`
+- `TypeFullName` - `string` (required) - Full CLR type name
+- `IsStatic` - `bool` (required) - True for static member sub-scope, false for instance
+
+**Purpose**: Separating static/instance prevents false collision detection. TS allows same name for static and instance members.
+
+**Example ScopeKey**:
+- `"type:System.String#instance"` - Instance members of System.String
+- `"type:System.String#static"` - Static members of System.String
+- `"view:{TypeStableId}:{InterfaceStableId}#instance"` - Explicit interface impl view
+
+---
+
+## File: ScopeFactory.cs
+
+### Purpose
+
+Centralized scope construction for `SymbolRenamer`. **NO MANUAL SCOPE STRINGS** - all scopes must be created through these helpers.
+
+### CANONICAL SCOPE FORMATS (Authoritative)
+
+**DO NOT DEVIATE FROM THESE FORMATS**:
+
+| Scope Type | Format | Example |
+|------------|--------|---------|
+| Namespace (public) | `ns:{Namespace}:public` | `"ns:System.Collections:public"` |
+| Namespace (internal) | `ns:{Namespace}:internal` | `"ns:System.Collections:internal"` |
+| Class members (instance) | `type:{TypeFullName}#instance` | `"type:System.String#instance"` |
+| Class members (static) | `type:{TypeFullName}#static` | `"type:System.String#static"` |
+| View members (instance) | `view:{TypeStableId}:{InterfaceStableId}#instance` | `"view:mscorlib:System.String:mscorlib:System.IComparable#instance"` |
+| View members (static) | `view:{TypeStableId}:{InterfaceStableId}#static` | `"view:mscorlib:System.String:mscorlib:System.IComparable#static"` |
+
+### USAGE PATTERN
+
+**Reservations**: Use BASE scopes (no `#instance`/`#static` suffix) - `ReserveMemberName()` adds it
+
+**Lookups**: Use SURFACE scopes (with `#instance`/`#static` suffix) - use `ClassSurface()`/`ViewSurface()`
+
+**M5 CRITICAL**: View members MUST be looked up with `ViewSurface()`, not `ClassSurface()`.
+
+---
 
 ### Factory Methods
 
-**Namespace(string ns, NamespaceArea area) → NamespaceScope**
+#### Namespace(string? ns, NamespaceArea area) -> NamespaceScope
 
-Creates namespace scope.
+Creates namespace scope for type name resolution.
 
-**ClassSurface(TypeSymbol, bool isStatic) → TypeScope**
+**Format**: `"ns:{Namespace}:public"` or `"ns:{Namespace}:internal"`
 
-Creates class surface scope (instance or static).
+**Example**:
+```csharp
+var scope = ScopeFactory.Namespace("System.Collections.Generic", NamespaceArea.Internal);
+// scope.ScopeKey = "ns:System.Collections.Generic:internal"
 
-**ViewSurface(TypeSymbol, TypeReference iface, bool isStatic) → ViewScope**
+var globalScope = ScopeFactory.Namespace(null, NamespaceArea.Internal);
+// globalScope.ScopeKey = "ns:(global):internal"
+```
 
-Creates view surface scope for interface.
+#### ClassBase(TypeSymbol) -> TypeScope
 
-**FromMember(MemberSymbol, TypeSymbol) → RenameScope**
+Creates BASE class scope for member reservations (no side suffix).
 
-Determines scope from member properties:
-- If `EmitScope == ClassSurface` → `ClassSurface(type, member.IsStatic)`
-- If `EmitScope == ViewOnly` → `ViewSurface(type, member.SourceInterface, member.IsStatic)`
+**Format**: `"type:{TypeFullName}"` (ReserveMemberName will add `#instance`/`#static`)
+
+**Use for**: `ReserveMemberName()` calls
+
+**Example**:
+```csharp
+var scope = ScopeFactory.ClassBase(typeSymbol);
+// scope.ScopeKey = "type:System.String"
+
+renamer.ReserveMemberName(memberStableId, "ToString", scope, "...", isStatic: false, "...");
+// Reserves in: "type:System.String#instance"
+```
+
+#### ClassSurface(TypeSymbol, bool isStatic) -> TypeScope
+
+Creates FULL class scope based on member's `isStatic` flag.
+
+**Format**: `"type:{TypeFullName}#instance"` or `"#static"`
+
+**Use for**: `GetFinalMemberName()`, `TryGetDecision()` calls when `isStatic` is dynamic
+
+**Preferred over manual ternary** - cleaner call-sites.
+
+**Example**:
+```csharp
+var scope = ScopeFactory.ClassSurface(typeSymbol, member.IsStatic);
+string finalName = renamer.GetFinalMemberName(memberStableId, scope);
+```
+
+#### ViewBase(TypeSymbol, string interfaceStableId) -> TypeScope
+
+Creates BASE view scope for member reservations (no side suffix).
+
+**Format**: `"view:{TypeStableId}:{InterfaceStableId}"` (ReserveMemberName will add `#instance`/`#static`)
+
+**Use for**: `ReserveMemberName()` calls for ViewOnly members
+
+**Example**:
+```csharp
+var scope = ScopeFactory.ViewBase(typeSymbol, interfaceStableId);
+// scope.ScopeKey = "view:mscorlib:System.String:mscorlib:System.IComparable"
+
+renamer.ReserveMemberName(memberStableId, "CompareTo", scope, "...", isStatic: false, "...");
+// Reserves in: "view:mscorlib:System.String:mscorlib:System.IComparable#instance"
+```
+
+#### ViewSurface(TypeSymbol, string interfaceStableId, bool isStatic) -> TypeScope
+
+Creates FULL view scope for explicit interface view member lookups.
+
+**Format**: `"view:{TypeStableId}:{InterfaceStableId}#instance"` or `"#static"`
+
+**Use for**: `GetFinalMemberName()`, `TryGetDecision()` calls for ViewOnly members
+
+**M5 FIX**: This is what emitters were missing - they were using `ClassInstance()`/`ClassStatic()` for view members, causing PG_NAME_004 collisions.
+
+**Example**:
+```csharp
+var scope = ScopeFactory.ViewSurface(typeSymbol, interfaceStableId, isStatic: false);
+// scope.ScopeKey = "view:mscorlib:System.String:mscorlib:System.IComparable#instance"
+
+string finalName = renamer.GetFinalMemberName(memberStableId, scope);
+```
 
 ---
 
-## StableId.cs
+## Key Algorithms
 
-### TypeStableId
+### Dual-Scope Algorithm
+
+The Renamer uses a sophisticated dual-scope algorithm that allows the same member to have different names in different contexts:
+
+**Class Surface Scope**:
+- Members emitted on class declaration
+- Scope key: `type:{TypeFullName}#instance` or `type:{TypeFullName}#static`
+- Collision resolution: Numeric suffixes (`toString`, `toString2`, `toString3`)
+
+**View Surface Scope**:
+- Members emitted on interface views
+- Scope key: `view:{TypeStableId}:{InterfaceStableId}#instance` or `#static`
+- Separate scope per interface (allows different implementations)
+- Collision resolution: Interface suffix first (`count_ICollection`), then numeric
+
+**Why Dual-Scope?**
+
+A class can implement the same interface member differently through explicit interface implementation:
 
 ```csharp
-record struct TypeStableId(string AssemblyName, string ClrFullName)
-```
-
-**Format:** `"AssemblyName:ClrFullName"`
-- Example: `"System.Private.CoreLib:System.Collections.Generic.List\`1"`
-
-**Methods:**
-- `ToString()` → formatted string
-- `Equals()` → by assembly + full name
-- `GetHashCode()` → combine both
-
-### MemberStableId
-
-```csharp
-record struct MemberStableId(
-    string AssemblyName,
-    string DeclaringTypeClrFullName,
-    string MemberName,
-    string CanonicalSignature,
-    int MetadataToken)
-```
-
-**Format:** `"AssemblyName:DeclaringType::MemberName(Signature):ReturnType"`
-
-**Equality:** By assembly, declaring type, member name, and signature.
-**Metadata token excluded from equality** (semantic identity only).
-
----
-
-## TypeScriptReservedWords.cs
-
-### Reserved Word Sanitization
-
-**SanitizeIdentifier(string name) → string**
-
-**Algorithm:**
-1. Check if name is TS reserved word
-2. If reserved: append `_` suffix
-3. Return sanitized name
-
-**Reserved Words:**
-```
-break, case, catch, class, const, continue, debugger, default, delete,
-do, else, enum, export, extends, false, finally, for, function, if,
-import, in, instanceof, new, null, return, super, switch, this, throw,
-true, try, typeof, var, void, while, with, as, implements, interface,
-let, package, private, protected, public, static, yield, any, boolean,
-constructor, declare, get, module, require, number, set, string, symbol,
-type, from, of, namespace
-```
-
-**SanitizeParameterName(string name) → string**
-
-Handles parameter names that may be reserved:
-```csharp
-// "class" → "class_" in parameter list
-method(class_: string)
-```
-
----
-
-## Dual-Scope Algorithm
-
-### Class Surface vs View Surface
-
-**Problem:** Members on class and in views may have same name.
-
-**Solution:** Separate scopes.
-
-**Example:**
-```typescript
-class Decimal {
-    toString(): string;  // Scope: "type:System.Decimal#instance"
-
-    As_IConvertible: {
-        toString(): string;  // Scope: "view:CoreLib:Decimal:CoreLib:IConvertible#instance"
-    };
-
-    As_IFormattable: {
-        toString(format: string): string;  // Scope: "view:CoreLib:Decimal:CoreLib:IFormattable#instance"
-    };
-}
-```
-
-**Benefits:**
-- No artificial suffixes needed
-- Each context has independent naming
-- Collision detection works per scope
-
-### Static vs Instance
-
-**Problem:** TypeScript separates static and instance namespaces.
-
-**Solution:** Separate scopes with `#static` and `#instance` suffixes.
-
-**Example:**
-```typescript
-class Array {
-    length: int;              // Scope: "type:System.Array#instance"
-    static Length(a: Array): int;  // Scope: "type:System.Array#static"
-    // NO COLLISION!
-}
-```
-
----
-
-## Collision Resolution
-
-### Numeric Suffix Strategy
-
-**Problem:** Requested name already used in scope.
-
-**Solution:** Append numeric suffix.
-
-**Algorithm:**
-1. Check `scopeNames.Contains(requested)`
-2. If collision:
-   - Try `requested2`, `requested3`, ...
-   - Find first unused number
-3. Record strategy: `"NumericSuffix"`
-
-**Example:**
-```
-ToString → toString (first)
-ToString → toString2 (second)
-ToString → toString3 (third)
-```
-
-### Reserved Word Strategy
-
-**Problem:** Name is TypeScript reserved word.
-
-**Solution:** Append `_` suffix.
-
-**Algorithm:**
-1. Check `ReservedWords.Contains(name)`
-2. If reserved: append `_`
-3. Record strategy: `"Sanitize"`
-
-**Example:**
-```
-class → class_
-interface → interface_
-typeof → typeof_
-```
-
----
-
-## Decision Recording
-
-**Why record decisions?**
-- Debugging (understand why name was chosen)
-- Binding metadata (CLR ↔ TypeScript mappings)
-- Reproducibility (same input → same output)
-
-**Emitted to:** `bindings.json`
-
-**Example Decision:**
-```json
+// C#
+class MyClass : IComparable, IComparable<MyClass>
 {
-  "id": "System.Private.CoreLib:System.Decimal::ToString():String",
-  "requested": "toString",
-  "final": "toString",
-  "from": "ToString",
-  "reason": "StandardMemberRename",
-  "strategy": "CamelCase",
-  "scope": "type:System.Decimal#instance",
-  "isStatic": false
+    public int CompareTo(object obj) { ... }           // Class surface
+    int IComparable<MyClass>.CompareTo(MyClass other) { ... }  // ViewOnly
+}
+
+// TypeScript
+class MyClass {
+    // Class surface (ClassSurface scope)
+    compareTo(obj: any): int;
+
+    // View for IComparable<MyClass> (View scope)
+    readonly asIComparable_1: {
+        compareTo$view(other: MyClass): int;  // $view suffix
+    };
 }
 ```
 
+### Collision Resolution Strategy
+
+**1. First Try**: Base name after style transform + sanitization
+```csharp
+"ToString" → "toString"  // First reservation
+```
+
+**2. Standard Collision**: Numeric suffix
+```csharp
+"ToString" → "toString2"  // Second reservation
+"ToString" → "toString3"  // Third reservation
+```
+
+**3. Explicit Interface Implementation**: Interface name suffix
+```csharp
+"System.Collections.ICollection.Count" → "count_ICollection"  // First
+"System.Collections.ICollection.Count" → "count_ICollection2"  // Second
+```
+
+**4. Reserved Word**: Trailing underscore
+```csharp
+"switch" → "switch_"  // First
+"switch" → "switch_2"  // Second (with underscore)
+```
+
+### Static vs Instance Separation
+
+TypeScript allows same name for static and instance members:
+
+```typescript
+class Example {
+    static foo: string;  // Static scope
+    foo: number;         // Instance scope - NO COLLISION!
+}
+```
+
+Therefore, Renamer uses separate sub-scopes:
+- `type:Example#static` - for static members
+- `type:Example#instance` - for instance members
+
+### Reservation vs Lookup
+
+**Reservation Phase** (during NameReservation):
+- Use BASE scopes: `ClassBase(type)`, `ViewBase(type, ifaceId)`
+- `ReserveMemberName()` adds `#instance` or `#static` suffix internally
+
+**Lookup Phase** (during Emit):
+- Use SURFACE scopes: `ClassSurface(type, isStatic)`, `ViewSurface(type, ifaceId, isStatic)`
+- `GetFinalMemberName()` requires exact scope with suffix
+
 ---
 
-## Integration with Pipeline
+## M5 Critical Fix Summary
 
-### Phase 3 (Shape)
-- **HiddenMemberPlanner**: Pre-reserves `method_new` for C# 'new' keyword
-- **IndexerPlanner**: Pre-reserves `get_Item`, `set_Item` for indexers
+**Problem**: Before M5, view members were reserved in view scopes but looked up in class scopes, causing PG_NAME_004 errors (view member names shadowing class surface).
 
-### Phase 3.5 (Normalize)
-- **NameReservation**: Reserves all remaining names
-  - Type names (namespace scope)
-  - Class surface members (class scope)
-  - View members (view scope, with `$view` collision detection)
+**Solution**: Changed `_decisions` dictionary to key by `(StableId, ScopeKey)` tuple instead of just `StableId`, allowing:
+1. Same member reserved in multiple scopes (class + view)
+2. Different final names per scope
+3. Correct lookup via scope-aware `GetFinalMemberName()`
 
-### Phase 4.7 (PhaseGate)
-- **Finalization checks**: Verify every emitted member has decision
-
-### Phase 5 (Emit)
-- **BindingEmitter**: Retrieves all decisions for bindings.json
+**Impact**: Eliminated 100+ PG_NAME_004 collisions, enabled proper dual-scope naming.
 
 ---
 
 ## Summary
 
-**SymbolRenamer responsibilities:**
-1. Central naming authority (single source of truth)
-2. Dual-scope algorithm (class vs view, static vs instance)
-3. Collision resolution (numeric suffixes)
-4. Reserved word sanitization (`_` suffix)
-5. Decision recording (full provenance)
+The Renaming system provides:
 
-**Key design decisions:**
-- Immutable decisions (idempotent reservation)
-- Scope-based uniqueness (not global)
-- Semantic StableIds (not metadata tokens)
-- Separate static/instance scopes (TS semantics)
-- Full decision provenance (debugging + bindings)
+1. **Centralized Naming**: All TS identifiers flow through SymbolRenamer
+2. **Dual-Scope Support**: Same member can have different names in class vs view scopes
+3. **Static/Instance Separation**: Prevents false collisions
+4. **Deterministic Collision Resolution**: Numeric suffixes, interface suffixes
+5. **Scope Safety**: Type-safe scope construction via ScopeFactory
+6. **Full Provenance**: Every rename decision recorded with reason
+
+**Key Design Principles**:
+- No manual scope strings (use ScopeFactory)
+- No name guessing (reserve first, look up later)
+- Scope-aware lookups (class vs view)
+- Style transforms applied consistently
+- Reserved words sanitized automatically

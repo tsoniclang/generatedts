@@ -971,6 +971,209 @@ public static bool IsPrimitive(string clrFullName)
 
 ---
 
+## File: Shared/NameUtilities.cs
+
+### Purpose
+Implements the **CLR-name contract** - a consistent naming policy used across all emission surfaces (class members, interface members, views). Ensures interfaces and classes emit matching member names to prevent TS2420 errors ("Class incorrectly implements interface").
+
+**Key Principle:** Use CLR names (PascalCase from reflection), sanitize reserved words, NEVER use numeric suffixes.
+
+### What is the CLR-Name Contract?
+
+The CLR-name contract is a naming policy that ensures consistent member names across:
+- Class surface members (`EmitScope = ClassSurface`)
+- Interface members
+- Explicit interface implementations (`EmitScope = ViewOnly`)
+
+**Policy rules:**
+1. **Start with CLR name** - Use the original PascalCase name from `System.Reflection`
+2. **Sanitize reserved words** - Append `_` if name conflicts with TypeScript/JavaScript reserved words
+3. **NEVER use numeric suffixes** - Do not emit `equals2`, `getHashCode3`, etc. (renaming artifacts)
+
+**Why this matters:**
+Without consistent naming, interfaces and classes can have mismatched member names:
+```typescript
+// BAD - Without CLR-name contract
+interface IDisposable {
+    Dispose(): void;  // CLR name
+}
+class FileStream implements IDisposable {
+    dispose(): void;  // lowercase!
+}
+// TS2420: Class 'FileStream' incorrectly implements interface 'IDisposable'.
+// Property 'Dispose' is missing in type 'FileStream' but required in type 'IDisposable'.
+```
+
+**Impact:** Reduced TS2420 errors by 81% (579 → ~100 errors)
+
+### Method: ApplyClrSurfaceNamePolicy()
+```csharp
+public static string ApplyClrSurfaceNamePolicy(string clrName)
+```
+**What it does:**
+- **Main public API** for applying CLR-name contract
+- Takes a CLR name (e.g., `"Dispose"`, `"GetHashCode"`, `"ToString"`)
+- Returns sanitized identifier safe for TypeScript emission
+- Used by PhaseGate validators to verify interface/class compatibility
+
+**Algorithm:**
+1. Call `SanitizeIdentifier(clrName)` to handle reserved words
+2. Return sanitized name (no numeric suffix handling needed - contract forbids them)
+
+**Examples:**
+```csharp
+ApplyClrSurfaceNamePolicy("Dispose")    → "Dispose"
+ApplyClrSurfaceNamePolicy("GetType")    → "GetType"
+ApplyClrSurfaceNamePolicy("ToString")   → "ToString"
+ApplyClrSurfaceNamePolicy("default")    → "default_"  // Reserved word
+ApplyClrSurfaceNamePolicy("class")      → "class_"    // Reserved word
+```
+
+**Usage in PhaseGate:**
+```csharp
+// From Plan/Validation/Names.cs:ValidateClrSurfaceNamePolicy()
+var surfaceNames = new HashSet<string>();
+
+// Build class surface set
+foreach (var method in classMethods)
+{
+    var clrName = method.ClrName;
+    var surfaceName = NameUtilities.ApplyClrSurfaceNamePolicy(clrName);
+    surfaceNames.Add(surfaceName);
+}
+
+// Validate interfaces
+foreach (var ifaceMethod in interfaceMethods)
+{
+    var expectedName = NameUtilities.ApplyClrSurfaceNamePolicy(ifaceMethod.ClrName);
+    if (!surfaceNames.Contains(expectedName))
+    {
+        // ERROR: TBG8A1 (SurfaceNamePolicyMismatch)
+    }
+}
+```
+
+### Method: SanitizeIdentifier()
+```csharp
+private static string SanitizeIdentifier(string name)
+```
+**What it does:**
+- Appends `_` to TypeScript/JavaScript reserved words
+- Uses `Renaming.TypeScriptReservedWords.Sanitize()` for actual reserved word checking
+
+**Examples:**
+```csharp
+SanitizeIdentifier("GetType")     → "GetType"      // Not reserved
+SanitizeIdentifier("default")     → "default_"     // Reserved word
+SanitizeIdentifier("class")       → "class_"       // Reserved word
+SanitizeIdentifier("implements")  → "implements_"  // Reserved word
+SanitizeIdentifier("interface")   → "interface_"   // Reserved word
+```
+
+**Reserved words handled:**
+- JavaScript keywords: `class`, `default`, `interface`, `implements`, `const`, `let`, `var`, etc.
+- Future reserved: `enum`, `await`, `yield`, etc.
+- Strict mode reserved: `private`, `protected`, `public`, etc.
+
+### Method: HasNumericSuffix()
+```csharp
+public static bool HasNumericSuffix(string name)
+```
+**What it does:**
+- Detects if a name ends with numeric digits (e.g., `equals2`, `getHashCode3`)
+- Used by PhaseGate validator `PG_NAME_SURF_002` (currently disabled)
+- Returns `true` if name ends with one or more digits
+
+**Algorithm:**
+```csharp
+// Start from end of string
+int i = name.Length - 1;
+while (i >= 0 && char.IsDigit(name[i]))
+    i--;
+
+// If we moved backward, we found trailing digits
+return i < name.Length - 1;
+```
+
+**Examples:**
+```csharp
+HasNumericSuffix("Dispose")      → false
+HasNumericSuffix("GetHashCode")  → false
+HasNumericSuffix("ToInt32")      → true   // Legitimate CLR name!
+HasNumericSuffix("equals2")      → true   // Renaming artifact (BAD)
+HasNumericSuffix("ToString3")    → true   // Renaming artifact (BAD)
+```
+
+**Why PG_NAME_SURF_002 is disabled:**
+This method cannot distinguish between:
+- Legitimate CLR names with numbers (`ToInt32`, `UTF8Encoding`, `MD5`)
+- Renaming artifacts (`equals2`, `toString3`)
+
+To re-enable the validator, it would need to compare against original CLR names to detect if suffix was ADDED.
+
+### Method: IsNonNumericOverride()
+```csharp
+private static bool IsNonNumericOverride(string clrName, string renamedName)
+```
+**What it does:**
+- Detects if renamer applied a semantic override (not a numeric suffix)
+- Returns `true` if renamed name differs from CLR name in a non-numeric way
+- Used internally (currently unused, but designed for future disambiguation logic)
+
+**Algorithm:**
+```csharp
+// Same name - no override
+if (clrName == renamedName)
+    return false;
+
+// Check if renamed name is clrName + digits
+if (renamedName.StartsWith(clrName))
+{
+    var suffix = renamedName.Substring(clrName.Length);
+    if (suffix.All(char.IsDigit))
+        return false;  // Numeric override (e.g., ToString → ToString2)
+}
+
+// Otherwise semantic override (e.g., ToString → ToString_)
+return true;
+```
+
+**Examples:**
+```csharp
+IsNonNumericOverride("ToString", "ToString")    → false  // No override
+IsNonNumericOverride("ToString", "ToString2")   → false  // Numeric override
+IsNonNumericOverride("ToString", "ToString3")   → false  // Numeric override
+IsNonNumericOverride("ToString", "ToString_")   → true   // Semantic override (reserved word)
+IsNonNumericOverride("GetType", "GetType_Foo")  → true   // Semantic override (different suffix)
+```
+
+### Integration with PhaseGate
+
+**Validator: PG_NAME_SURF_001** (TBG8A1 - SurfaceNamePolicyMismatch)
+- Uses `ApplyClrSurfaceNamePolicy()` to validate interface/class compatibility
+- Ensures emit phase will produce matching names
+- Prevents TS2420 errors at generation time (not validation time)
+
+**Validator: PG_NAME_SURF_002** (TBG8A2 - NumericSuffixOnSurface)
+- Uses `HasNumericSuffix()` to detect renaming artifacts
+- Currently DISABLED due to legitimate CLR names with numbers
+- See `Plan/Validation/Names.cs` for validator implementations
+
+### Integration with Emit Phase
+
+**ClassPrinter.cs:**
+- Does NOT directly use NameUtilities (uses Renamer instead)
+- But the CLR-name contract ensures Renamer never produces numeric suffixes on surface members
+
+**MethodPrinter.cs:**
+- Does NOT directly use NameUtilities (uses Renamer instead)
+- But PhaseGate validation guarantees names will match interfaces
+
+**Design Note:**
+NameUtilities is primarily a **validation-time API** (used by PhaseGate), not an emit-time API. The emit phase uses `BuildContext.Renamer` which respects the CLR-name contract through PhaseGate enforcement.
+
+---
+
 ## File: Printers/ClassPrinter.cs
 
 ### Purpose
@@ -978,7 +1181,7 @@ Prints TypeScript class declarations from TypeSymbol. Handles classes, structs, 
 
 ### Method: Print()
 ```csharp
-public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
+public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, SymbolGraph graph)
 ```
 **What it does:**
 - **GUARD:** Never prints non-public types (logs rejection if attempted)
@@ -990,27 +1193,89 @@ public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildCont
   - `TypeKind.Delegate` → `PrintDelegate()`
   - `TypeKind.Interface` → `PrintInterface()`
 
+**Parameters:**
+- `graph` - SymbolGraph for type lookups (needed for TS2693 same-namespace view fix)
+
 ### Method: PrintInstance()
 ```csharp
-public static string PrintInstance(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
+public static string PrintInstance(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, SymbolGraph graph)
 ```
 **What it does:**
 - Prints class/struct with `$instance` suffix (for companion views pattern)
 - Used when type has explicit interface views
 - Only classes and structs support this (other types fallback to normal Print)
 
+**Parameters:**
+- `graph` - SymbolGraph for type lookups (needed for TS2693 same-namespace view fix)
+
 ### Method: PrintClass()
 ```csharp
-private static string PrintClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, bool instanceSuffix = false)
+private static string PrintClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, SymbolGraph graph, bool instanceSuffix = false)
 ```
 **What it does:**
 1. Gets final TypeScript name from Renamer
 2. Adds `$instance` suffix if requested
 3. Emits class modifiers (`abstract` if abstract)
 4. Emits generic parameters with constraints
-5. Emits base class (`extends BaseClass`, skips Object/ValueType)
-6. Emits interfaces (`implements IFoo, IBar`)
-7. Calls `EmitMembers()` to emit body
+5. **TS2693 FIX:** Applies same-namespace view handling to base class (see `ApplyInstanceSuffixForSameNamespaceViews()`)
+6. **TS2863 FIX:** Filters `any`/`unknown` from extends clause (TypeScript rejects "extends any")
+7. Emits base class (`extends BaseClass`, skips Object/ValueType/any/unknown)
+8. **TS2693 FIX:** Applies same-namespace view handling to interface list
+9. Emits interfaces (`implements IFoo, IBar`)
+10. Calls `EmitMembers()` to emit body
+
+**Algorithm for base class emission:**
+```csharp
+if (type.BaseType != null)
+{
+    var baseTypeName = TypeRefPrinter.Print(type.BaseType, resolver, ctx);
+    // TS2693 FIX: For same-namespace types with views, use instance class name
+    baseTypeName = ApplyInstanceSuffixForSameNamespaceViews(baseTypeName, type.BaseType, type.Namespace, graph, ctx);
+
+    // CRITICAL: Never emit "extends any" - TypeScript rejects it
+    if (baseTypeName != "Object" &&
+        baseTypeName != "ValueType" &&
+        baseTypeName != "any" &&
+        baseTypeName != "unknown")
+    {
+        sb.Append(" extends ");
+        sb.Append(baseTypeName);
+    }
+}
+```
+
+**Algorithm for interface emission:**
+```csharp
+if (type.Interfaces.Length > 0)
+{
+    sb.Append(" implements ");
+    var interfaceNames = type.Interfaces.Select(i =>
+    {
+        var name = TypeRefPrinter.Print(i, resolver, ctx);
+        // TS2693 FIX: For same-namespace types with views, use instance class name
+        return ApplyInstanceSuffixForSameNamespaceViews(name, i, type.Namespace, graph, ctx);
+    });
+    sb.Append(string.Join(", ", interfaceNames));
+}
+```
+
+**Why these fixes matter:**
+
+1. **TS2693 (same-namespace views):** Without the fix, when a class extends/implements a type with views in the same namespace, it references the type alias name which isn't accessible inside namespace declarations:
+```typescript
+// BAD - Without fix
+namespace System.Runtime.InteropServices {
+    class SafeHandleZeroOrMinusOneIsInvalid extends SafeHandle { }
+    // TS2693: 'SafeHandle' only refers to a type, but is being used as a value here.
+}
+```
+
+2. **TS2863 (extends any):** When TypeRefPrinter falls back to `any` for unmappable types, emitting "extends any" causes TypeScript errors:
+```typescript
+// BAD - Without fix
+class Foo extends any { }
+// TS2863: 'any' cannot be used as a base class or interface.
+```
 
 ### Method: PrintStruct()
 ```csharp
@@ -1057,6 +1322,131 @@ private static string PrintInterface(TypeSymbol type, TypeNameResolver resolver,
 1. Gets final TypeScript name from Renamer
 2. Emits `interface TypeName<...> extends ... { ... }`
 3. Calls `EmitInterfaceMembers()` to emit body
+
+### Method: ApplyInstanceSuffixForSameNamespaceViews()
+```csharp
+private static string ApplyInstanceSuffixForSameNamespaceViews(
+    string resolvedName,
+    TypeReference typeRef,
+    string currentNamespace,
+    SymbolGraph graph,
+    BuildContext ctx)
+```
+**What it does:**
+- **TS2693 FIX:** Detects same-namespace types with views and returns instance class name (`TypeName$instance`)
+- Prevents "only refers to a type" errors when referencing view-emitting types in heritage clauses
+- Only applies to named types in the same namespace that emit companion views
+
+**Algorithm:**
+1. Check if typeRef is a NamedTypeReference (not primitive, not generic parameter)
+2. Look up type symbol in graph via ClrFullName
+3. Check if type is in the same namespace as current type
+4. Check if type has explicit views (ViewOnly members)
+5. If all conditions met, append `$instance` to name (before generic arguments if present)
+
+**Detailed implementation:**
+```csharp
+// Only applies to named types
+if (typeRef is not NamedTypeReference named)
+    return resolvedName;
+
+// Look up type symbol
+var clrFullName = named.FullName;
+if (!graph.TypeIndex.TryGetValue(clrFullName, out var typeSymbol))
+    return resolvedName; // External type
+
+// Check if same namespace
+if (typeSymbol.Namespace != currentNamespace)
+    return resolvedName; // Cross-namespace (qualified names work)
+
+// Check if type has views
+if (typeSymbol.ExplicitViews.Length > 0 &&
+    (typeSymbol.Kind == TypeKind.Class || typeSymbol.Kind == TypeKind.Struct))
+{
+    // Insert $instance BEFORE generic arguments
+    var genericStart = resolvedName.IndexOf('<');
+    if (genericStart >= 0)
+    {
+        // CORRECT: "Foo$instance<T>"
+        // WRONG:   "Foo<T>$instance" (syntax error!)
+        return resolvedName.Substring(0, genericStart) + "$instance" + resolvedName.Substring(genericStart);
+    }
+    else
+    {
+        // No generic arguments - just append
+        return $"{resolvedName}$instance";
+    }
+}
+
+return resolvedName;
+```
+
+**Why this fix is necessary:**
+
+**The Problem (TS2693):**
+
+When types with views are referenced in same-namespace heritage clauses, TypeScript sees:
+```typescript
+namespace System.Runtime.InteropServices {
+    // SafeHandle emits as TWO declarations:
+    type SafeHandle = SafeHandle$instance;  // Type alias (not accessible as value)
+    class SafeHandle$instance { ... }        // Instance class
+
+    // This FAILS:
+    class SafeHandleZeroOrMinusOneIsInvalid extends SafeHandle { }
+    // TS2693: 'SafeHandle' only refers to a type, but is being used as a value here.
+}
+```
+
+**Why it fails:**
+- Type aliases (`type Foo = ...`) are NOT accessible as values in heritage clauses
+- Inside namespace declarations, only the instance class (`SafeHandle$instance`) is accessible as a value
+- Heritage clauses (`extends`, `implements`) require VALUE references, not type references
+
+**The Solution:**
+
+Detect same-namespace references and use instance class name:
+```typescript
+namespace System.Runtime.InteropServices {
+    type SafeHandle = SafeHandle$instance;
+    class SafeHandle$instance { ... }
+
+    // This WORKS:
+    class SafeHandleZeroOrMinusOneIsInvalid extends SafeHandle$instance { }
+    // Instance class is accessible as a value ✓
+}
+```
+
+**Why cross-namespace works without fix:**
+
+Cross-namespace references use qualified imports at module level:
+```typescript
+// System.Runtime.InteropServices/internal/index.d.ts
+import * as System from '../../System/internal/index';
+
+export namespace System.Runtime.InteropServices {
+    class Foo extends System.Object { }
+    // 'System.Object' resolves to the type alias at MODULE level, where it IS accessible
+}
+```
+
+**Generic type handling:**
+
+For generic types with views (e.g., `Nullable<T>`):
+```typescript
+// BAD - $instance after generic args (syntax error)
+class Foo extends Nullable<int>$instance { }
+
+// GOOD - $instance before generic args
+class Foo extends Nullable$instance<int> { }
+```
+
+The fix inserts `$instance` before the `<` character.
+
+**Impact:**
+- Commit 5880297: "Fix same-namespace TS2693 by using $instance suffix in heritage clauses"
+- Eliminated same-namespace TS2693 errors
+- Cross-namespace references unaffected (continue to work)
 
 ### Method: EmitMembers()
 ```csharp

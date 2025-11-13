@@ -827,6 +827,165 @@ class Foo {
 
 ---
 
+#### 6. `ValidateClrSurfaceNamePolicy(BuildContext ctx, SymbolGraph graph, ValidationContext validationCtx)`
+
+**What it validates:**
+- **PG_NAME_SURF_001:** Class members match interface members using CLR-name policy
+- For each class implementing interfaces, validates interface member names exist on class surface or in views
+- Ensures emit phase will produce matching names (prevents TS2420 errors)
+
+**Error codes:**
+- `TBG8A1` (SurfaceNamePolicyMismatch) - Class missing interface member under CLR-name policy (PG_NAME_SURF_001)
+
+**Examples of failures:**
+```csharp
+// Interface requires "Dispose" but class has "dispose"
+interface IDisposable {
+    method Dispose(): void { ClrName = "Dispose" }
+}
+
+class FileStream : IDisposable {
+    method dispose(): void { ClrName = "dispose", EmitScope = ClassSurface }
+}
+// ERROR: TBG8A1 (CLR-name policy applies "Dispose", class only has "dispose")
+```
+
+**What is CLR-name policy?**
+The CLR-name contract states:
+1. Start with CLR name (PascalCase from reflection)
+2. Sanitize TypeScript reserved words (append `_`)
+3. NEVER use numeric suffixes (equals2, getHashCode3)
+
+This ensures interfaces and classes emit identical member names, preventing TS2420 errors.
+
+**Algorithm:**
+1. For each class/struct implementing interfaces:
+   - Build set of all class surface member names using `NameUtilities.ApplyClrSurfaceNamePolicy()`
+   - Include both ClassSurface members and ViewOnly members (explicit implementations)
+2. For each implemented interface:
+   - Resolve interface type via TypeIndex
+   - For each interface method:
+     - Apply CLR-name policy: `ApplyClrSurfaceNamePolicy(ifaceMethod.ClrName)`
+     - Check if name exists in class surface set
+     - Report error if missing
+   - For each interface property (skip indexers):
+     - Apply CLR-name policy: `ApplyClrSurfaceNamePolicy(ifaceProp.ClrName)`
+     - Check if name exists in class surface set
+     - Report error if missing
+
+**Key functions used:**
+- `Emit.Shared.NameUtilities.ApplyClrSurfaceNamePolicy(clrName)` - Applies CLR-name contract
+- `graph.TypeIndex.TryGetValue(fullName, out ifaceType)` - Resolves interface types
+
+**Why this matters:**
+Without this validation, the emit phase could generate:
+```typescript
+// Interface (internal/index.d.ts)
+interface IDisposable {
+    Dispose(): void;  // PascalCase
+}
+
+// Class (internal/index.d.ts)
+class FileStream implements IDisposable {
+    dispose(): void;  // camelCase
+}
+// TS2420: Class 'FileStream' incorrectly implements interface 'IDisposable'.
+// Property 'Dispose' is missing in type 'FileStream' but required in type 'IDisposable'.
+```
+
+**Impact:**
+- Validation passes → TS2420 errors eliminated
+- Before this validator: 579 TS2420 errors (33%)
+- After CLR-name contract: ~100 TS2420 errors (81% reduction)
+
+---
+
+#### 7. `ValidateNoNumericSuffixesOnSurface(BuildContext ctx, SymbolGraph graph, ValidationContext validationCtx)`
+
+**What it validates:**
+- **PG_NAME_SURF_002:** No numeric suffixes on emitted surface or view member names
+- Catches cases where renaming added numeric disambiguation (equals2, getHashCode3)
+- Ensures CLR-name contract compliance (CLR names never have numeric suffixes)
+
+**Error codes:**
+- `TBG8A2` (NumericSuffixOnSurface) - Member name ends with numeric suffix (PG_NAME_SURF_002)
+
+**Examples of failures:**
+```csharp
+// Method with numeric suffix
+class Foo {
+    method Equals(object obj): bool {
+        ClrName = "Equals",
+        EmitScope = ClassSurface
+    }
+}
+// If renamer produced "Equals2" → ERROR: TBG8A2
+
+// Property with numeric suffix
+class Bar {
+    property Count: int {
+        ClrName = "Count",
+        EmitScope = ClassSurface
+    }
+}
+// If renamer produced "Count3" → ERROR: TBG8A2
+```
+
+**Why numeric suffixes are wrong:**
+The CLR-name contract states: **NEVER use numeric suffixes** because:
+1. CLR names are PascalCase without disambiguation numbers
+2. Numeric suffixes only exist in the old camelCase policy for collision resolution
+3. Under CLR-name contract, collisions are impossible (interfaces and classes use same CLR names)
+
+**Algorithm:**
+1. For each type in graph:
+   - Check ClassSurface methods:
+     - Apply CLR-name policy: `ApplyClrSurfaceNamePolicy(method.ClrName)`
+     - Check: `HasNumericSuffix(clrName)`
+     - Report error if numeric suffix found
+   - Check ClassSurface properties:
+     - Apply CLR-name policy: `ApplyClrSurfaceNamePolicy(prop.ClrName)`
+     - Check: `HasNumericSuffix(clrName)`
+     - Report error if numeric suffix found
+   - For each ExplicitView:
+     - Check each ViewMember:
+       - Apply CLR-name policy: `ApplyClrSurfaceNamePolicy(viewMember.ClrName)`
+       - Check: `HasNumericSuffix(clrName)`
+       - Report error if numeric suffix found
+
+**Numeric suffix detection:**
+`HasNumericSuffix(name)` returns true if name matches pattern: `^[a-zA-Z_][a-zA-Z0-9_]*\d+$`
+
+Examples:
+- `"Equals2"` → true (ends with digit)
+- `"GetHashCode3"` → true (ends with digit)
+- `"ToString"` → false (no trailing digits)
+- `"ToInt32"` → true BUT ALLOWED (this is CLR name, not disambiguation)
+
+**Special case - legitimate numeric suffixes:**
+Some CLR names legitimately contain numbers (e.g., `ToInt32`, `UTF8Encoding`). The validator allows these because they're part of the original CLR name, not added disambiguation.
+
+**Current Status:**
+This validator is **disabled** in PhaseGate (commented out) because legitimate CLR names like `ToInt32` contain numbers. The validator would need to distinguish between:
+- Legitimate CLR names: `ToInt32` (OK)
+- Disambiguation suffixes: `ToString2` (ERROR)
+
+**Why disabled:**
+```csharp
+// PhaseGate.cs
+// Names.ValidateNoNumericSuffixesOnSurface(ctx, graph, validationCtx);
+// DISABLED: CLR names can legitimately contain numbers (ToInt32, UTF8Encoding, etc.)
+// This validator would flag legitimate CLR names as errors
+```
+
+**Future improvement:**
+To re-enable, validator needs to:
+1. Track original CLR name from reflection
+2. Compare emitted name against original
+3. Only flag if numeric suffix was ADDED (not part of original CLR name)
+
+---
+
 ### Module: Scopes.cs
 
 **Purpose:** Scope-related validation (EmitScope invariants, scope mismatches, scope key formatting).

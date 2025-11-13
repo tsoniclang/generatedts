@@ -1,480 +1,328 @@
 # SinglePhase Pipeline Architecture
 
-## System Overview
+## 1. System Overview
 
-**tsbindgen** transforms .NET assemblies into TypeScript declaration files with metadata sidecars via System.Reflection.
+### What is tsbindgen?
 
-- **Input**: .NET assembly DLL files
-- **Process**: Reflect → analyze → resolve conflicts → plan → emit
-- **Output**: TypeScript `.d.ts`, JSON metadata, binding mappings
+**tsbindgen** transforms .NET assemblies into TypeScript declaration files with metadata sidecars, enabling the **Tsonic compiler** to import and use .NET BCL types with full IDE support and type safety.
 
-Enables Tsonic compiler (TypeScript→C# transpiler) to:
-- Type-check TypeScript against .NET APIs
-- Generate correct C# with proper overload resolution
-- Respect CLR semantics (virtual, static, ref/out, constraints)
-- Handle explicit interface implementations
+### The Tsonic Compiler
 
-**Scale**: 130 BCL namespaces, 4,000+ types, 100% data integrity.
+**Tsonic** is a TypeScript-to-C# compiler targeting NativeAOT executables:
+
+- Enables writing .NET applications using TypeScript syntax
+- Direct .NET interop: `import { File } from "System.IO"`
+- Compiles to single-file native executables via .NET CLI
+- Full TypeScript type checking against .NET APIs
+
+**Example**:
+```typescript
+import { File } from "System.IO";
+import { Console } from "System";
+
+const lines = File.ReadAllLines("data.txt");
+Console.WriteLine(`Read ${lines.length} lines`);
+```
+
+### How tsbindgen Enables Tsonic
+
+tsbindgen generates three companion artifacts per assembly:
+
+1. **Type declarations** (`*.d.ts`) - For IDE IntelliSense and type checking
+2. **Metadata sidecars** (`*.metadata.json`) - CLR semantics (virtual/override, struct, ref)
+3. **Binding manifests** (`*.bindings.json`) - Maps TS names to CLR names
+
+### Purpose
+
+Bridge TypeScript and .NET:
+
+- **Input**: .NET assembly DLLs
+- **Process**: Reflect, analyze, resolve conflicts, validate, emit
+- **Output**: TypeScript `.d.ts` + JSON metadata
+
+Enables:
+- Reference .NET types with IntelliSense
+- Use `List<T>`, `Dictionary<K,V>`, `File`, `Console` from TypeScript
+- Type-safe TypeScript→C# boundary
+- Correct C# code generation via metadata
 
 ---
 
-## Core Principles
+## 2. Architectural Principles
 
 ### Single-Pass Processing
 
-Pipeline processes each assembly **once** through sequential phases. No iteration. Each phase returns new immutable SymbolGraph.
+Pipeline processes each assembly **once** through sequential phases. No iteration. Each phase transforms symbol graph immutably.
 
-### Immutable Data
+### Immutable Data Structures
 
-All structures are **immutable records**:
-- `SymbolGraph` → `NamespaceSymbol[]` → `TypeSymbol[]` → `MemberSymbol[]`
-- Transformations use `with` expressions
-- No mutation - pure functional
+All data structures are **immutable records** (`SymbolGraph`, `TypeSymbol`, `MemberSymbol`). Transformations return new instances via `with` expressions. Enables:
+- Pure functional transformations
+- Safe parallelization
+- Precise change tracking
 
-### Static Classes with Pure Functions
+### Pure Functions
 
-All logic in **static classes** with **pure functions**:
-- No instance state
-- No side effects (except I/O)
-- Input → Process → Output
+Transformation logic in **static classes** with **pure functions**. No instance state, no side effects. Input → Process → Output.
 
-```csharp
-public static class InterfaceInliner
-{
-    public static SymbolGraph Inline(BuildContext ctx, SymbolGraph graph)
-    {
-        // Returns new graph
-    }
-}
-```
+### Centralized State (BuildContext)
 
-### Centralized Services (BuildContext)
-
-All shared state in `BuildContext`:
-- **Policy**: Configuration
-- **SymbolRenamer**: Central naming authority
-- **DiagnosticBag**: Error collection
+Shared services:
+- **Policy**: Configuration (naming, filters)
+- **SymbolRenamer**: Centralized naming authority
+- **DiagnosticBag**: Error/warning collection
 - **Interner**: String deduplication
 - **Logger**: Progress reporting
 
-Created once, passed to all phases.
+### StableId-Based Identity
+
+Every symbol has **StableId** (assembly-qualified identifier):
+- **Type**: `"System.Private.CoreLib:System.Decimal"`
+- **Member**: `"System.Private.CoreLib:System.Decimal::ToString(IFormatProvider):String"`
+
+Immutable, unique, stable across runs. Used for rename decisions, cross-assembly refs, binding.
+
+### Scope-Based Naming
+
+TypeScript names reserved in **scopes** for uniqueness:
+- **Namespace**: `ns:System.Collections.Generic:internal`
+- **Class Instance**: `type:System.Decimal#instance`
+- **View**: `view:CoreLib:System.Decimal:CoreLib:IConvertible#instance`
+
+Enables class member `ToString()` and view member `ToString()` to coexist.
 
 ---
 
-## Pipeline Phases
+## 3. Pipeline Phases
 
 ```
-┌─────────────────────────────────────────┐
-│  PHASE 1: Load (Reflection)             │
-│  - AssemblyLoader (transitive closure)  │
-│  - ReflectionReader (System.Reflection) │
-│  - InterfaceMemberSubstitution          │
-│  Output: SymbolGraph (pure CLR)         │
-└─────────────┬───────────────────────────┘
-              │
-┌─────────────▼───────────────────────────┐
-│  PHASE 2: Normalize (Build Indices)     │
-│  - SymbolGraph.WithIndices()            │
-│  - NamespaceIndex, TypeIndex            │
-│  Output: SymbolGraph (with indices)     │
-└─────────────┬───────────────────────────┘
-              │
-┌─────────────▼───────────────────────────┐
-│  PHASE 3: Shape (16 Transformations)    │
-│  1. GlobalInterfaceIndex                │
-│  2. InterfaceDeclIndex                  │
-│  3. InterfaceInliner (flatten)          │
-│  4. InternalInterfaceFilter             │
-│  5. StructuralConformance               │
-│  6. ExplicitImplSynthesizer             │
-│  7. InterfaceResolver                   │
-│  8. DiamondResolver                     │
-│  9. BaseOverloadAdder                   │
-│  10. OverloadReturnConflictResolver     │
-│  11. MemberDeduplicator                 │
-│  12. ViewPlanner                        │
-│  13. ClassSurfaceDeduplicator           │
-│  14. HiddenMemberPlanner                │
-│  15. IndexerPlanner                     │
-│  16. FinalIndexersPass                  │
-│  17. StaticSideAnalyzer                 │
-│  18. ConstraintCloser                   │
-│  Output: SymbolGraph (TS-ready)         │
-└─────────────┬───────────────────────────┘
-              │
-┌─────────────▼───────────────────────────┐
-│  PHASE 3.5: Name Reservation            │
-│  - NameReservation.ReserveAllNames      │
-│  - Reserve types, members in scopes     │
-│  - Apply naming policy, resolve         │
-│  Output: SymbolGraph + Rename Decisions │
-└─────────────┬───────────────────────────┘
-              │
-┌─────────────▼───────────────────────────┐
-│  PHASE 4: Plan (Imports/Validation)     │
-│  - ImportGraph (analyze dependencies)   │
-│  - ImportPlanner (plan imports/aliases) │
-│  - EmitOrderPlanner (stable order)      │
-│  - OverloadUnifier (merge overloads)    │
-│  - InterfaceConstraintAuditor           │
-│  - PhaseGate (50+ validation rules)     │
-│  Output: EmissionPlan (validated)       │
-└─────────────┬───────────────────────────┘
-              │
-┌─────────────▼───────────────────────────┐
-│  PHASE 5: Emit (File Generation)        │
-│  - SupportTypesEmit (_support/types)    │
-│  - InternalIndexEmitter (internal/)     │
-│  - FacadeEmitter (facade/)              │
-│  - MetadataEmitter (metadata.json)      │
-│  - BindingEmitter (bindings.json)       │
-│  - ModuleStubEmitter (index.js)         │
-│  Output: Files on disk                  │
-└─────────────┬───────────────────────────┘
-              │
-         BuildResult
+Input: .NET Assembly DLLs
+  ↓
+[Phase 1: Load] - System.Reflection → SymbolGraph (pure CLR data)
+  ↓
+[Phase 2: Normalize] - Build indices (NamespaceIndex, TypeIndex)
+  ↓
+[Phase 3: Shape] - 16 transformations (interface inlining, view planning, etc.)
+  ↓
+[Phase 3.5: Name Reservation] - Reserve all names via SymbolRenamer
+  ↓
+[Phase 4: Plan] - Import analysis + PhaseGate validation (50+ rules)
+  ↓
+[Phase 5: Emit] - Generate .d.ts, .metadata.json, .bindings.json
+  ↓
+Output: TypeScript declarations + metadata
 ```
+
+### Phase 1: Load (Reflection)
+
+- **AssemblyLoader**: Transitive closure loading
+- **ReflectionReader**: System.Reflection → SymbolGraph
+- **TypeReferenceFactory**: Build TypeReference objects
+- **InterfaceMemberSubstitution**: Substitute closed generic interface members
+
+**Output**: SymbolGraph (pure CLR data, no TypeScript concepts)
+
+### Phase 2: Normalize (Build Indices)
+
+- Build NamespaceIndex, TypeIndex for fast lookups
+- Canonical signature normalization
+
+**Output**: SymbolGraph with indices
+
+### Phase 3: Shape (Transformations)
+
+16 sequential passes handling .NET/TypeScript impedance mismatches:
+
+1. **GlobalInterfaceIndex** - Index all interfaces
+2. **InterfaceDeclIndex** - Index interface members
+3. **StructuralConformance** - Analyze structural conformance (mark ViewOnly)
+4. **InterfaceInliner** - Flatten interface hierarchy
+5. **ExplicitImplSynthesizer** - Synthesize explicit implementations
+6. **DiamondResolver** - Resolve diamond inheritance
+7. **BaseOverloadAdder** - Add base overloads
+8. **StaticSideAnalyzer** - Analyze static members
+9. **IndexerPlanner** - Mark indexers as Omitted
+10. **HiddenMemberPlanner** - Handle C# 'new' keyword
+11. **FinalIndexersPass** - Remove leaked indexers
+12. **ClassSurfaceDeduplicator** - Deduplicate class surface
+13. **ConstraintCloser** - Resolve generic constraints
+14. **OverloadReturnConflictResolver** - Resolve return type conflicts
+15. **ViewPlanner** - Plan explicit interface views
+16. **MemberDeduplicator** - Final deduplication
+
+**Output**: SymbolGraph shaped for TypeScript
+
+### Phase 3.5: Name Reservation
+
+- **NameReservation**: Reserve all type/member names via SymbolRenamer
+- Apply naming policy (PascalCase, camelCase, etc.)
+- Resolve conflicts via numeric suffixes
+- Sanitize reserved words (class → class_)
+
+**Output**: SymbolGraph + RenameDecisions in Renamer
+
+### Phase 4: Plan (Import Analysis + Validation)
+
+- **ImportGraph**: Build dependency graph
+- **ImportPlanner**: Determine imports/aliases
+- **EmitOrderPlanner**: Stable emission order
+- **OverloadUnifier**: Merge overload variants
+- **InterfaceConstraintAuditor**: Audit constructor constraints
+- **PhaseGate**: Validate 50+ invariants before emission
+
+**Output**: EmissionPlan (graph + imports + order)
+
+### Phase 5: Emit (File Generation)
+
+- **SupportTypesEmitter**: `_support/types.d.ts`
+- **InternalIndexEmitter**: `internal/index.d.ts` per namespace
+- **FacadeEmitter**: `index.d.ts` per namespace
+- **MetadataEmitter**: `metadata.json` per namespace
+- **BindingEmitter**: `bindings.json` per namespace
+- **ModuleStubEmitter**: `index.js` stubs per namespace
+
+**Output**: Files written to output directory
 
 ---
 
-## Key Concepts
+## 4. Key Concepts
 
-### StableId: Immutable Identity
-
-**StableId** = assembly-qualified identifier **before name transformations**. Permanent key for rename decisions and CLR bindings.
+### StableId: Immutable Symbol Identity
 
 **Format**:
-- **Type**: `{AssemblyName}:{ClrFullName}`
-  - Example: `"System.Private.CoreLib:System.Collections.Generic.List\`1"`
-- **Member**: `{AssemblyName}:{DeclaringType}::{MemberName}{CanonicalSignature}`
-  - Example: `"System.Private.CoreLib:System.Decimal::ToString(IFormatProvider):String"`
+- Type: `{AssemblyName}:{ClrFullName}`
+- Member: `{AssemblyName}:{DeclaringType}::{MemberName}{Signature}`
 
-**Properties**:
-- Immutable, unique, stable, semantic (not metadata token)
-- Used for rename keys, cross-assembly refs, bindings, deduplication
+**Properties**: Immutable, unique, stable across runs, semantic (not metadata token)
 
-**Equality**: Same assembly + declaring type + member name + canonical signature. Metadata token excluded.
+**Usage**: Rename decision keys, cross-assembly refs, binding metadata, duplicate detection
 
-### EmitScope: Placement Decisions
-
-Controls **where** member is emitted:
+### EmitScope: Where Members Are Emitted
 
 ```csharp
-public enum EmitScope
-{
-    ClassSurface,  // Direct on class/interface
-    StaticSurface, // Static section
-    ViewOnly,      // As_IInterface view property
-    Omitted        // Not emitted (tracked in metadata)
+enum EmitScope {
+    ClassSurface,   // On class body
+    StaticSurface,  // Static section
+    ViewOnly,       // As_IInterface view property
+    Omitted         // Not emitted (tracked in metadata)
 }
 ```
 
 **ClassSurface**: Default for public members
-```typescript
-class Decimal { ToString(): string; }
-```
+**ViewOnly**: Explicit interface implementations (structural conformance failed)
+**Omitted**: Indexers, generic static members, internal/private (tracked in metadata)
 
-**ViewOnly**: Explicit interface implementations
-```typescript
-class Decimal {
-    As_IConvertible: { ToBoolean(): boolean; };
-}
-```
+### ViewPlanner: Explicit Interface Implementation Support
 
-**Omitted**: Intentionally not emitted
-- Indexers (TS limitation)
-- Generic static members (TS limitation)
-- Tracked in `metadata.json`
-
-**Decision Process**:
-1. **StructuralConformance** marks ViewOnly if structural impl fails
-2. **IndexerPlanner** marks indexers Omitted
-3. **ClassSurfaceDeduplicator** demotes duplicates to ViewOnly
-4. **PhaseGate** validates EmitScope consistency
-
-### ViewPlanner: Explicit Interface Implementation
-
-TypeScript lacks explicit interface implementations. C# has them:
-
-```csharp
-// C# - explicit impl
-class Decimal : IConvertible
-{
-    public override string ToString() => "...";               // Implicit
-    bool IConvertible.ToBoolean(IFormatProvider? p) => ...;   // Explicit - ONLY via cast
-}
-```
-
-**ViewPlanner solution**: Generate **view properties**
+TypeScript lacks explicit interface implementations. **ViewPlanner** generates view properties:
 
 ```typescript
 class Decimal {
     ToString(): string;  // ClassSurface
 
-    As_IConvertible: {   // View property
+    As_IConvertible: {   // ViewOnly members
         ToBoolean(provider: IFormatProvider | null): boolean;
         ToInt32(provider: IFormatProvider | null): int;
     };
 }
 ```
 
-**How it works**:
-1. **StructuralConformance** marks ViewOnly when structural impl fails
-2. **ViewPlanner** groups ViewOnly by source interface
-3. Creates `ExplicitView` with view property name + member list
-4. **FacadeEmitter** emits view properties
+**Process**: StructuralConformance marks ViewOnly → ViewPlanner groups by interface → Emit view properties
 
 ### Scope-Based Naming
 
-TypeScript naming differs from C#. Need separate scopes:
-
-**Problem**: Multiple members with same name in different contexts
-
-```csharp
-// C# - different contexts
-class Decimal : IConvertible, IFormattable
-{
-    string ToString() => "1.0";
-    string IConvertible.ToString(IFormatProvider p) => "1.0";
-    string IFormattable.ToString(string fmt, IFormatProvider p) => "1.0";
-}
-```
-
-**Solution**: Separate scopes for each context
+Separate scopes enable name reuse:
 
 ```typescript
 class Decimal {
-    ToString(): string;  // Scope: "type:System.Decimal#instance"
+    ToString(): string;  // Scope: type:Decimal#instance
     As_IConvertible: {
-        ToString(): string;  // Scope: "view:CoreLib:Decimal:CoreLib:IConvertible#instance"
+        ToString(): string;  // Scope: view:Decimal:IConvertible#instance
     };
-    As_IFormattable: {
-        ToString(): string;  // Scope: "view:CoreLib:Decimal:CoreLib:IFormattable#instance"
-    };
+    static Parse(s: string): Decimal;  // Scope: type:Decimal#static
 }
 ```
 
-**Scope Formats**:
-- **Namespace**: `ns:System.Collections.Generic:internal`
-- **Class Instance**: `type:System.Decimal#instance`
-- **Class Static**: `type:System.Decimal#static`
-- **View Instance**: `view:CoreLib:System.Decimal:CoreLib:IConvertible#instance`
-- **View Static**: `view:CoreLib:System.Decimal:CoreLib:IConvertible#static`
-
-**Benefits**: Independent naming per context, no artificial suffixes, preserves original names.
+**Scopes**: Namespace, Class Instance, Class Static, View Instance, View Static
 
 ### PhaseGate: Pre-Emission Validation
 
-Comprehensive validation layer with 50+ invariants. Runs **after transformations**, **before emission**.
+Validates 50+ invariants after transformations, before emission:
 
-**Purpose**: Fail fast, prevent malformed output, document invariants, enable safe refactoring.
+**Categories**:
+- Finalization (every symbol has final name)
+- Scope integrity (well-formed scopes)
+- Name uniqueness (no duplicates in scope)
+- View integrity (ViewOnly belongs to view)
+- Import/Export (valid imports, no circular deps)
+- Type resolution (all types resolvable)
+- Overload collision (no arity conflicts)
+- Constraint integrity (satisfiable constraints)
 
-**Validation Categories**:
-1. **Finalization** (PG_FIN_001-009) - Every symbol has final TS name
-2. **Scope Integrity** (PG_SCOPE_001-004) - Well-formed scopes
-3. **Name Uniqueness** (PG_NAME_001-005) - No duplicates in scope
-4. **View Integrity** (PG_INT_001-003) - ViewOnly members belong to views
-5. **Import/Export** (PG_IMPORT/EXPORT/API_001-002) - Valid imports, no internal leaks
-6. **Type Resolution** (PG_LOAD/TYPEMAP_001) - All types resolved
-7. **Overload Collision** (PG_OL_001-002) - No collisions
-8. **Constraint Integrity** (PG_CNSTR_001-004) - Constraints satisfied
-
-**Severity**: ERROR blocks emission, WARNING logged, INFO diagnostic.
-
-**Output**: Console log, `.diagnostics.txt`, `validation-summary.json`
-
-**Integration**:
-```csharp
-PhaseGate.Validate(ctx, graph, imports, constraintFindings);
-if (ctx.Diagnostics.HasErrors()) {
-    return new BuildResult { Success = false };
-}
-```
+**Severity**: ERROR blocks emission, WARNING logs only
 
 ---
 
-## Directory Structure
+## 5. Directory Structure
 
 ```
 SinglePhase/
 ├── SinglePhaseBuilder.cs        # Main orchestrator
-├── BuildContext.cs              # Services container
-│
+├── BuildContext.cs              # Shared services
 ├── Load/                        # Phase 1: Reflection
-│   ├── AssemblyLoader.cs
-│   ├── ReflectionReader.cs
-│   ├── TypeReferenceFactory.cs
-│   ├── InterfaceMemberSubstitution.cs
-│   └── DeclaringAssemblyResolver.cs
-│
-├── Model/                       # Immutable data
-│   ├── SymbolGraph.cs
-│   ├── Symbols/ (Namespace, Type, Member)
-│   ├── Types/ (TypeReference variants)
-│   └── AssemblyKey.cs
-│
+├── Model/                       # Immutable data structures
 ├── Normalize/                   # Phase 2: Indices
-│   ├── SignatureNormalization.cs
-│   ├── OverloadUnifier.cs
-│   └── NameReservation.cs
-│
-├── Shape/                       # Phase 3: Transformations (18 passes)
-│   ├── GlobalInterfaceIndex.cs
-│   ├── InterfaceDeclIndex.cs
-│   ├── InterfaceInliner.cs
-│   ├── InternalInterfaceFilter.cs
-│   ├── StructuralConformance.cs
-│   ├── ExplicitImplSynthesizer.cs
-│   ├── InterfaceResolver.cs
-│   ├── DiamondResolver.cs
-│   ├── BaseOverloadAdder.cs
-│   ├── OverloadReturnConflictResolver.cs
-│   ├── MemberDeduplicator.cs
-│   ├── ViewPlanner.cs
-│   ├── ClassSurfaceDeduplicator.cs
-│   ├── HiddenMemberPlanner.cs
-│   ├── IndexerPlanner.cs
-│   ├── FinalIndexersPass.cs
-│   ├── StaticSideAnalyzer.cs
-│   └── ConstraintCloser.cs
-│
-├── Renaming/                    # Phase 3.5: Naming
-│   ├── SymbolRenamer.cs
-│   ├── StableId.cs
-│   ├── RenameScope.cs
-│   ├── ScopeFactory.cs
-│   ├── RenameDecision.cs
-│   ├── NameReservationTable.cs
-│   └── TypeScriptReservedWords.cs
-│
-├── Plan/                        # Phase 4: Planning + Validation
-│   ├── ImportGraph.cs
-│   ├── ImportPlanner.cs
-│   ├── EmitOrderPlanner.cs
-│   ├── InterfaceConstraintAuditor.cs
-│   ├── PhaseGate.cs
-│   ├── TsAssignability.cs
-│   ├── TsErase.cs
-│   ├── PathPlanner.cs
-│   └── Validation/ (Core, Names, Views, Scopes, Types, etc.)
-│
+├── Shape/                       # Phase 3: Transformations
+├── Renaming/                    # Phase 3.5: Naming service
+├── Plan/                        # Phase 4: Import planning
 └── Emit/                        # Phase 5: File generation
-    ├── SupportTypesEmitter.cs
-    ├── InternalIndexEmitter.cs
-    ├── FacadeEmitter.cs
-    ├── MetadataEmitter.cs
-    ├── BindingEmitter.cs
-    ├── ModuleStubEmitter.cs
-    ├── Printers/ (Class, Interface, Enum, Method, Property, etc.)
-    ├── TypeRefPrinter.cs
-    └── TypeNameResolver.cs
 ```
-
-**Design**: Load (pure CLR) → Model (shared data) → Normalize (indices) → Shape (16 transforms) → Renaming (central naming) → Plan (imports + validation) → Emit (string generation)
 
 ---
 
-## BuildContext Services
+## 6. Build Context Services
 
 ### Policy (Configuration)
 
-```csharp
-public sealed class GenerationPolicy
-{
-    // Naming
-    public NameTransformStrategy TypeNameTransform { get; init; }
-    public NameTransformStrategy MemberNameTransform { get; init; }
-    public Dictionary<string, string> ExplicitMap { get; init; }
+- Type/member name transforms
+- Emission filters (internal types, doc comments)
+- Branded primitives (int vs number)
+- Import style (ES6 vs namespace)
 
-    // Filters
-    public bool IncludeInternalTypes { get; init; }
-    public bool EmitDocumentation { get; init; }
-    public bool UseBrandedPrimitives { get; init; }
+### SymbolRenamer (Naming Service)
 
-    // Import style
-    public ImportStyle ImportStyle { get; init; }
-}
-```
-
-### SymbolRenamer (Central Naming Authority)
-
-**Responsibilities**:
-1. Reserve names in scopes
-2. Apply style transforms (PascalCase, camelCase)
-3. Resolve conflicts via numeric suffixes
-4. Sanitize reserved words (class → class_)
-5. Track rename decisions with provenance
-
-**Key Methods**:
-```csharp
-void ReserveTypeName(StableId id, string requested, NamespaceScope scope, string reason);
-void ReserveMemberName(StableId id, string requested, RenameScope scope, string reason, bool isStatic);
-string GetFinalTypeName(TypeSymbol type, NamespaceArea area);
-string GetFinalMemberName(StableId id, RenameScope scope);
-```
-
-**Scope Separation**: Class surface vs view surfaces - independent naming.
-
-**Decision Recording**:
-```csharp
-public sealed record RenameDecision
-{
-    public StableId Id { get; init; }
-    public string Requested { get; init; }
-    public string Final { get; init; }
-    public string From { get; init; }
-    public string Reason { get; init; }
-    public string Strategy { get; init; }  // "NumericSuffix", "Sanitize"
-    public string ScopeKey { get; init; }
-}
-```
-
-Emitted to `bindings.json` for runtime binding.
+Central naming authority:
+- Reserve names in scopes
+- Apply style transforms
+- Resolve conflicts (numeric suffixes)
+- Sanitize reserved words
+- Track rename decisions
 
 ### DiagnosticBag (Error Collection)
 
-```csharp
-void Error(string code, string message);
-void Warning(string code, string message);
-void Info(string code, string message);
-bool HasErrors();
-IReadOnlyList<Diagnostic> GetAll();
-```
-
-**Diagnostic**: Severity (Error/Warning/Info), Code ("PG_FIN_003"), Message, Location.
+Collects errors/warnings/info throughout pipeline. Blocks emission if errors exist.
 
 ### Interner (String Deduplication)
 
-```csharp
-string Intern(string value);
-```
-
-Reduces memory by 30-40% for large BCL assemblies.
+Reduces memory via string interning. Typical savings: 30-40%.
 
 ### Logger (Progress Reporting)
 
-```csharp
-void Log(string category, string message);
-```
-
-**Categories**: "Build", "Load", "Shape", "ViewPlanner", "PhaseGate", "Emit"
-
-**Filtering**:
-```csharp
-var ctx = BuildContext.Create(policy, logger, verboseLogging: true);
-// OR
-var logCategories = new HashSet<string> { "PhaseGate", "ViewPlanner" };
-var ctx = BuildContext.Create(policy, logger, verboseLogging: false, logCategories);
-```
+Optional logging for debugging. Categories: Build, Load, Shape, ViewPlanner, PhaseGate, Emit.
 
 ---
 
 ## Summary
 
-**SinglePhase Pipeline**: Deterministic pure functional transformation from .NET → TypeScript.
+**SinglePhase pipeline** is a deterministic, pure functional transformation:
 
-**Flow**: Load (Reflection → SymbolGraph) → Normalize (Indices) → Shape (16 transforms) → Name Reservation (SymbolRenamer) → Plan (Imports + PhaseGate) → Emit (TypeScript files + metadata)
+1. **Load**: Reflection → SymbolGraph
+2. **Normalize**: Build indices
+3. **Shape**: 16 transformations
+4. **Name Reservation**: Reserve all names
+5. **Plan**: Import analysis + validation
+6. **Emit**: Generate files
 
-**Principles**: Immutability, purity, centralization, StableId identity, scope-based naming, validation gates.
+**Core Principles**: Immutability, purity, centralization, stable identity, scoping, validation
 
-**Result**: 100% data integrity, zero data loss, type-safe TypeScript for entire .NET BCL.
+**Result**: 100% data integrity, zero data loss, type-safe TypeScript declarations for entire .NET BCL (4,047 types, 130 namespaces).

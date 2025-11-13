@@ -1,434 +1,700 @@
 # Phase 4: Shape - CLR to TypeScript Semantic Transformation
 
-Transforms CLR semantics → TypeScript-compatible semantics. All passes are pure functions returning new `SymbolGraph`.
+## Overview
 
-## Pass Execution Order
+**Shape phase** transforms CLR semantics → TypeScript-compatible semantics via **16 sequential transformation passes**. Operates on normalized `SymbolGraph` from Phase 3.
 
-```
-1. GlobalInterfaceIndex      → Build global interface signature index
-2. InterfaceDeclIndex         → Build declared-only member index
-3. InterfaceInliner          → Flatten interface hierarchies (remove extends)
-3.5. InternalInterfaceFilter  → Remove internal BCL interfaces
-4. StructuralConformance     → Synthesize ViewOnly for non-conforming interfaces
-5. ExplicitImplSynthesizer   → Synthesize missing EII members
-6. InterfaceResolver         → Resolve which interface declares member
-7. DiamondResolver           → Detect diamond inheritance conflicts
-8. BaseOverloadAdder         → Add base class overloads to derived
-9. OverloadReturnConflictResolver → Detect return-type conflicts
-10. MemberDeduplicator       → Remove StableId duplicates
-11. ViewPlanner              → Create As_IInterface properties
-12. ClassSurfaceDeduplicator → Deduplicate by emitted name, demote to ViewOnly
-13. HiddenMemberPlanner      → Reserve names for 'new' hidden members
-14. IndexerPlanner           → Convert indexers to methods (policy)
-15. FinalIndexersPass        → Final indexer policy enforcement
-16. StaticSideAnalyzer       → Detect/rename static-side conflicts
-17. ConstraintCloser         → Resolve and validate generic constraints
-```
+**Key Responsibilities**:
+- Flatten interface hierarchies (remove `extends`)
+- Synthesize missing interface members
+- Resolve diamond inheritance, add base overloads
+- Deduplicate members, plan explicit interface views
+- Handle indexers, static-side conflicts, generic constraints
 
-**Critical Dependencies:**
-- 3 before 3.5: InternalInterfaceFilter needs flattened interfaces
-- 3.5 before 4-5: Don't synthesize for internal interfaces
-- 3 before 4-5: Synthesis needs flattened interfaces
-- 1-2 before 6: Resolver needs indexes
-- 4-5 before 11: View planning needs ViewOnly members
-- 11 before 12: Surface dedup can safely demote to ViewOnly
-- 14 before 15: Final pass ensures no indexer leaks
+**PURE Transformations**: All passes return new immutable `SymbolGraph` instances.
 
 ---
 
 ## Pass 1: GlobalInterfaceIndex
 
-Builds cross-assembly interface index for member resolution.
+**File**: `GlobalInterfaceIndex.cs`
 
-**Data Structures:**
+### Purpose
+Build cross-assembly interface indexes: `GlobalInterfaceIndex` (all signatures) and `InterfaceDeclIndex` (declared-only).
+
+### Public API
+
+**`GlobalInterfaceIndex.Build(BuildContext ctx, SymbolGraph graph)`**
+- Index ALL public interfaces across assemblies
+- Compute method/property signatures per interface
+- Store in `_globalIndex[ClrFullName]`
+
+**`GetInterface(string fullName)`** - Lookup interface by full name
+
+**`ContainsInterface(string fullName)`** - Check existence
+
+### Data Structures
+
 ```csharp
-record InterfaceInfo(
+public record InterfaceInfo(
     TypeSymbol Symbol,
-    HashSet<string> MethodSignatures,    // All (declared + inherited)
+    string FullName,
+    string AssemblyName,
+    HashSet<string> MethodSignatures,
     HashSet<string> PropertySignatures)
 ```
-
-**Algorithm:**
-- Index ALL interfaces by `ClrFullName`
-- Compute canonical signatures for methods/properties
-- Store in `_globalIndex` dictionary
-
-**Used by:** InterfaceResolver, StructuralConformance
 
 ---
 
 ## Pass 2: InterfaceDeclIndex
 
-Indexes ONLY declared members (excludes inherited).
+**File**: `GlobalInterfaceIndex.cs`
 
-**Why separate?** Needed to determine which interface in chain actually declares a member.
+### Purpose
+Index interface members that are DECLARED (not inherited). Used to resolve which interface actually declares a member.
 
-**Algorithm:**
-1. For each interface:
-   - Collect inherited signatures via BFS of base interfaces
-   - Subtract inherited from total → declared only
-2. Store as `DeclaredMembers`
+### Public API
 
-**Used by:** InterfaceResolver.FindDeclaringInterface
+**`InterfaceDeclIndex.Build(BuildContext ctx, SymbolGraph graph)`**
+- Collect inherited signatures from base interfaces
+- Filter to declared-only members
+- Store in `_declIndex[ClrFullName]`
 
----
+**`DeclaresMethod/Property(string ifaceFullName, string canonicalSig)`** - Check if interface declares member
 
-## Pass 3: InterfaceInliner
+### Data Structures
 
-Flattens interface hierarchies - copies all inherited members into each interface, clears `extends`.
-
-**Why?** TypeScript `extends` causes variance issues. Safer to flatten.
-
-**Algorithm:**
-1. BFS traversal of `iface.Interfaces`, collect all members
-2. **Generic parameter substitution** - for each inherited member:
-   - Build substitution map: interface generic params → actual type args
-   - Compose parent substitutions for chained generics
-   - Substitute method/property/event types
-   - **CRITICAL:** Filter out method-level generic params (don't substitute method's own `<T>`)
-3. Deduplicate:
-   - Methods: by canonical signature
-   - Properties: by name (TS doesn't allow property overloads)
-   - Events: by canonical signature
-4. Clear `Interfaces` array
-
-**Key Methods:**
-- `BuildSubstitutionMapForInterface()` - Maps generic param names → type args
-- `ComposeSubstitutions()` - Handles grandparent → parent → child chains
-- `SubstituteMethodMembers()` - Protects method-level generics from substitution
-- `SubstitutePropertyMembers()` - Substitutes property types and indexer params
-- `SubstituteEventMembers()` - Substitutes event handler types
-
-**Example:**
 ```csharp
-interface IBase<T> { T GetValue(); }
-interface IDerived : IBase<string> { }
-// CORRECT: IDerived gets "string GetValue()" - T substituted
+public record DeclaredMembers(
+    string InterfaceFullName,
+    HashSet<string> MethodSignatures,
+    HashSet<string> PropertySignatures)
 ```
 
 ---
 
-## Pass 3.5: InternalInterfaceFilter
+## Pass 3: StructuralConformance
 
-**Purpose:** Filters internal BCL interfaces from type interface lists. Internal interfaces are implementation details not meant for public use.
+**File**: `StructuralConformance.cs`
 
-**Why needed?** Types implement internal interfaces like `IValueTupleInternal`, `IDebuggerDisplay`, `ISimdVector<T>` that cause TS2304 errors.
+### Purpose
+Analyze structural conformance for interfaces. Synthesize ViewOnly members for interfaces that can't be structurally implemented on class surface.
 
-**Algorithm:**
-1. For each type in graph:
-   - For each interface in `type.Interfaces`:
-     - Check if internal (explicit list + pattern matching)
-     - If internal: remove from interface list, log
-2. Return new graph with filtered interfaces
+### Public API
 
-**Detection Logic:**
-- **Explicit list**: Exact CLR full name matches (e.g., `"System.Runtime.Intrinsics.ISimdVector\\`2"`)
-- **Pattern matching**: Simple name contains patterns (e.g., "Internal", "Debugger", "ParseAndFormatInfo")
+**`StructuralConformance.Analyze(BuildContext ctx, SymbolGraph graph)`**
 
-**Patterns:** `"Internal"`, `"Debugger"`, `"ParseAndFormatInfo"`, `"Runtime"`, `"Compiler"`, `"Roslyn"`
+**Algorithm**:
+1. For each class/struct implementing interfaces:
+   - Build class surface (representable members, exclude ViewOnly)
+   - For each interface:
+     - Build substituted interface surface (flattened + type args)
+     - Check TS assignability: `classSurface.IsTsAssignableMethod/Property(ifaceMember)`
+     - For missing: synthesize ViewOnly member with interface StableId
+2. Add synthesized ViewOnly members to type immutably
+3. Return new SymbolGraph
 
-**Impact:** Eliminates TS2304 errors for internal interfaces
+**Key**: Uses interface member's StableId (NOT class StableId) to prevent ID conflicts.
 
-**Must run AFTER:** InterfaceInliner (needs flattened list)
-**Must run BEFORE:** ExplicitImplSynthesizer (don't synthesize for internal interfaces)
+**Synthesized member**:
+```csharp
+new MethodSymbol {
+    StableId = ifaceMethod.StableId,  // From interface!
+    Provenance = MemberProvenance.ExplicitView,
+    EmitScope = EmitScope.ViewOnly,
+    SourceInterface = declaringInterface
+}
+```
 
 ---
 
-## Pass 4: StructuralConformance
+## Pass 4: InterfaceInliner
 
-Analyzes structural conformance and synthesizes ViewOnly members for interfaces that can't be satisfied on class surface.
+**File**: `InterfaceInliner.cs`
 
-**Algorithm:**
-1. Build class surface (exclude ViewOnly)
-2. For each interface:
-   - Build substituted interface surface (flattened + type args)
-   - Check TS assignability: `ClassSurface.IsTsAssignableMethod/Property(ifaceMember)`
-   - For missing: synthesize ViewOnly clone with **interface's StableId**
-3. Add ViewOnly members to type
+### Purpose
+Flatten interface hierarchies - remove `extends` chains. Copy all inherited members into each interface.
 
-**Key:** Uses interface member's StableId (not class's) to prevent ID conflicts across types.
+**Why?** TypeScript `extends` causes variance issues. Safer to flatten.
 
-**ClassSurface.IsTsAssignableMethod:**
-1. Find candidates by name (case-insensitive)
-2. Erase to TS signatures (remove CLR-specific info)
-3. Check `TsAssignability.IsMethodAssignable(classSig, ifaceSig)`
+### Public API
+
+**`InterfaceInliner.Inline(BuildContext ctx, SymbolGraph graph)`**
+
+**Algorithm**:
+1. For each interface:
+   - BFS traversal of base interfaces
+   - Collect all members (methods, properties, events)
+   - Deduplicate by canonical signature
+   - Clear `Interfaces` array (no more extends)
+2. Return updated graph
+
+### FIX D: Generic Parameter Substitution
+
+**Purpose**: Substitute type parameters when flattening generic interface hierarchies.
+
+**Problem Without FIX D**:
+```csharp
+// C#:
+interface IBase<T> { T GetValue(); }
+interface IDerived : IBase<string> { }
+
+// WITHOUT FIX D:
+interface IDerived {
+  GetValue(): T;  // ERROR: T orphaned
+}
+
+// WITH FIX D:
+interface IDerived {
+  GetValue(): string;  // CORRECT
+}
+```
+
+**What FIX D Handles**:
+1. Direct substitution: `ICollection<T>` → `ICollection<string>`
+2. Nested generics: `ICollection<KeyValuePair<TKey, TValue>>`
+3. Chained substitution: Grandparent generics through parent
+4. Method-level generic protection: Don't substitute method's own type params
+
+**Key Methods**:
+
+#### `BuildSubstitutionMapForInterface(TypeSymbol baseIface, TypeReference baseIfaceRef)`
+```csharp
+// Input: ICollection<T>, ICollection<string>
+// Output: { "T" -> string }
+```
+
+Maps interface generic parameter names to actual type arguments.
+
+#### `ComposeSubstitutions(parent, current)`
+Composes two substitution maps for chained generics (grandparent → parent → child).
+
+#### `SubstituteMethodMembers(methods, substitutionMap)`
+Apply substitution to method signatures.
+
+**CRITICAL**: Filters out method-level generic parameters:
+```csharp
+var methodLevelParams = new HashSet<string>(method.GenericParameters.Select(gp => gp.Name));
+var filteredMap = substitutionMap.Where(kv => !methodLevelParams.Contains(kv.Key));
+```
+
+**Why**: Method's own generics must NOT be substituted.
+
+#### `SubstitutePropertyMembers(properties, substitutionMap)`
+Apply substitution to property types and index parameters.
+
+#### `SubstituteEventMembers(events, substitutionMap)`
+Apply substitution to event handler types.
+
+**Complete Example**:
+```csharp
+// IList<string> : ICollection<string> : IEnumerable<string>
+// Result: IList<string> gets all members with T → string substituted
+```
+
+**Impact**: Eliminates orphaned generic parameter errors in flattened interfaces.
+
+---
+
+## Pass 4.5: InternalInterfaceFilter
+
+**File**: `InternalInterfaceFilter.cs`
+
+### Purpose
+Filter internal BCL interfaces from type interface lists. Internal interfaces are BCL implementation details causing TS2304 errors.
+
+### Public API
+
+**`InternalInterfaceFilter.FilterGraph(BuildContext ctx, SymbolGraph graph)`**
+- Iterate all types, filter internal interfaces
+- Log removed count
+- Return new SymbolGraph with filtered lists
+
+**`FilterInterfaces(BuildContext ctx, TypeSymbol type)`**
+- Filter internal interfaces from single type
+- Check `IsInternalInterface(iface)`
+- Return updated type or original if none removed
+
+### Pattern Matching
+
+**`IsInternalInterface(TypeReference typeRef)`**
+1. Check explicit list: `ExplicitInternalInterfaces.Contains(fullName)`
+2. Check patterns: `name.Contains(pattern)` on simple name
+
+**InternalPatterns**:
+```csharp
+{ "Internal", "Debugger", "ParseAndFormatInfo", "Runtime",
+  "StateMachineBox", "SecurePooled", "BuiltInJson", "DeferredDisposable" }
+```
+
+**ExplicitInternalInterfaces**:
+```csharp
+{ "System.Runtime.Intrinsics.ISimdVector`2",
+  "System.IUtfChar`1",
+  "System.Collections.Immutable.IStrongEnumerator`1",
+  "System.Runtime.CompilerServices.ITaskAwaiter", ... }
+```
+
+**Why patterns on simple name?** Prevents false positives like filtering `System.Runtime.InteropServices.ISerializable`.
+
+**Impact**: Eliminated 75 TS2304 errors (75.8% reduction).
 
 ---
 
 ## Pass 5: ExplicitImplSynthesizer
 
-Synthesizes missing interface members. In C#, explicit interface implementations are invisible on class - we must synthesize them.
+**File**: `ExplicitImplSynthesizer.cs`
 
-**Algorithm:**
-1. Collect required members from all implemented interfaces
-2. Find missing: check `type.Members.*.Any(m => m.StableId.Equals(required.StableId))`
-3. Synthesize missing with:
-   - **Interface member's StableId** (not class's)
-   - `Provenance = ExplicitView`
-   - `EmitScope = ViewOnly`
-4. Deduplicate by StableId (multiple interfaces may require same member)
+### Purpose
+Synthesize missing interface members for classes/structs. Ensures all interface-required members exist. In C#, explicit interface implementations (EII) are invisible on class.
 
-**Key:** Compare by StableId directly, not re-canonicalizing signatures.
+### Public API
+
+**`ExplicitImplSynthesizer.Synthesize(BuildContext ctx, SymbolGraph graph)`**
+
+**Algorithm**:
+1. For each class/struct:
+   - Collect required members: `CollectInterfaceMembers(ctx, graph, type)`
+   - Find missing: `FindMissingMembers(ctx, type, requiredMembers)`
+   - Synthesize missing methods/properties with interface StableId
+   - Deduplicate by StableId (multiple interfaces may require same member)
+   - Add to type immutably
+2. Return updated graph
+
+**Key Fix**: Compare by StableId directly (not re-canonicalizing signatures).
 
 ---
 
 ## Pass 6: InterfaceResolver
 
-Resolves which interface in inheritance chain declares a member.
+**File**: `InterfaceResolver.cs`
 
-**Why?** When IList<T> : ICollection<T> both have Add(), determine which declared it first.
+### Purpose
+Resolve interface members to declaring interface. Determines which interface in inheritance chain actually declares a member.
 
-**Algorithm (FindDeclaringInterface):**
-1. Build inheritance chain: recursive BFS from roots to given interface (top-down)
+### Public API
+
+**`InterfaceResolver.FindDeclaringInterface(TypeReference closedIface, string memberCanonicalSig, bool isMethod, BuildContext ctx)`**
+
+**Algorithm**:
+1. Build inheritance chain: `BuildInterfaceChain(closedIface, ctx)` (top-down order)
 2. Walk chain from ancestors to immediate
-3. For each: check `InterfaceDeclIndex.DeclaresMethod/Property(ifaceDefName, canonicalSig)`
-4. Pick most ancestral (first in chain) if multiple candidates
-5. Cache result by `(closedIfaceName, memberCanonicalSig)`
+3. Check `InterfaceDeclIndex.DeclaresMethod/Property(ifaceDefName, memberCanonicalSig)`
+4. Pick winner: most ancestral if multiple candidates
+5. Cache result
 
-**BuildInterfaceChain:**
-- Recursive BFS: process base interfaces first, then current
-- Substitute type arguments at each level
-- Reverse to get top-down order (roots first)
+**Returns**: Closed interface reference declaring member, or null.
 
 ---
 
 ## Pass 7: DiamondResolver
 
-Detects diamond inheritance conflicts. When multiple paths bring same method with different signatures, logs conflict.
+**File**: `DiamondResolver.cs`
 
-**Diamond Pattern:**
+### Purpose
+Resolve diamond inheritance conflicts. When multiple paths bring same method with different signatures, ensure all variants available.
+
+**Diamond Pattern**:
 ```
     IBase
    /    \
-  IA    IB (both override IBase.Method with different sigs)
+  IA    IB
    \    /
    Class
 ```
 
-**Algorithm:**
-1. Group methods by CLR name within scope (ClassSurface/ViewOnly separate)
-2. For groups with multiple methods:
-   - Group by canonical signature
-   - If multiple signatures → diamond detected
-3. Log conflicts (PhaseGate validates)
-4. Strategy handling:
-   - `OverloadAll` → keep all (already in list)
-   - `PreferDerived` → log preference (don't modify)
-   - `Error` → PhaseGate will fail
+### Public API
 
-**Note:** Detection only, doesn't modify graph.
+**`DiamondResolver.Resolve(BuildContext ctx, SymbolGraph graph)`**
+
+**Algorithm**:
+1. Check policy: `ctx.Policy.Interfaces.DiamondResolution`
+   - If `Error` → analyze and report
+2. For each type: group methods by CLR name in each EmitScope
+3. For groups with multiple signatures → diamond conflict detected
+4. Log conflicts (PhaseGate validates)
+5. Return graph unchanged (detection only)
 
 ---
 
 ## Pass 8: BaseOverloadAdder
 
-Adds base class overloads to derived. TS requires all overloads present on derived (unlike C# where they're inherited).
+**File**: `BaseOverloadAdder.cs`
 
-**Algorithm:**
-1. Find base class (skip if external/System.Object)
-2. Group methods by name (derived and base)
-3. For each base method:
-   - If derived doesn't override → skip (keeps base)
-   - Build expected StableId for derived version
-   - If missing from derived → synthesize
-4. Deduplicate by StableId (base hierarchy may have same method at multiple levels)
+### Purpose
+Add base class overloads when derived class differs. In TypeScript, all overloads must be present on derived class.
 
-**CreateBaseOverloadMethod:**
-- Uses **derived class's StableId** (not base's)
-- `Provenance = BaseOverload`
-- `EmitScope = ClassSurface`
-- Reserves name with Renamer
+**Example**:
+```csharp
+class Base { void M(int x) { } void M(string s) { } }
+class Derived : Base { override void M(int x) { } }
+// TS error: missing M(string) - must add base overload
+```
+
+### Public API
+
+**`BaseOverloadAdder.AddOverloads(BuildContext ctx, SymbolGraph graph)`**
+
+**Algorithm**:
+1. For each class with base type:
+   - Find base class
+   - Group methods by name (derived + base)
+   - For each base method name:
+     - If derived doesn't override → skip
+     - For each base method:
+       - Check if derived has exact signature (by StableId)
+       - If missing → synthesize with `CreateBaseOverloadMethod`
+   - Deduplicate, validate, add to derived
+2. Return updated graph
+
+**Synthesized member**:
+```csharp
+new MethodSymbol {
+    StableId = new MemberStableId { ... },  // Derived location
+    ClrName = baseMethod.ClrName,
+    ReturnType = baseMethod.ReturnType,
+    Provenance = MemberProvenance.BaseOverload,
+    EmitScope = EmitScope.ClassSurface
+}
+```
 
 ---
 
 ## Pass 9: OverloadReturnConflictResolver
 
-Detects return-type conflicts. TS doesn't support overloads differing only in return type.
+**File**: `OverloadReturnConflictResolver.cs`
 
-**Algorithm:**
-1. Group methods by signature excluding return: `"MethodName(param1Type,param2Type)"`
-2. For groups with multiple return types → conflict detected
-3. Log conflict (PhaseGate validates)
+### Purpose
+Detect return-type conflicts in overloads. TypeScript doesn't support overloads differing only in return type.
 
-**Note:** Detection only, doesn't modify graph.
+**Example**:
+```csharp
+// C# allows:
+int GetValue(string key);
+string GetValue(string key);  // Different return
+// TypeScript DOESN'T allow this!
+```
+
+### Public API
+
+**`OverloadReturnConflictResolver.Resolve(BuildContext ctx, SymbolGraph graph)`**
+
+**Algorithm**:
+1. For each type, per EmitScope:
+   - Group methods by signature excluding return: `GetSignatureWithoutReturn(ctx, m)`
+   - For groups with multiple methods:
+     - Get distinct return types
+     - If multiple → conflict detected, log
+2. Return graph unchanged (detection only)
 
 ---
 
 ## Pass 10: MemberDeduplicator
 
-Safety net - removes any StableId duplicates introduced by multiple Shape passes.
+**File**: `MemberDeduplicator.cs`
 
-**Algorithm:**
-- For each type: deduplicate methods/properties/fields/events/constructors by StableId
-- Keep first occurrence (deterministic)
+### Purpose
+Final deduplication to remove duplicates introduced by multiple Shape passes. Keeps first occurrence by StableId.
+
+### Public API
+
+**`MemberDeduplicator.Deduplicate(BuildContext ctx, SymbolGraph graph)`**
+
+**Algorithm**:
+1. For each namespace → type:
+   - Deduplicate methods, properties, fields, events, constructors by StableId
+   - Use `HashSet<StableId>` to track seen
+2. Return new graph with unique members
 
 ---
 
 ## Pass 11: ViewPlanner
 
-Creates As_IInterface properties for interfaces with ViewOnly members.
+**File**: `ViewPlanner.cs`
 
-**Algorithm:**
-1. Collect ALL ViewOnly members with `SourceInterface`
-2. Group by interface StableId
-3. For each interface:
-   - Create `ExplicitView(InterfaceReference, ViewPropertyName, ViewMembers)`
-   - Validate no duplicate StableIds within view
-4. Attach views to type
+### Purpose
+Plan explicit interface views (As_IInterface properties). Creates views for interfaces that couldn't be structurally implemented.
 
-**CreateViewName:**
-- `IDisposable` → `As_IDisposable`
-- `IEnumerable<string>` → `As_IEnumerable_1_of_string`
-- `IDictionary<string, int>` → `As_IDictionary_2_of_string_and_int`
+### Public API
+
+**`ViewPlanner.Plan(BuildContext ctx, SymbolGraph graph)`**
+
+**Algorithm**:
+1. For each class/struct:
+   - Collect ALL ViewOnly members with SourceInterface
+   - Group by interface StableId
+   - For each interface:
+     - Collect ViewMembers: `new ViewMember(Kind, StableId, ClrName)`
+     - Create ExplicitView:
+       ```csharp
+       new ExplicitView(
+           InterfaceReference: ifaceRef,
+           ViewPropertyName: CreateViewName(ifaceRef),
+           ViewMembers: viewMembers)
+       ```
+   - Attach views to type: `t.WithExplicitViews(plannedViews)`
+2. Return updated graph
+
+**View names**: `IDisposable` → `As_IDisposable`, `IEnumerable<string>` → `As_IEnumerable_1_of_string`
+
+### Data Structures
+
+```csharp
+public record ExplicitView(
+    TypeReference InterfaceReference,
+    string ViewPropertyName,
+    ImmutableArray<ViewMember> ViewMembers)
+
+public record ViewMember(
+    ViewMemberKind Kind,  // Method, Property, Event
+    MemberStableId StableId,
+    string ClrName)
+```
 
 ---
 
 ## Pass 12: ClassSurfaceDeduplicator
 
-Deduplicates by emitted name (post-camelCase). When multiple properties emit to same name, keep most specific and demote others to ViewOnly.
+**File**: `ClassSurfaceDeduplicator.cs`
 
-**Algorithm:**
-1. Group class-surface properties by emitted name (camelCase)
-2. For duplicate groups:
-   - Pick winner: `PickWinner(candidates)`
-   - Demote losers: `EmitScope = ViewOnly`
+### Purpose
+Deduplicate class surface by emitted name (post-camelCase). When multiple properties emit to same name, keep most specific, demote others to ViewOnly.
 
-**PickWinner (preference order):**
-1. Non-explicit over explicit (`Provenance != ExplicitView`)
-2. Generic over non-generic (GenericParameterReference vs concrete)
+**Example**:
+```csharp
+class Foo {
+    object Current { get; }   // IEnumerator.Current
+    string Current { get; }   // IEnumerator<string>.Current
+}
+// Both emit to "current" → keep string, demote object to ViewOnly
+```
+
+### Public API
+
+**`ClassSurfaceDeduplicator.Deduplicate(BuildContext ctx, SymbolGraph graph)`**
+
+**Algorithm**:
+1. For each type:
+   - Group class-surface properties by emitted name (camelCase)
+   - For duplicate groups:
+     - Pick winner: `PickWinner(candidates)`
+     - Demote losers to ViewOnly
+2. Return updated graph
+
+**PickWinner preference**:
+1. Non-explicit over explicit
+2. Generic over non-generic
 3. Narrower type over `object`
-4. Stable ordering by `(DeclaringClrFullName, CanonicalSignature)`
-
-**Example:** `IEnumerator<T>.Current` (generic T) wins over `IEnumerator.Current` (object)
+4. Stable ordering
 
 ---
 
 ## Pass 13: HiddenMemberPlanner
 
-Handles C# 'new' hidden members. Reserves renamed versions (e.g., `Method_new`) through Renamer.
+**File**: `HiddenMemberPlanner.cs`
 
-**Algorithm:**
-- For each method with `IsNew`:
-  - Build requested name: `method.ClrName + ctx.Policy.Classes.HiddenMemberSuffix` (default: "_new")
-  - Reserve with Renamer: `ReserveMemberName(..., "HiddenNewConflict", ...)`
+### Purpose
+Plan C# 'new' hidden members. When derived hides base with 'new', reserve renamed version (e.g., `Method_new`) via Renamer.
 
-**Note:** Pure planning - doesn't modify graph, Renamer handles names.
+### Public API
+
+**`HiddenMemberPlanner.Plan(BuildContext ctx, SymbolGraph graph)`**
+
+**Algorithm**:
+1. For each class/struct with base type:
+   - Find methods marked `IsNew`
+   - Reserve renamed version: `ctx.Renamer.ReserveMemberName(stableId, clrName + "_new", scope, "HiddenNewConflict", isStatic)`
+2. DOES NOT modify graph (pure planning - Renamer handles names)
 
 ---
 
 ## Pass 14: IndexerPlanner
 
-Plans indexer representation (property vs methods).
+**File**: `IndexerPlanner.cs`
 
-**Policy:** `ctx.Policy.Indexers.EmitPropertyWhenSingle`
-- Single indexer + policy true → keep as property
-- Otherwise → convert ALL to methods
+### Purpose
+Plan indexer representation (property vs methods).
+- Single uniform indexer → keep as property
+- Multiple/heterogeneous → convert to get/set methods
 
-**ToIndexerMethods:**
-1. Getter: `T get_{methodName}(TIndex index)`
-2. Setter: `void set_{methodName}(TIndex index, T value)`
-- Default: `get_Item`, `set_Item`
-- Reserve names with Renamer
-- `Provenance = IndexerNormalized`
+**Policy**: `ctx.Policy.Indexers.EmitPropertyWhenSingle`
+
+### Public API
+
+**`IndexerPlanner.Plan(BuildContext ctx, SymbolGraph graph)`**
+
+**Algorithm**:
+1. For each type with indexers:
+   - If 1 indexer AND `EmitPropertyWhenSingle` → keep as property
+   - Otherwise → convert ALL to methods:
+     - `get_Item(index)`, `set_Item(index, value)`
+     - Remove indexer properties
+2. Return updated graph
 
 ---
 
 ## Pass 15: FinalIndexersPass
 
-Final enforcement - ensures no indexer properties leak through.
+**File**: `FinalIndexersPass.cs`
 
-**Invariant:**
+### Purpose
+Final, definitive pass to enforce indexer policy. Ensures no indexer properties leak through.
+
+**Invariant**:
 - 0 indexers → nothing
-- 1 indexer → keep as property ONLY if `policy.EmitPropertyWhenSingle`
+- 1 indexer → keep ONLY if `policy.EmitPropertyWhenSingle == true`
 - ≥2 indexers → convert ALL to methods
 
-**Note:** Same conversion as Pass 14, but runs at end to catch any leaks.
+### Public API
+
+**`FinalIndexersPass.Run(BuildContext ctx, SymbolGraph graph)`**
+
+**Algorithm**:
+1. For each type with indexers:
+   - Check invariant
+   - If needs conversion:
+     - Emit INFO diagnostic: `DiagnosticCodes.IndexerConflict`
+     - Synthesize get/set methods
+     - Remove indexer properties
+2. Return updated graph
 
 ---
 
 ## Pass 16: StaticSideAnalyzer
 
-Analyzes static-side inheritance conflicts. TS doesn't allow static side of class to extend static side of base.
+**File**: `StaticSideAnalyzer.cs`
 
-**Algorithm:**
-1. Collect static members from derived and base
-2. Find name conflicts: `derivedStaticNames.Intersect(baseStaticNames)`
-3. Apply policy action:
-   - `Error` → fail build
-   - `AutoRename` → reserve `"{name}_static"` via Renamer
-   - `Analyze` → warn only
+### Purpose
+Analyze static-side inheritance issues. TypeScript doesn't allow static side of class to extend static side of base, causing TS2417 errors.
 
-**Note:** Uses Renamer for renames, doesn't modify graph directly.
+**Policy**: `ctx.Policy.StaticSide.Action` (Analyze, AutoRename, Error)
+
+### Public API
+
+**`StaticSideAnalyzer.Analyze(BuildContext ctx, SymbolGraph graph)`**
+
+**Algorithm**:
+1. For each class with base type:
+   - Collect static members (derived + base)
+   - Find name conflicts
+   - Apply policy action:
+     - `Error` → emit error diagnostic
+     - `AutoRename` → `RenameConflictingStatic(ctx, ...)` (adds `_static` suffix via Renamer)
+     - `Analyze` → emit warning
+2. DOES NOT modify graph (uses Renamer for renames)
 
 ---
 
 ## Pass 17: ConstraintCloser
 
-Closes generic constraints for TypeScript.
+**File**: `ConstraintCloser.cs`
 
-**Steps:**
-1. **Resolve:** Convert raw `System.Type` constraints → `TypeReference`s
-   - Uses memoized `TypeReferenceFactory` to prevent infinite loops
-2. **Validate:**
-   - Both `struct` and `class` constraints → warning
-   - Unrepresentable types (pointers, byrefs) → warning
-3. **Merge strategy:**
-   - `Intersection` → TS uses `T extends A & B & C` automatically
-   - `Union` → Not supported in TS, emit warning
-   - `PreferLeft` → Log strategy
+### Purpose
+Close generic constraints for TypeScript. Resolve raw `System.Type` constraints → `TypeReference`s, validate compatibility.
+
+**Policy**: `ctx.Policy.Constraints.MergeStrategy`
+
+### Public API
+
+**`ConstraintCloser.Close(BuildContext ctx, SymbolGraph graph)`**
+
+**Algorithm**:
+1. Resolve constraints: `ResolveAllConstraints(ctx, graph)` (raw types → TypeReferences)
+2. For each type:
+   - Close type-level generic parameters: `CloseConstraints(ctx, gp)`
+   - Close method-level generic parameters
+3. Validate constraints: check incompatible/unrepresentable
+4. Return updated graph
+
+**Checks**:
+- Both `struct` and `class` constraints → warning
+- Unrepresentable types (pointers, byrefs) → warning
 
 ---
 
-## Key Transformations
+## Pass Order and Dependencies
+
+**CRITICAL: Passes MUST run in exact order**:
+
+1. **GlobalInterfaceIndex** - Build global index (required by all)
+2. **InterfaceDeclIndex** - Build declared-only index
+3. **InterfaceInliner** - Flatten hierarchies BEFORE conformance
+4. **StructuralConformance** - Synthesize ViewOnly members
+5. **ExplicitImplSynthesizer** - Synthesize missing EII
+6. **InterfaceResolver** - Resolve declaring interfaces
+7. **DiamondResolver** - Detect diamonds AFTER synthesis
+8. **BaseOverloadAdder** - Add base overloads AFTER diamonds
+9. **OverloadReturnConflictResolver** - Detect return conflicts
+10. **MemberDeduplicator** - Remove duplicates BEFORE view planning
+11. **ViewPlanner** - Plan views AFTER all ViewOnly synthesized
+12. **ClassSurfaceDeduplicator** - Deduplicate by emitted name
+13. **HiddenMemberPlanner** - Plan 'new' hidden members
+14. **IndexerPlanner** - Convert indexers
+15. **FinalIndexersPass** - Final indexer enforcement
+16. **StaticSideAnalyzer** - Analyze static conflicts
+17. **ConstraintCloser** - Close constraints (final pass)
+
+**Key Dependencies**:
+- Passes 4-5 depend on 3 (flattened interfaces)
+- Pass 6 depends on 1-2 (global indexes)
+- Pass 11 depends on 4-5 (ViewOnly members)
+- Pass 12 depends on 11 (can safely demote)
+- Pass 15 depends on 14 (ensures no leaks)
+
+---
+
+## Key Transformations Summary
 
 ### Interface Flattening
-```
-IEnumerable<T> extends IEnumerable
-→ IEnumerable_1<T> { both GetEnumerator() variants }
+```typescript
+// Before: interface IEnumerable<T> extends IEnumerable { }
+// After:  interface IEnumerable_1<T> { GetEnumerator(): IEnumerator_1<T>; GetEnumerator(): IEnumerator; }
 ```
 
 ### ViewOnly Synthesis
-```
-class Decimal : IConvertible
-→ class Decimal { [ViewOnly] ToBoolean(...) }
+```csharp
+// Before: class Decimal : IConvertible { } // Missing ToBoolean
+// After:  class Decimal { [ViewOnly] ToBoolean(provider): boolean }
 ```
 
 ### Explicit Views
-```
-class Decimal { [ViewOnly] ToBoolean, ToByte }
-→ class Decimal { As_IConvertible: { toBoolean, toByte } }
+```typescript
+class Decimal {
+    As_IConvertible: { toBoolean(provider): boolean; toByte(provider): byte; }
+}
 ```
 
 ### Base Overload Addition
-```
-class Derived { method(x: int) }
-→ class Derived { method(x: int), method(s: string) }
+```typescript
+// Before: class Derived { method(x: int): void }
+// After:  class Derived { method(x: int): void; method(s: string): void }
 ```
 
 ### Indexer Conversion
-```
-class Array<T> { this[int]: T, this[Range]: T[] }
-→ class Array_1<T> { get_Item(int): T, get_Item(Range): T[], set_Item(...) }
+```typescript
+// Before: class Array<T> { [indexer] this[int]: T }
+// After:  class Array_1<T> { get_Item(index: int): T; set_Item(index: int, value: T): void }
 ```
 
-### Class Surface Dedup
-```
-class Enumerator<T> { current: object, current: T }
-→ class Enumerator_1<T> { current: T, As_IEnumerator: { current: object } }
+### Class Surface Deduplication
+```typescript
+// Before: class Enumerator<T> { current: object; current: T }
+// After:  class Enumerator_1<T> { current: T; As_IEnumerator: { current: object } }
 ```
 
 ---
 
 ## Output
 
-**Shape phase produces:**
-- Flattened interfaces (no extends)
-- ViewOnly members for non-conforming interfaces
-- Explicit views planned
+**Shape phase produces**:
+- Flattened interfaces (no `extends`)
+- ViewOnly members synthesized
+- Explicit views planned (As_IInterface properties)
 - Base overloads added
-- Indexers converted (policy-dependent)
-- Conflicts detected (diamonds, return-type, static-side)
-- Constraints resolved and validated
-- Clean graph ready for Renaming/Emit
+- Indexers converted to methods
+- Diamond/return-type conflicts detected
+- Static-side issues analyzed/renamed
+- Generic constraints resolved
+- Clean graph ready for Renaming and Emit
 
-**Next Phase:** Renaming
+**Next Phase**: Renaming (reserve all names, apply transformations)

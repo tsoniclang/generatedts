@@ -1,429 +1,364 @@
-# Phase LOAD: Reflection
+# Phase 2: Load (Reflection)
 
 ## Overview
 
-Pure CLR reflection phase. No TypeScript concepts yet. Outputs `SymbolGraph` with types, members, and relationships.
+**Load phase** performs reflection over .NET assemblies to extract pure CLR metadata. Operates entirely in CLR domain—no TypeScript concepts. Builds complete `SymbolGraph` with types, members, and relationships.
 
-**Key operations:**
-- BFS transitive closure loading
-- Assembly identity validation (PublicKeyToken, version drift)
-- Type/member extraction via reflection
-- Type reference building with cycle detection
-- Closed generic interface substitution maps
+**Key responsibilities**:
+- Load assemblies with transitive closure (BFS)
+- Validate assembly identity (version consistency, PublicKeyToken)
+- Extract all public types/members via reflection
+- Build type references (named, generic, array, pointer, byref)
+- Substitute type parameters in closed generic interfaces
+
+**Key constraint**: Pure CLR data only—no `TsEmitName`, no TypeScript transformations (later phases).
+
+---
+
+## File: AssemblyLoader.cs
+
+### Purpose
+Creates `MetadataLoadContext` for loading assemblies in isolation. Handles reference pack resolution for .NET BCL. Implements transitive closure loading via BFS. Validates assembly identity consistency.
+
+### Method: CreateLoadContext()
+```csharp
+public MetadataLoadContext CreateLoadContext(IReadOnlyList<string> assemblyPaths)
+```
+Creates MetadataLoadContext for given assemblies. Uses `PathAssemblyResolver` to search:
+1. Directory containing target assemblies
+2. Reference assemblies directory (same as target for version consistency)
+
+### Method: LoadClosure()
+```csharp
+public LoadClosureResult LoadClosure(
+    IReadOnlyList<string> seedPaths,
+    IReadOnlyList<string> refPaths,
+    bool strictVersions = false)
+```
+
+**Main entry point** for full BCL generation. Loads transitive closure via BFS.
+
+**5 Phases**:
+1. **BuildCandidateMap**: Scan reference directories → `AssemblyKey → List<string>` map
+2. **ResolveClosure**: BFS over assembly references → `AssemblyKey → string` (resolved path)
+3. **ValidateAssemblyIdentity**: Guard PG_LOAD_002/003/004 (PublicKeyToken, version drift, retargetable)
+4. **FindCoreLibrary**: Locate System.Private.CoreLib (required for MetadataLoadContext)
+5. **Create MetadataLoadContext**: Load all assemblies in dependency order
+
+**Returns**: `LoadClosureResult` (MetadataLoadContext, assemblies, resolved paths)
+
+### BFS Closure Algorithm (ResolveClosure)
+1. Queue seed assemblies
+2. Dequeue current assembly
+3. Skip if visited
+4. **Version policy**: If already resolved, keep highest version
+5. Load metadata to read references (PEReader/MetadataReader - lightweight)
+6. For each reference:
+   - Look up in candidateMap
+   - If not found: Skip silently (PhaseGate validates later)
+   - If found: Pick highest version, enqueue
+7. Continue until queue empty
+
+**Key behaviors**:
+- Version upgrades: v2.0 wins over v1.0
+- Missing references: Silently skipped (validated by PhaseGate)
+- Lightweight loading: PEReader only, no Assembly.Load
+
+### Validation Guards (ValidateAssemblyIdentity)
+- **PG_LOAD_002**: Mixed PublicKeyToken → ERROR
+- **PG_LOAD_003**: Version drift → ERROR (strict mode) or WARNING
+- **PG_LOAD_004**: Retargetable/ContentType → Placeholder
+
+---
+
+## File: ReflectionReader.cs
+
+### Purpose
+Reflects over loaded assemblies to build `SymbolGraph`. Extracts types, members, type references. Handles MetadataLoadContext specifics (external types, unresolved references).
+
+### Method: ReadAssemblies()
+```csharp
+public static SymbolGraph ReadAssemblies(
+    BuildContext ctx,
+    IReadOnlyList<Assembly> assemblies,
+    MetadataLoadContext loadContext)
+```
+
+**Main entry point** for reflection. Returns SymbolGraph with all types/members.
+
+**Algorithm**:
+1. For each assembly:
+   - Get all types via `assembly.GetTypes()` (includes nested)
+   - Filter to public types only
+   - Group types by namespace
+   - For each namespace:
+     - Build NamespaceSymbol
+     - For each type: Build TypeSymbol (via `BuildTypeSymbol()`)
+     - For each member: Build MemberSymbol (via `BuildMemberSymbol()`)
+2. Build SymbolGraph with all namespaces
+3. Return SymbolGraph
+
+### Method: BuildTypeSymbol()
+```csharp
+private static TypeSymbol BuildTypeSymbol(Type type, BuildContext ctx)
+```
+
+Extracts type metadata:
+- **Basic**: Name, FullName, Namespace, Accessibility, Modifiers (abstract, sealed, static)
+- **Kind**: Class, Interface, Struct, Enum, Delegate
+- **Generics**: Type parameters, constraints
+- **Hierarchy**: Base type, interfaces
+- **Members**: Methods, properties, fields, events, constructors
+- **Nested types**: Recursively process nested types
+
+**Key**: All type references built via `TypeReferenceFactory.Create(type, ctx)`
+
+### Method: BuildMemberSymbol()
+```csharp
+private static MemberSymbol BuildMemberSymbol(MemberInfo member, BuildContext ctx)
+```
+
+Dispatches to specialized builders based on member type:
+- **MethodInfo** → `BuildMethodSymbol()`
+- **PropertyInfo** → `BuildPropertySymbol()`
+- **FieldInfo** → `BuildFieldSymbol()`
+- **EventInfo** → `BuildEventSymbol()`
+- **ConstructorInfo** → `BuildConstructorSymbol()`
+
+Each builder extracts:
+- Name, CLR name, accessibility, modifiers
+- Signature (parameters, return type)
+- Metadata (virtual, override, static, abstract)
+- Type references via TypeReferenceFactory
+
+---
+
+## File: TypeReferenceFactory.cs
+
+### Purpose
+Builds `TypeReference` objects from `System.Type` instances. Handles all type forms (named, generic, array, pointer, byref). Resolves external types (not in current assembly set).
+
+### Method: Create()
+```csharp
+public static TypeReference Create(Type type, BuildContext ctx)
+```
+
+**Main entry point**. Dispatches to specialized methods based on type characteristics.
+
+**Algorithm**:
+1. **IsGenericParameter**: `GenericParameterReference` (T, TKey, TValue)
+2. **IsPointer**: `PointerTypeReference` (int*, byte*)
+3. **IsByRef**: `ByRefTypeReference` (ref int, out string)
+4. **IsArray**: `ArrayTypeReference` (int[], string[,])
+5. **IsGenericType**:
+   - If generic type definition: `NamedTypeReference` (open generic List`1)
+   - If constructed generic: `GenericTypeReference` (closed List<int>)
+6. **Default**: `NamedTypeReference` (simple types like int, string, Decimal)
+
+### Named Type Creation
+```csharp
+private static NamedTypeReference CreateNamed(Type type, BuildContext ctx)
+```
+
+Builds NamedTypeReference for non-generic or open generic types.
+
+**Fields**:
+- `FullName`: CLR full name (e.g., "System.Collections.Generic.List`1")
+- `AssemblyName`: Declaring assembly name
+- `Namespace`: Namespace (e.g., "System.Collections.Generic")
+- `SimpleName`: Name without namespace (e.g., "List`1")
+- `IsExternal`: True if type not in current assembly set
+
+**Nested type handling**: Composes full name from declaring types (A+B+C → "A+B+C")
+
+### Generic Type Creation
+```csharp
+private static GenericTypeReference CreateGeneric(Type type, BuildContext ctx)
+```
+
+Builds GenericTypeReference for constructed generic types (List<int>, Dictionary<string, int>).
+
+**Fields**:
+- `TypeDefinition`: NamedTypeReference to open generic (List`1)
+- `TypeArguments`: Array of TypeReferences (int, string, etc.)
+
+**Algorithm**:
+1. Get generic type definition via `type.GetGenericTypeDefinition()`
+2. Create NamedTypeReference for definition
+3. Get type arguments via `type.GetGenericArguments()`
+4. Recursively create TypeReferences for each argument
+5. Return GenericTypeReference
+
+### Array/Pointer/ByRef Creation
+- **ArrayTypeReference**: `ElementType + Rank` (int[] → ElementType=int, Rank=1)
+- **PointerTypeReference**: `PointedType` (int* → PointedType=int)
+- **ByRefTypeReference**: `ReferencedType` (ref int → ReferencedType=int)
 
 ---
 
 ## File: DeclaringAssemblyResolver.cs
 
-**Purpose:** Resolves external type references to declaring assemblies using MetadataLoadContext. Foundation for cross-assembly type resolution and type-forwarding support.
+### Purpose
+**NEW IN JUMANJI8**: Resolves declaring assembly for types across assembly boundaries. Handles cross-assembly dependencies and external type references.
 
-**Key Methods:**
-- `ResolveBatch(IReadOnlySet<string> clrKeys)` - Batch resolves CLR keys → assembly names
-- `ResolveToAssembly(string clrKey)` - Single type resolution
-- `GroupByAssembly(Dictionary)` - Groups types by assembly for diagnostics
-
-**Algorithm:**
-1. For CLR key (e.g., `"System.Runtime.Intrinsics.Vector128\`1"`):
-2. Call `LoadContext.LoadFromAssemblyName(key)` with placeholder AssemblyName
-3. MetadataLoadContext resolves via PathAssemblyResolver
-4. Extract `assembly.GetName().Name` as declaring assembly
-5. Return map: `clrKey → assemblyName`
-
-**Impact:**
-- Enables cross-assembly type resolution
-- Foundation for type-forwarding support
-- Used in Plan phase by ImportGraph
-
----
-
-## AssemblyLoader.cs
-
-### LoadClosureResult
+### Method: ResolveDeclaringAssembly()
 ```csharp
-record LoadClosureResult(MetadataLoadContext, IReadOnlyList<Assembly>, IReadOnlyDictionary<AssemblyKey, string>)
+public static string ResolveDeclaringAssembly(
+    Type type,
+    IReadOnlyDictionary<AssemblyKey, string> resolvedPaths)
 ```
 
-### AssemblyLoader
+**What it does**:
+- Takes a Type instance from MetadataLoadContext
+- Returns the declaring assembly's file path
+- Looks up path in resolvedPaths map (from AssemblyLoader.LoadClosure)
 
-**CreateLoadContext(assemblyPaths)**
-- Uses `PathAssemblyResolver` with target dir + reference pack dir
-- Core assembly: System.Private.CoreLib
+**Why needed**: External types referenced in signatures need assembly path for StableId computation.
 
-**LoadAssemblies(loadContext, assemblyPaths)**
-- Deduplicates by assembly identity string: `"Name, Version=X.Y.Z.W"`
-- Skips mscorlib (core assembly auto-loaded)
+**Algorithm**:
+1. Get type's assembly via `type.Assembly`
+2. Create AssemblyKey from assembly name
+3. Look up in resolvedPaths map
+4. Return path if found, null otherwise
 
-**LoadClosure(seedPaths, refPaths, strictVersions)**
-- Main entry point for BCL generation
-- 5 phases:
-  1. `BuildCandidateMap()` - Scan ref dirs → `AssemblyKey → List<path>` (multi-version)
-  2. `ResolveClosure()` - BFS transitive closure → `AssemblyKey → path`
-  3. `ValidateAssemblyIdentity()` - PG_LOAD_002/003/004 guards
-  4. `FindCoreLibrary()` - Locate System.Private.CoreLib
-  5. Create `MetadataLoadContext` and load all
-
-**BuildCandidateMap(refPaths)**
-- Scans *.dll in reference dirs
-- Maps `AssemblyKey → List<string>` for version selection
-- Silently skips unreadable DLLs
-
-**ResolveClosure(seedPaths, candidateMap, strictVersions)**
-- BFS algorithm:
-  - Queue starts with seed paths
-  - Uses `PEReader`/`MetadataReader` for lightweight loading (no Assembly.Load)
-  - Version policy: highest version wins (logs upgrades)
-  - Missing refs: PG_LOAD_001 (external ref) - silently skipped
-- Returns: `AssemblyKey → resolved path`
-
-**ValidateAssemblyIdentity(resolvedPaths, strictVersions)**
-- **PG_LOAD_002:** Mixed PublicKeyToken for same name → ERROR
-- **PG_LOAD_003:** Major version drift → ERROR (strict) or WARNING
-- **PG_LOAD_004:** Placeholder (retargetable/ContentType)
-
-**FindCoreLibrary(resolvedPaths)**
-- Finds System.Private.CoreLib by name (case-insensitive)
-- Throws if missing
-
-**GetReferenceAssembliesPath(assemblyPaths)**
-- Primary: Dir of first assembly path
-- Fallback: Runtime directory (`typeof(object).Assembly.Location`)
-- Rationale: Same dir as target ensures version consistency
-
-**GetResolverPaths(assemblyPaths, referenceAssembliesPath)**
-- Deduplicates by assembly name (file name without extension)
-- First wins: reference pack takes precedence over target dir
-- Prevents PathAssemblyResolver confusion
+**Usage**: Called by ReflectionReader when building TypeReferences for external types
 
 ---
 
-## ReflectionReader.cs
-
-### ReflectionReader
-Fields: `_ctx`, `_typeFactory`
-
-**ReadAssemblies(loadContext, assemblyPaths)**
-- Sorts assemblies by name (determinism)
-- Filters: compiler-generated types, non-public types
-- Groups types by namespace
-- Returns `SymbolGraph` with `Namespaces` and `SourceAssemblies`
-
-**ReadType(type)**
-1. `StableId`: AssemblyName + ClrFullName (interned)
-2. `DetermineTypeKind()` → Enum/Interface/Delegate/StaticNamespace/Struct/Class
-3. `ComputeAccessibility()` → Recursive for nested types
-4. Generic params: `_typeFactory.CreateGenericParameterSymbol()`
-5. Base/interfaces: `_typeFactory.Create()`
-6. Members: `ReadMembers()`
-7. Nested types: Recursive, filters compiler-generated
-
-**ComputeAccessibility(type)**
-- Nested types: Intersection of declaring type accessibility + nested visibility
-- `IsNestedPublic` + `DeclaringType.Public` → `Public`, else `Internal`
-- Prevents emitting nested public types inside internal containers
-
-**DetermineTypeKind(type)**
-Order: Enum → Interface → Delegate → StaticNamespace (abstract+sealed+!valuetype) → Struct → Class
-
-**ReadMembers(type)**
-- Uses `BindingFlags.DeclaredOnly` (no inherited members)
-- Skips special names (property/event accessors)
-- Duplicate detection: `methodKey = "{name}|{metadataToken}"` → ERROR if duplicate StableId
-- Returns: `TypeMembers` with all collections
-
-**ReadMethod(method, declaringType)**
-- Explicit interface impl: `clrName.Contains('.')` → use qualified name (e.g., "System.IDisposable.Dispose")
-- `MemberStableId`: includes `CanonicalSignature` + `MetadataToken`
-- `IsOverride` via `IsMethodOverride(method)`
-- All members start with `Provenance.Original`, `EmitScope.ClassSurface`
-
-**ReadProperty(property, declaringType)**
-- `IndexParameters` for indexers
-- `IsOverride` from getter if exists
-- Visibility from getter ?? setter
-
-**ReadField(field, declaringType)**
-- `IsReadOnly` = `field.IsInitOnly`
-- `IsConst` = `field.IsLiteral`
-- `ConstValue` via `field.GetRawConstantValue()`
-
-**ReadEvent(evt, declaringType)**
-- Explicit interface impl detection (same as methods)
-- Visibility from add method
-
-**ReadConstructor(ctor, declaringType)**
-- `MemberName = ".ctor"`
-- `CanonicalSignature` from parameter types
-
-**ReadParameter(param)**
-- Fallback name: `$"arg{param.Position}"`
-- Sanitizes TypeScript reserved words: `TypeScriptReservedWords.SanitizeParameterName()`
-- `IsRef` = `IsByRef && !IsOut`
-- `IsParams` = check ParamArrayAttribute
-
-**IsMethodOverride(method)**
-```csharp
-return method.IsVirtual && !method.Attributes.HasFlag(MethodAttributes.NewSlot);
-```
-- Override = virtual method reusing parent's vtable slot (no NewSlot)
-
-**IsCompilerGenerated(typeName)**
-```csharp
-return typeName.Contains('<') || typeName.Contains('>');
-```
-Examples: `<Module>`, `<>c__DisplayClass`, `<>d__Iterator`
-
-**CreateMethodSignature(method)**
-- Calls `_ctx.CanonicalizeMethod(name, paramTypes, returnType)` (interned)
-
----
-
-## InterfaceMemberSubstitution.cs
-
-### InterfaceMemberSubstitution (static)
-
-**Purpose:** Builds substitution maps for closed generic interfaces. Actual substitution performed by Shape phase.
-
-**SubstituteClosedInterfaces(ctx, graph)**
-1. `BuildInterfaceIndex()` → `ClrFullName → TypeSymbol`
-2. For each type: `ProcessType()`
-3. Logs total substitution count
-- **Note:** Maps built but not stored. Shape phase rebuilds as needed.
-
-**BuildInterfaceIndex(graph)**
-- Filters `type.Kind == TypeKind.Interface`
-- Returns: `Dictionary<string, TypeSymbol>`
-
-**ProcessType(type, interfaceIndex)**
-- For each interface in `type.Interfaces`:
-  - Check if closed generic: `NamedTypeReference` with `TypeArguments.Count > 0`
-  - Extract generic definition: `GetGenericDefinitionName()`
-  - Look up in index
-  - Call `BuildSubstitutionMap()`
-
-**BuildSubstitutionMap(interfaceSymbol, closedInterfaceRef)**
-- Validates arity matches
-- Maps: `parameter.Name → typeArgument`
-- Returns: `Dictionary<string, TypeReference>`
-- Example: `IComparable<T>` + `IComparable<int>` → `{ "T" → int }`
-
-**SubstituteTypeReference(original, substitutionMap)**
-Recursive pattern matching:
-- `GenericParameterReference`: Lookup in map or return original
-- `ArrayTypeReference`: Substitute element type
-- `PointerTypeReference`: Substitute pointee type
-- `ByRefTypeReference`: Substitute referenced type
-- `NamedTypeReference`: Substitute type arguments
-- Other: Return original
-
-**GetGenericDefinitionName(fullName)**
-- Finds backtick: extract arity digits
-- Converts: `"System.IComparable<int>"` → `"System.IComparable\`1"`
-
----
-
-## TypeReferenceFactory.cs
+## File: InterfaceMemberSubstitution.cs
 
 ### Purpose
-Converts `System.Type` to `TypeReference`. Memoization + cycle detection prevents stack overflow on recursive constraints.
+Substitutes type parameters in closed generic interface members. Handles cases like `IEnumerable<int>.GetEnumerator()` → `IEnumerator<int>` (not `IEnumerator<T>`).
 
-### TypeReferenceFactory
-Fields: `_ctx`, `_cache`, `_inProgress`
-
-**Create(type)**
-1. Check cache → early return
-2. Detect cycle: if `_inProgress.Contains(type)` → return `PlaceholderTypeReference`
-3. Mark in-progress (try-finally cleanup)
-4. Call `CreateInternal()`
-5. Cache result
-
-**CreateInternal(type)**
-Order: ByRef → Pointer → Array → GenericParameter → Named
-
-**Pointer depth counting:**
-- Walks element types: `int***` → depth 3
-- Final element type via `Create()` recursion
-
-**CreateNamed(type)**
-1. Extract assemblyName
-2. **CRITICAL - Open generic form:**
-   ```csharp
-   var fullName = type.IsGenericType && type.IsConstructedGenericType
-       ? type.GetGenericTypeDefinition().FullName  // "System.IEquatable`1"
-       : type.FullName;                            // NOT "System.IEquatable`1[[...]]"
-   ```
-   - Prevents assembly-qualified type args in FullName
-   - Required for correct StableId lookup
-   - Related to ImportGraph.GetOpenGenericClrKey()
-3. Extract namespace, name
-4. **HARDENING:** Guarantee non-empty Name:
-   - Fallback: Extract last segment after '.' or '+'
-   - Last resort: `"UnknownType"` + log warning
-5. Generic types:
-   - Arity from `GetGenericArguments().Length`
-   - If `IsConstructedGenericType`: Recursively `Create()` each arg
-6. **HARDENING:** Stamp `interfaceStableId` at load time:
-   - Format: `"{assemblyName}:{fullName}"`
-   - Eliminates repeated computation in later phases
-
-**CreateGenericParameter(type)**
-- Creates `GenericParameterId` with declaring type + position
-- **Constraints NOT resolved** (empty list)
-- ConstraintCloser (Shape phase) resolves later to avoid infinite recursion
-
-**CreateGenericParameterSymbol(type)**
-1. Validates `type.IsGenericParameter`
-2. Extracts variance: Covariant/Contravariant/None
-3. Special constraints: ReferenceType/ValueType/DefaultConstructor (bitwise OR)
-4. **Stores raw constraint types:** `type.GetGenericParameterConstraints()` → System.Type[]
-5. ConstraintCloser converts to TypeReferences later
-6. Empty `Constraints` field (filled by ConstraintCloser)
-
-**ClearCache()**
-- Test-only: `_cache.Clear()`
-
----
-
-## Call Flow
-
-### LoadClosure
-```
-LoadClosure
-  ├─► BuildCandidateMap → AssemblyKey → List<path>
-  ├─► ResolveClosure (BFS) → AssemblyKey → path
-  ├─► ValidateAssemblyIdentity (PG_LOAD_002/003/004)
-  ├─► FindCoreLibrary
-  └─► Create MetadataLoadContext + load all
-```
-
-### ReadAssemblies
-```
-ReadAssemblies
-  ├─► AssemblyLoader.LoadAssemblies
-  ├─► For each assembly (sorted):
-  │     ├─► For each type:
-  │     │     ├─► Skip compiler-generated
-  │     │     ├─► ComputeAccessibility (recursive for nested)
-  │     │     ├─► Skip non-public
-  │     │     └─► ReadType
-  │     │           ├─► DetermineTypeKind
-  │     │           ├─► TypeReferenceFactory.CreateGenericParameterSymbol
-  │     │           ├─► TypeReferenceFactory.Create (base/interfaces)
-  │     │           ├─► ReadMembers
-  │     │           │     ├─► ReadMethod (explicit iface impl detection)
-  │     │           │     ├─► ReadProperty (indexer support)
-  │     │           │     ├─► ReadField (const value extraction)
-  │     │           │     ├─► ReadEvent
-  │     │           │     └─► ReadConstructor
-  │     │           └─► ReadType (nested types, recursive)
-  │     └─► Group by namespace
-  └─► Build SymbolGraph
-```
-
-### TypeReferenceFactory.Create
-```
-Create(type)
-  ├─► Cache check → return
-  ├─► Cycle check → PlaceholderTypeReference
-  └─► CreateInternal
-        ├─► ByRef → ByRefTypeReference
-        ├─► Pointer → PointerTypeReference (depth counting)
-        ├─► Array → ArrayTypeReference (rank from GetArrayRank)
-        ├─► GenericParameter → GenericParameterReference (constraints empty)
-        └─► Named → NamedTypeReference
-              ├─► HARDENING: Guarantee non-empty Name
-              ├─► Generic: Recursively Create() each arg
-              └─► HARDENING: Stamp interfaceStableId
-```
-
-### InterfaceMemberSubstitution
-```
-SubstituteClosedInterfaces
-  ├─► BuildInterfaceIndex → ClrFullName → TypeSymbol
-  └─► For each type:
-        └─► ProcessType
-              ├─► For each closed generic interface:
-              │     ├─► GetGenericDefinitionName
-              │     └─► BuildSubstitutionMap
-              │           └─► Map: parameter.Name → typeArgument
-              └─► Return substitution count
-```
-
----
-
-## Key Algorithms
-
-### BFS Transitive Closure (ResolveClosure)
-1. Queue ← seed paths
-2. While queue not empty:
-   - Dequeue path
-   - Get AssemblyKey (via `AssemblyName.GetAssemblyName`)
-   - Skip if visited
-   - Mark visited
-   - Version policy: If already resolved, keep highest version
-   - Add to resolved map
-   - Read metadata via PEReader/MetadataReader (lightweight)
-   - For each AssemblyReference:
-     - Look up in candidate map
-     - Pick highest version from candidates
-     - Enqueue
-
-**Time:** O(N), **Space:** O(N)
-
-### Type Reference Cycle Detection
-1. Check cache → return
-2. Check `_inProgress` → return PlaceholderTypeReference (breaks cycle)
-3. Add to `_inProgress` (try-finally cleanup)
-4. `CreateInternal()` (may recursively call Create)
-5. Cache result
-
-**Example cycle:** `IComparable<T> where T : IComparable<T>`
-- Create(T) → marks T in-progress → resolves constraint → Create(T) → detects cycle → PlaceholderTypeReference
-
-**Time:** O(D) first call, O(1) cached. **Space:** O(D) stack, O(T) cache.
-
-### Accessibility for Nested Types
+### Why Needed
+When reflecting over closed generic interfaces, member signatures contain open type parameters:
 ```csharp
-// Recursive: nested public only if all ancestors public
-if (type.IsNestedPublic)
-    return ComputeAccessibility(type.DeclaringType!) == Public ? Public : Internal;
+// Given: class List<int> : IEnumerable<int>
+// Without substitution:
+interface IEnumerable<T> {
+    GetEnumerator(): IEnumerator<T>  // Wrong - returns IEnumerator<T> not IEnumerator<int>
+}
+
+// With substitution:
+interface IEnumerable<int> {
+    GetEnumerator(): IEnumerator<int>  // Correct - substituted T → int
+}
 ```
 
-**Time:** O(N) nesting depth, **Space:** O(N) stack
+### Method: SubstituteClosedInterfaces()
+```csharp
+public static SymbolGraph SubstituteClosedInterfaces(
+    BuildContext ctx,
+    SymbolGraph graph)
+```
 
-### Generic Parameter Substitution
-Recursive pattern matching:
-- GenericParam → map lookup or original
-- Array/Pointer/ByRef → substitute element/pointee/ref
-- NamedTypeRef → substitute type args
-- Other → original
+**Algorithm**:
+1. For each type in graph:
+2. For each interface type:
+   - Check if generic (has type arguments)
+   - Build substitution map: `{T → int, TKey → string, TValue → bool}`
+3. For each interface member:
+   - Substitute type parameters in return type
+   - Substitute type parameters in parameter types
+   - Create new MemberSymbol with substituted types
+4. Return new SymbolGraph with substituted interfaces
 
-**Time:** O(D) type depth, **Space:** O(D) stack
+**Example substitution map**:
+- `IEnumerable<int>` → `{T → int}`
+- `IDictionary<string, bool>` → `{TKey → string, TValue → bool}`
+
+---
+
+## Integration with Pipeline
+
+### Input
+- Assembly DLL paths (string[])
+
+### Process
+1. **AssemblyLoader.LoadClosure()** → Load all assemblies
+2. **ReflectionReader.ReadAssemblies()** → Extract types/members
+3. **InterfaceMemberSubstitution.SubstituteClosedInterfaces()** → Fix generic interfaces
+
+### Output
+- **SymbolGraph** containing:
+  - All namespaces
+  - All public types (classes, interfaces, structs, enums, delegates)
+  - All public members (methods, properties, fields, events, constructors)
+  - All type references (base types, interfaces, signatures)
+  - All nested types
+  - All substituted generic interface members
+
+**Data characteristics**:
+- Pure CLR metadata (no TypeScript names)
+- `TsEmitName = null` for all symbols
+- `EmitScope` not yet determined
+- Interface hierarchies not yet flattened
+- No ViewOnly members yet
+- No deduplication yet
+
+### Next Phase
+Phase 3 (Normalize) builds indices and begins TypeScript transformations.
+
+---
+
+## Key Concepts
+
+### MetadataLoadContext
+Isolated assembly loading context. Allows loading assemblies without executing code. Required for reflecting over BCL assemblies (can't load System.Private.CoreLib into runtime).
+
+**Benefits**:
+- No assembly version conflicts
+- No runtime execution
+- Can load assemblies for different .NET versions
+- Lightweight (metadata only, no JIT)
+
+### Assembly Identity Validation
+Three guards ensure consistency:
+1. **PG_LOAD_002**: No mixed PublicKeyToken for same assembly name
+2. **PG_LOAD_003**: No major version drift (configurable: error or warning)
+3. **PG_LOAD_004**: No retargetable/ContentType conflicts (future)
+
+### Version Policy
+When multiple versions of same assembly referenced: **highest version wins**
+
+Example:
+- Assembly A references System.Collections v1.0
+- Assembly B references System.Collections v2.0
+- Result: System.Collections v2.0 loaded
+
+### Type Reference Forms
+- **NamedTypeReference**: Simple types (int, string, List`1)
+- **GenericTypeReference**: Closed generics (List<int>, Dictionary<string, bool>)
+- **ArrayTypeReference**: Arrays (int[], string[,])
+- **PointerTypeReference**: Pointers (int*, byte*)
+- **ByRefTypeReference**: By-ref (ref int, out string)
+- **GenericParameterReference**: Type parameters (T, TKey, TValue)
+
+### External Types
+Types not in current assembly set. Marked with `IsExternal = true`. Validated later by PhaseGate (PG_LOAD_001: all external types must be resolvable).
+
+---
+
+## Files Summary
+
+| File | Purpose | Key Methods |
+|------|---------|-------------|
+| **AssemblyLoader.cs** | Assembly loading, closure resolution | LoadClosure(), ResolveClosure(), ValidateAssemblyIdentity() |
+| **ReflectionReader.cs** | Reflection over types/members | ReadAssemblies(), BuildTypeSymbol(), BuildMemberSymbol() |
+| **TypeReferenceFactory.cs** | Build TypeReference objects | Create(), CreateNamed(), CreateGeneric() |
+| **DeclaringAssemblyResolver.cs** | Cross-assembly type resolution | ResolveDeclaringAssembly() |
+| **InterfaceMemberSubstitution.cs** | Substitute generic interface members | SubstituteClosedInterfaces() |
 
 ---
 
 ## Summary
 
-**Load phase responsibilities:**
-1. Load transitive closure (BFS)
+**Load phase** is pure reflection over .NET assemblies:
+1. Load assembly transitive closure (BFS)
 2. Validate assembly identity (PublicKeyToken, version drift)
-3. Extract types/members (reflection)
-4. Build type references (memoization + cycle detection)
-5. Build substitution maps (closed generic interfaces)
-6. Return LoadContext for cross-assembly resolution
+3. Reflect over all types/members
+4. Build type references (all forms)
+5. Substitute closed generic interface members
+6. Return SymbolGraph (pure CLR data)
 
-**Output:**
-- `SymbolGraph` with pure CLR metadata (no TypeScript concepts)
-- `MetadataLoadContext` - passed to Plan phase for DeclaringAssemblyResolver
-
-**Key design decisions:**
-- **MetadataLoadContext isolation:** Reflection on BCL without version conflicts
-- **Name-based type comparisons:** Required for MetadataLoadContext (`typeof()` doesn't work)
-- **Cycle detection:** Prevents stack overflow on recursive constraints
-- **DeclaredOnly members:** No inherited members (Shape phase handles inheritance)
-- **Compiler-generated filtered:** Skips angle-bracket types
-- **Deduplication:** Assembly identity, MetadataToken, type keys
-- **Determinism:** Sorted iteration for reproducible output
-- **Lightweight loading:** PEReader/MetadataReader (no Assembly.Load in BFS)
-- **Version policy:** Highest version wins
-- **Hardening:** Non-empty Name guarantee, InterfaceStableId stamping
-- **Deferred constraint resolution:** ConstraintCloser (Shape phase) handles recursive constraints
+**Output**: Complete metadata graph ready for TypeScript transformation (starts in Phase 3: Normalize/Shape).
