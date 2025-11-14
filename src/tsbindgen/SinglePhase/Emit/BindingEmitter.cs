@@ -73,22 +73,62 @@ public static class BindingEmitter
         // Get final TypeScript name from Renamer
         var tsEmitName = ctx.Renamer.GetFinalTypeName(type);
 
+        // V1: Generate definitions (what CLR declares on this type)
+        var methodDefinitions = type.Members.Methods
+            .Select(m => GenerateMethodBinding(m, type, ctx))
+            .ToList();
+        var propertyDefinitions = type.Members.Properties
+            .Select(p => GeneratePropertyBinding(p, type, ctx))
+            .ToList();
+        var fieldDefinitions = type.Members.Fields
+            .Select(f => GenerateFieldBinding(f, type, ctx))
+            .ToList();
+        var eventDefinitions = type.Members.Events
+            .Select(e => GenerateEventBinding(e, type, ctx))
+            .ToList();
+        var constructorDefinitions = type.Members.Constructors
+            .Select(c => GenerateConstructorBinding(c, type, ctx))
+            .ToList();
+
+        // V2: Generate exposures (what TS shows, and where it forwards)
+        var exposedMethods = type.Members.Methods
+            .Where(m => m.EmitScope != EmitScope.Omitted) // Only expose non-omitted members
+            .Select(m => GenerateMethodExposure(m, type, ctx))
+            .ToList();
+        var exposedProperties = type.Members.Properties
+            .Where(p => p.EmitScope != EmitScope.Omitted)
+            .Select(p => GeneratePropertyExposure(p, type, ctx))
+            .ToList();
+        var exposedFields = type.Members.Fields
+            .Select(f => GenerateFieldExposure(f, type, ctx))
+            .ToList();
+        var exposedEvents = type.Members.Events
+            .Select(e => GenerateEventExposure(e, type, ctx))
+            .ToList();
+        var exposedConstructors = type.Members.Constructors
+            .Select(c => GenerateConstructorExposure(c, type, ctx))
+            .ToList();
+
         return new TypeBinding
         {
             ClrName = type.ClrFullName,
             TsEmitName = tsEmitName,
             AssemblyName = type.StableId.AssemblyName,
             MetadataToken = 0, // Types don't have metadata tokens
-            // M5 FIX: Include ViewOnly members - they get $view names from view scope
-            Methods = type.Members.Methods
-                .Select(m => GenerateMethodBinding(m, type, ctx))
-                .ToList(),
-            Properties = type.Members.Properties
-                .Select(p => GeneratePropertyBinding(p, type, ctx))
-                .ToList(),
-            Fields = type.Members.Fields.Select(f => GenerateFieldBinding(f, type, ctx)).ToList(),
-            Events = type.Members.Events.Select(e => GenerateEventBinding(e, type, ctx)).ToList(),
-            Constructors = type.Members.Constructors.Select(c => GenerateConstructorBinding(c, type, ctx)).ToList()
+
+            // V1: Definitions
+            Methods = methodDefinitions,
+            Properties = propertyDefinitions,
+            Fields = fieldDefinitions,
+            Events = eventDefinitions,
+            Constructors = constructorDefinitions,
+
+            // V2: Exposures
+            ExposedMethods = exposedMethods.Any() ? exposedMethods : null,
+            ExposedProperties = exposedProperties.Any() ? exposedProperties : null,
+            ExposedFields = exposedFields.Any() ? exposedFields : null,
+            ExposedEvents = exposedEvents.Any() ? exposedEvents : null,
+            ExposedConstructors = exposedConstructors.Any() ? exposedConstructors : null
         };
     }
 
@@ -122,7 +162,10 @@ public static class BindingEmitter
             NormalizedSignature = normalizedSignature,
             EmitScope = method.EmitScope.ToString(),
             Arity = method.Arity,
-            ParameterCount = method.Parameters.Length
+            ParameterCount = method.Parameters.Length,
+            // V2: Add declaring type information from StableId
+            DeclaringClrType = method.StableId.DeclaringClrFullName,
+            DeclaringAssemblyName = method.StableId.AssemblyName
         };
     }
 
@@ -157,7 +200,10 @@ public static class BindingEmitter
             EmitScope = property.EmitScope.ToString(),
             IsIndexer = property.IsIndexer,
             HasGetter = property.HasGetter,
-            HasSetter = property.HasSetter
+            HasSetter = property.HasSetter,
+            // V2: Add declaring type information from StableId
+            DeclaringClrType = property.StableId.DeclaringClrFullName,
+            DeclaringAssemblyName = property.StableId.AssemblyName
         };
     }
 
@@ -177,7 +223,10 @@ public static class BindingEmitter
             MetadataToken = field.StableId.MetadataToken ?? 0,
             NormalizedSignature = normalizedSignature,
             IsStatic = field.IsStatic,
-            IsReadOnly = field.IsReadOnly
+            IsReadOnly = field.IsReadOnly,
+            // V2: Add declaring type information from StableId
+            DeclaringClrType = field.StableId.DeclaringClrFullName,
+            DeclaringAssemblyName = field.StableId.AssemblyName
         };
     }
 
@@ -196,7 +245,10 @@ public static class BindingEmitter
             TsEmitName = tsEmitName,
             MetadataToken = evt.StableId.MetadataToken ?? 0,
             NormalizedSignature = normalizedSignature,
-            IsStatic = evt.IsStatic
+            IsStatic = evt.IsStatic,
+            // V2: Add declaring type information from StableId
+            DeclaringClrType = evt.StableId.DeclaringClrFullName,
+            DeclaringAssemblyName = evt.StableId.AssemblyName
         };
     }
 
@@ -212,7 +264,136 @@ public static class BindingEmitter
             CanonicalSignature = ctor.StableId.CanonicalSignature,
             NormalizedSignature = normalizedSignature,
             IsStatic = ctor.IsStatic,
-            ParameterCount = ctor.Parameters.Length
+            ParameterCount = ctor.Parameters.Length,
+            // V2: Add declaring type information from StableId
+            DeclaringClrType = ctor.StableId.DeclaringClrFullName,
+            DeclaringAssemblyName = ctor.StableId.AssemblyName
+        };
+    }
+
+    // ============================================================================
+    // V2 EXPOSURE GENERATION
+    // ============================================================================
+
+    private static MethodExposure GenerateMethodExposure(MethodSymbol method, TypeSymbol ownerType, BuildContext ctx)
+    {
+        // Get TS name (same logic as definition)
+        string tsName;
+        if (method.EmitScope == EmitScope.ViewOnly && method.SourceInterface != null)
+        {
+            var interfaceStableId = ScopeFactory.GetInterfaceStableId(method.SourceInterface);
+            var viewScope = ScopeFactory.ViewSurface(ownerType, interfaceStableId, method.IsStatic);
+            tsName = ctx.Renamer.GetFinalMemberName(method.StableId, viewScope);
+        }
+        else
+        {
+            var classScope = ScopeFactory.ClassSurface(ownerType, method.IsStatic);
+            tsName = ctx.Renamer.GetFinalMemberName(method.StableId, classScope);
+        }
+
+        // Use NormalizedSignature as TsSignatureId for overload disambiguation
+        var tsSignatureId = SignatureNormalization.NormalizeMethod(method);
+
+        return new MethodExposure
+        {
+            TsName = tsName,
+            IsStatic = method.IsStatic,
+            TsSignatureId = tsSignatureId,
+            Target = new ExposureTarget
+            {
+                DeclaringClrType = method.StableId.DeclaringClrFullName,
+                DeclaringAssemblyName = method.StableId.AssemblyName,
+                MetadataToken = method.StableId.MetadataToken ?? 0
+            }
+        };
+    }
+
+    private static PropertyExposure GeneratePropertyExposure(PropertySymbol property, TypeSymbol ownerType, BuildContext ctx)
+    {
+        // Get TS name (same logic as definition)
+        string tsName;
+        if (property.EmitScope == EmitScope.ViewOnly && property.SourceInterface != null)
+        {
+            var interfaceStableId = ScopeFactory.GetInterfaceStableId(property.SourceInterface);
+            var viewScope = ScopeFactory.ViewSurface(ownerType, interfaceStableId, property.IsStatic);
+            tsName = ctx.Renamer.GetFinalMemberName(property.StableId, viewScope);
+        }
+        else
+        {
+            var classScope = ScopeFactory.ClassSurface(ownerType, property.IsStatic);
+            tsName = ctx.Renamer.GetFinalMemberName(property.StableId, classScope);
+        }
+
+        var tsSignatureId = SignatureNormalization.NormalizeProperty(property);
+
+        return new PropertyExposure
+        {
+            TsName = tsName,
+            IsStatic = property.IsStatic,
+            TsSignatureId = tsSignatureId,
+            Target = new ExposureTarget
+            {
+                DeclaringClrType = property.StableId.DeclaringClrFullName,
+                DeclaringAssemblyName = property.StableId.AssemblyName,
+                MetadataToken = property.StableId.MetadataToken ?? 0
+            }
+        };
+    }
+
+    private static FieldExposure GenerateFieldExposure(FieldSymbol field, TypeSymbol ownerType, BuildContext ctx)
+    {
+        var classScope = ScopeFactory.ClassSurface(ownerType, field.IsStatic);
+        var tsName = ctx.Renamer.GetFinalMemberName(field.StableId, classScope);
+        var tsSignatureId = SignatureNormalization.NormalizeField(field);
+
+        return new FieldExposure
+        {
+            TsName = tsName,
+            IsStatic = field.IsStatic,
+            TsSignatureId = tsSignatureId,
+            Target = new ExposureTarget
+            {
+                DeclaringClrType = field.StableId.DeclaringClrFullName,
+                DeclaringAssemblyName = field.StableId.AssemblyName,
+                MetadataToken = field.StableId.MetadataToken ?? 0
+            }
+        };
+    }
+
+    private static EventExposure GenerateEventExposure(EventSymbol evt, TypeSymbol ownerType, BuildContext ctx)
+    {
+        var classScope = ScopeFactory.ClassSurface(ownerType, evt.IsStatic);
+        var tsName = ctx.Renamer.GetFinalMemberName(evt.StableId, classScope);
+        var tsSignatureId = SignatureNormalization.NormalizeEvent(evt);
+
+        return new EventExposure
+        {
+            TsName = tsName,
+            IsStatic = evt.IsStatic,
+            TsSignatureId = tsSignatureId,
+            Target = new ExposureTarget
+            {
+                DeclaringClrType = evt.StableId.DeclaringClrFullName,
+                DeclaringAssemblyName = evt.StableId.AssemblyName,
+                MetadataToken = evt.StableId.MetadataToken ?? 0
+            }
+        };
+    }
+
+    private static ConstructorExposure GenerateConstructorExposure(ConstructorSymbol ctor, TypeSymbol ownerType, BuildContext ctx)
+    {
+        var tsSignatureId = SignatureNormalization.NormalizeConstructor(ctor);
+
+        return new ConstructorExposure
+        {
+            IsStatic = ctor.IsStatic,
+            TsSignatureId = tsSignatureId,
+            Target = new ExposureTarget
+            {
+                DeclaringClrType = ctor.StableId.DeclaringClrFullName,
+                DeclaringAssemblyName = ctor.StableId.AssemblyName,
+                MetadataToken = ctor.StableId.MetadataToken ?? 0
+            }
         };
     }
 }
@@ -235,15 +416,24 @@ public sealed record TypeBinding
     public required string TsEmitName { get; init; }
     public required string AssemblyName { get; init; }
     public required int MetadataToken { get; init; }
+
+    // V1: Definitions (what CLR declares on this type)
     public required List<MethodBinding> Methods { get; init; }
     public required List<PropertyBinding> Properties { get; init; }
     public required List<FieldBinding> Fields { get; init; }
     public required List<EventBinding> Events { get; init; }
     public required List<ConstructorBinding> Constructors { get; init; }
+
+    // V2: Exposures (what TS shows, and where it forwards)
+    public List<MethodExposure>? ExposedMethods { get; init; }
+    public List<PropertyExposure>? ExposedProperties { get; init; }
+    public List<FieldExposure>? ExposedFields { get; init; }
+    public List<EventExposure>? ExposedEvents { get; init; }
+    public List<ConstructorExposure>? ExposedConstructors { get; init; }
 }
 
 /// <summary>
-/// Binding for a method.
+/// Binding for a method (definition).
 /// </summary>
 public sealed record MethodBinding
 {
@@ -255,10 +445,14 @@ public sealed record MethodBinding
     public required string EmitScope { get; init; }
     public required int Arity { get; init; }
     public required int ParameterCount { get; init; }
+
+    // V2: Declaring type information
+    public string? DeclaringClrType { get; init; }
+    public string? DeclaringAssemblyName { get; init; }
 }
 
 /// <summary>
-/// Binding for a property.
+/// Binding for a property (definition).
 /// </summary>
 public sealed record PropertyBinding
 {
@@ -271,10 +465,14 @@ public sealed record PropertyBinding
     public required bool IsIndexer { get; init; }
     public required bool HasGetter { get; init; }
     public required bool HasSetter { get; init; }
+
+    // V2: Declaring type information
+    public string? DeclaringClrType { get; init; }
+    public string? DeclaringAssemblyName { get; init; }
 }
 
 /// <summary>
-/// Binding for a field.
+/// Binding for a field (definition).
 /// </summary>
 public sealed record FieldBinding
 {
@@ -284,10 +482,14 @@ public sealed record FieldBinding
     public required string NormalizedSignature { get; init; }
     public required bool IsStatic { get; init; }
     public required bool IsReadOnly { get; init; }
+
+    // V2: Declaring type information
+    public string? DeclaringClrType { get; init; }
+    public string? DeclaringAssemblyName { get; init; }
 }
 
 /// <summary>
-/// Binding for an event.
+/// Binding for an event (definition).
 /// </summary>
 public sealed record EventBinding
 {
@@ -296,10 +498,14 @@ public sealed record EventBinding
     public required int MetadataToken { get; init; }
     public required string NormalizedSignature { get; init; }
     public required bool IsStatic { get; init; }
+
+    // V2: Declaring type information
+    public string? DeclaringClrType { get; init; }
+    public string? DeclaringAssemblyName { get; init; }
 }
 
 /// <summary>
-/// Binding for a constructor.
+/// Binding for a constructor (definition).
 /// </summary>
 public sealed record ConstructorBinding
 {
@@ -308,4 +514,76 @@ public sealed record ConstructorBinding
     public required string NormalizedSignature { get; init; }
     public required bool IsStatic { get; init; }
     public required int ParameterCount { get; init; }
+
+    // V2: Declaring type information
+    public string? DeclaringClrType { get; init; }
+    public string? DeclaringAssemblyName { get; init; }
+}
+
+// ============================================================================
+// V2 EXPOSURE TYPES
+// ============================================================================
+
+/// <summary>
+/// Target of an exposure - where the actual CLR implementation lives.
+/// </summary>
+public sealed record ExposureTarget
+{
+    public required string DeclaringClrType { get; init; }
+    public required string DeclaringAssemblyName { get; init; }
+    public required int MetadataToken { get; init; }
+}
+
+/// <summary>
+/// Method exposure - a method visible on the TS surface that forwards to a CLR method.
+/// </summary>
+public sealed record MethodExposure
+{
+    public required string TsName { get; init; }
+    public required bool IsStatic { get; init; }
+    public required string TsSignatureId { get; init; }
+    public required ExposureTarget Target { get; init; }
+}
+
+/// <summary>
+/// Property exposure - a property visible on the TS surface that forwards to a CLR property.
+/// </summary>
+public sealed record PropertyExposure
+{
+    public required string TsName { get; init; }
+    public required bool IsStatic { get; init; }
+    public required string TsSignatureId { get; init; }
+    public required ExposureTarget Target { get; init; }
+}
+
+/// <summary>
+/// Field exposure - a field visible on the TS surface that forwards to a CLR field.
+/// </summary>
+public sealed record FieldExposure
+{
+    public required string TsName { get; init; }
+    public required bool IsStatic { get; init; }
+    public required string TsSignatureId { get; init; }
+    public required ExposureTarget Target { get; init; }
+}
+
+/// <summary>
+/// Event exposure - an event visible on the TS surface that forwards to a CLR event.
+/// </summary>
+public sealed record EventExposure
+{
+    public required string TsName { get; init; }
+    public required bool IsStatic { get; init; }
+    public required string TsSignatureId { get; init; }
+    public required ExposureTarget Target { get; init; }
+}
+
+/// <summary>
+/// Constructor exposure - a constructor visible on the TS surface that forwards to a CLR constructor.
+/// </summary>
+public sealed record ConstructorExposure
+{
+    public required bool IsStatic { get; init; }
+    public required string TsSignatureId { get; init; }
+    public required ExposureTarget Target { get; init; }
 }
