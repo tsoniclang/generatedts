@@ -98,8 +98,9 @@ public static class FacadeEmitter
             {
                 sb.AppendLine("// Individual type exports for convenience");
 
-                // Create TypeNameResolver for constraint printing
-                var resolver = new TypeNameResolver(ctx, plan.Graph);
+                // TS2304 FIX: Create TypeNameResolver in facade mode to qualify cross-namespace types
+                // This ensures constraints like "T extends IEquatable_1<T>" become "T extends System.IEquatable_1<T>"
+                var resolver = new TypeNameResolver(ctx, plan.Graph, importPlan: null, currentNamespace: ns.Name, facadeMode: true);
 
                 foreach (var export in exports)
                 {

@@ -9,6 +9,7 @@ namespace tsbindgen.SinglePhase.Emit;
 /// Single source of truth for resolving TypeScript identifiers from TypeReferences.
 /// Uses the Renamer to ensure imports and declarations use identical names.
 /// TS2693 FIX: Also uses ImportPlan to qualify value-imported types with namespace alias.
+/// TS2304 FIX (Facade): In facade mode, always qualifies cross-namespace types with namespace alias.
 /// </summary>
 public sealed class TypeNameResolver
 {
@@ -16,14 +17,18 @@ public sealed class TypeNameResolver
     private readonly SymbolGraph _graph;
     private readonly ImportPlan? _importPlan;
     private readonly string? _currentNamespace;
+    private readonly bool _facadeMode;
 
-    public TypeNameResolver(BuildContext ctx, SymbolGraph graph, ImportPlan? importPlan = null, string? currentNamespace = null)
+    public TypeNameResolver(BuildContext ctx, SymbolGraph graph, ImportPlan? importPlan = null, string? currentNamespace = null, bool facadeMode = false)
     {
         _ctx = ctx;
         _graph = graph;
         _importPlan = importPlan;
         _currentNamespace = currentNamespace;
+        _facadeMode = facadeMode;
     }
+
+    public bool IsFacadeMode => _facadeMode;
 
     /// <summary>
     /// Resolve the final TypeScript identifier for a TypeSymbol.
@@ -88,6 +93,11 @@ public sealed class TypeNameResolver
                 fullName = fullName.Substring(0, commaIndex).Trim();
             }
 
+            // Extract namespace from full name (e.g., "System.Collections.Generic.List`1" → "System.Collections.Generic")
+            var externalNamespace = fullName.Contains('.')
+                ? fullName.Substring(0, fullName.LastIndexOf('.'))
+                : "";
+
             var simpleName = fullName.Contains('.')
                 ? fullName.Substring(fullName.LastIndexOf('.') + 1)
                 : fullName;
@@ -99,13 +109,46 @@ public sealed class TypeNameResolver
             // External types (not in current graph) still need reserved word handling
             // Example: System.Type referenced from another namespace → Type_
             var result = TypeScriptReservedWords.Sanitize(sanitized);
-            return result.Sanitized;
+            var finalExternalName = result.Sanitized;
+
+            // TS2304 FIX (Facade): Qualify external cross-namespace types in facade mode
+            if (_facadeMode && _currentNamespace != null && externalNamespace != _currentNamespace && !string.IsNullOrEmpty(externalNamespace))
+            {
+                var namespaceAlias = GetNamespaceAlias(externalNamespace);
+                return $"{namespaceAlias}.{finalExternalName}";
+            }
+
+            return finalExternalName;
         }
 
         // 4. Get final TypeScript name from Renamer (single source of truth)
         var finalName = _ctx.Renamer.GetFinalTypeName(typeSymbol);
 
+        // 5. TS2304 FIX (Facade): In facade mode, qualify cross-namespace types with namespace alias
+        //    This prevents "Cannot find name 'IEquatable_1'" errors in facade constraint clauses
+        if (_facadeMode && _currentNamespace != null)
+        {
+            var targetNamespace = typeSymbol.Namespace;
+            if (targetNamespace != _currentNamespace)
+            {
+                // Cross-namespace reference in facade - must qualify
+                // Convert "System.Runtime.InteropServices" → "System_Runtime_InteropServices"
+                var namespaceAlias = GetNamespaceAlias(targetNamespace);
+                return $"{namespaceAlias}.{finalName}";
+            }
+        }
+
         return finalName;
+    }
+
+    /// <summary>
+    /// Get the TypeScript import alias for a namespace.
+    /// Converts "System.Collections.Generic" to "System_Collections_Generic".
+    /// </summary>
+    private static string GetNamespaceAlias(string namespaceName)
+    {
+        // Replace dots with underscores to make valid TS identifier
+        return namespaceName.Replace('.', '_');
     }
 
     /// <summary>
