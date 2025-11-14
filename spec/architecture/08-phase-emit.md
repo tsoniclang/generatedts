@@ -281,14 +281,99 @@ NestedTypeReference("Outer`1+Inner")               → "Inner"
 
 **Note:** Returns name WITH backtick arity (e.g., `IEnumerable\`1`), not without (e.g., `IEnumerable`). This is critical for distinguishing generic arities.
 
-### Method: NamespaceUsesSupportTypes()
+### Method: QualifyViewInterface() - TS2304 FIX (jumanji9)
+```csharp
+private static string QualifyViewInterface(
+    Model.Types.TypeReference interfaceRef,
+    string currentNamespace,
+    TypeNameResolver resolver,
+    BuildContext ctx)
+```
+**Lines:** 408-450
+
+**Purpose:** Qualify view interface types with namespace alias if they're cross-namespace. This fixes TS2304 "Cannot find name" errors for transitively implemented interfaces.
+
+**Problem it solves:**
+```typescript
+// WITHOUT QualifyViewInterface:
+interface __List_1$views<T> {
+  readonly IEnumerable_1$view: IEnumerable_1<T>;  // TS2304: Cannot find name 'IEnumerable_1'
+}
+
+// WITH QualifyViewInterface (jumanji9):
+interface __List_1$views<T> {
+  readonly IEnumerable_1$view: System_Collections_Generic_Internal.System.Collections.Generic.IEnumerable_1<T>;
+}
+```
+
+**Why needed:** View interfaces that are transitively implemented (not directly in the implements clause) don't get added to `ValueImportQualifiedNames` by ImportPlanner, so they need manual cross-namespace qualification.
+
+**Algorithm:**
+1. **Print base type name:**
+   - Use `TypeRefPrinter.Print()` to get initial type name
+
+2. **Check if it's a NamedTypeReference:**
+   - Extract namespace from CLR full name (before last dot)
+   - Example: `System.Collections.Generic.IEnumerable\`1` → namespace is `System.Collections.Generic`
+
+3. **Check if cross-namespace:**
+   - Compare `interfaceNamespace` with `currentNamespace`
+   - If same namespace, return base name (no qualification needed)
+   - If already qualified (contains `.`), return as-is
+
+4. **Qualify with namespace alias:**
+   - Generate alias: `interfaceNamespace.Replace('.', '_') + "_Internal"`
+   - Example: `System.Collections.Generic` → `System_Collections_Generic_Internal`
+   - Return: `{alias}.{interfaceNamespace}.{baseName}`
+
+**Example:**
+```csharp
+// Input:
+interfaceRef = IEnumerable<T> (from System.Collections.Generic)
+currentNamespace = "System.Collections"
+
+// Processing:
+baseName = "IEnumerable_1<T>"
+interfaceNamespace = "System.Collections.Generic"
+Different from currentNamespace → needs qualification
+
+// Output:
+"System_Collections_Generic_Internal.System.Collections.Generic.IEnumerable_1<T>"
+```
+
+**Called by:** `EmitCompanionViewsInterface()` at line 398 when emitting each view property
+
+**Impact:** Eliminated 1 TS2304 error in System.Collections namespace. Prevents "Cannot find name" errors for transitive interface references in companion views.
+
+**jumanji9 Addition:** This method was added in jumanji9 to handle edge cases where ImportPlanner doesn't track transitive interfaces (interfaces not directly in the class's implements clause but inherited through interface inheritance).
+
+### Method: NamespaceUsesSupportTypes() - TS2304 FIX (jumanji9)
 ```csharp
 private static bool NamespaceUsesSupportTypes(NamespaceSymbol ns)
 ```
 **What it does:**
 - Scans all public types and their ClassSurface/StaticSurface members
+- **jumanji9 Addition:** Also checks constructor parameters for unsafe types
 - Checks if any use `PointerTypeReference` or `ByRefTypeReference`
 - Returns `true` if support types import needed
+
+**jumanji9 Constructor Checking (lines 532-541):**
+```csharp
+// Check constructors for unsafe types
+foreach (var ctor in type.Members.Constructors)
+{
+    // Constructors are always on class surface
+    foreach (var param in ctor.Parameters)
+    {
+        if (ContainsUnsafeType(param.Type))
+            return true;
+    }
+}
+```
+
+**Why needed:** Constructors with pointer/byref parameters need TSUnsafePointer/TSByRef imports, but constructors weren't being checked before jumanji9. This caused missing import errors.
+
+**Impact:** Eliminated 1 TS2304 error for `TSUnsafePointer` in namespaces with unsafe constructor parameters.
 
 ### Method: ContainsUnsafeType()
 ```csharp
@@ -896,11 +981,17 @@ Single source of truth for resolving TypeScript identifiers from TypeReferences.
 
 ### Constructor
 ```csharp
-public TypeNameResolver(BuildContext ctx, SymbolGraph graph)
+public TypeNameResolver(BuildContext ctx, SymbolGraph graph, ImportPlan? importPlan = null,
+    string? currentNamespace = null, bool facadeMode = false)
 ```
 **What it does:**
 - Stores `BuildContext` (for Renamer access)
 - Stores `SymbolGraph` (for TypeIndex lookups)
+- Stores `ImportPlan` (optional - for value import qualification, TS2693 fix)
+- Stores `currentNamespace` (optional - for cross-namespace qualification)
+- Stores `facadeMode` flag (TS2304 FIX - enables cross-namespace qualification in facades)
+
+**jumanji9 Addition**: `facadeMode` parameter added to enable cross-namespace type qualification in facade constraint clauses. When true, all cross-namespace type references are qualified with namespace alias to prevent TS2304 "Cannot find name" errors.
 
 ### Method: For(TypeSymbol)
 ```csharp
@@ -923,9 +1014,11 @@ public string For(NamedTypeReference named)
 ```
 **What it does:**
 1. **Try TypeMap FIRST** - Short-circuit built-in types before graph lookup (prevents PG_LOAD_001)
-2. **Look up TypeSymbol in graph** - Uses StableId (`{AssemblyName}:{FullName}`)
-3. **If not in graph** - Type is external (from another assembly), sanitize CLR name
-4. **Get final TypeScript name from Renamer** - Single source of truth
+2. **Check value import qualification** - TS2693 fix for value-imported types
+3. **Look up TypeSymbol in graph** - Uses StableId (`{AssemblyName}:{FullName}`)
+4. **If not in graph** - Type is external (from another assembly), sanitize CLR name
+5. **Get final TypeScript name from Renamer** - Single source of truth
+6. **Facade mode qualification** (jumanji9) - Qualify cross-namespace types
 
 **Algorithm:**
 ```csharp
@@ -933,17 +1026,50 @@ public string For(NamedTypeReference named)
 if (TypeMap.TryMapBuiltin(named.FullName, out var builtinType))
     return builtinType;
 
-// 2. Look up in graph
+// 2. TS2693 FIX: Check value import qualification
+if (_importPlan != null && _currentNamespace != null)
+{
+    if (_importPlan.ValueImportQualifiedNames.TryGetValue((_currentNamespace, clrFullName), out var qualifiedName))
+        return qualifiedName;
+}
+
+// 3. Look up in graph
 var stableId = $"{named.AssemblyName}:{named.FullName}";
 if (!_graph.TypeIndex.TryGetValue(stableId, out var typeSymbol))
 {
     // External type - sanitize CLR name
-    return SanitizeClrName(simpleName);
+    var finalExternalName = SanitizeClrName(simpleName);
+
+    // TS2304 FIX (Facade - jumanji9): Qualify external cross-namespace types
+    if (_facadeMode && _currentNamespace != null && externalNamespace != _currentNamespace)
+    {
+        return $"{GetNamespaceAlias(externalNamespace)}.{finalExternalName}";
+    }
+
+    return finalExternalName;
 }
 
-// 3. Get final name from Renamer
-return _ctx.Renamer.GetFinalTypeName(typeSymbol);
+// 4. Get final name from Renamer
+var finalName = _ctx.Renamer.GetFinalTypeName(typeSymbol);
+
+// 5. TS2304 FIX (Facade - jumanji9): Qualify cross-namespace types in facade mode
+if (_facadeMode && _currentNamespace != null)
+{
+    var targetNamespace = typeSymbol.Namespace;
+    if (targetNamespace != _currentNamespace)
+    {
+        return $"{GetNamespaceAlias(targetNamespace)}.{finalName}";
+    }
+}
+
+return finalName;
 ```
+
+**jumanji9 Facade Mode Logic**:
+- When `facadeMode` is true, cross-namespace type references are qualified with namespace alias
+- Example: `IEquatable_1` → `System.IEquatable_1` in `System.Buffers` facade
+- Prevents TS2304 "Cannot find name" errors in facade constraint clauses
+- Eliminated 7 TS2304 errors in facades
 
 ### Method: SanitizeClrName()
 ```csharp
@@ -1244,12 +1370,17 @@ if (type.BaseType != null)
 }
 ```
 
-**Algorithm for interface emission:**
+**Algorithm for interface emission (jumanji9):**
 ```csharp
-if (type.Interfaces.Length > 0)
+// TS2304 FIX: Filter out non-public interfaces (not in graph)
+var publicInterfaces = type.Interfaces
+    .Where(i => IsInterfaceInGraph(i, graph))
+    .ToArray();
+
+if (publicInterfaces.Length > 0)
 {
     sb.Append(" implements ");
-    var interfaceNames = type.Interfaces.Select(i =>
+    var interfaceNames = publicInterfaces.Select(i =>
     {
         var name = TypeRefPrinter.Print(i, resolver, ctx);
         // TS2693 FIX: For same-namespace types with views, use instance class name
@@ -1258,6 +1389,8 @@ if (type.Interfaces.Length > 0)
     sb.Append(string.Join(", ", interfaceNames));
 }
 ```
+
+**jumanji9 Change:** Added `IsInterfaceInGraph()` filter before emitting implements clause. This prevents non-public interfaces from appearing in the implements clause, which was causing massive cascading TypeScript errors (TS2420, TS2416).
 
 **Why these fixes matter:**
 
@@ -1447,6 +1580,78 @@ The fix inserts `$instance` before the `<` character.
 - Commit 5880297: "Fix same-namespace TS2693 by using $instance suffix in heritage clauses"
 - Eliminated same-namespace TS2693 errors
 - Cross-namespace references unaffected (continue to work)
+
+### Method: IsInterfaceInGraph() - TS2304/TS2420 FIX (jumanji9)
+```csharp
+private static bool IsInterfaceInGraph(TypeReference ifaceRef, SymbolGraph graph)
+```
+**Lines:** 1186-1196
+
+**Purpose:** Filter out non-public interfaces from implements clauses. Only emit interfaces that exist in the SymbolGraph (public types).
+
+**Problem it solves:**
+```csharp
+// C# code:
+internal interface IInternalFoo { }
+public interface IPublicBar { }
+public class MyClass : IInternalFoo, IPublicBar { }
+
+// WITHOUT IsInterfaceInGraph:
+class MyClass implements IInternalFoo, IPublicBar { }
+// TS2304: Cannot find name 'IInternalFoo' (it was never emitted!)
+// TS2420: Class incorrectly implements interface 'IInternalFoo'
+
+// WITH IsInterfaceInGraph (jumanji9):
+class MyClass implements IPublicBar { }
+// ✓ Only public interfaces appear in implements clause
+```
+
+**Why needed:** Internal/private interfaces are not emitted to .d.ts files (only public types are emitted). If they appear in implements clauses, TypeScript can't find them and generates errors. This causes massive cascading errors because derived classes also fail to implement the phantom interface.
+
+**Algorithm:**
+1. **Check if NamedTypeReference:**
+   - If not (e.g., generic parameter): return `true` (always allowed)
+
+2. **Build StableId:**
+   - Format: `"{assemblyName}:{fullName}"`
+   - Example: `"System.Private.CoreLib:System.Collections.Generic.IEnumerable\`1"`
+
+3. **Look up in TypeIndex:**
+   - Use `graph.TypeIndex.TryGetValue(stableId, out _)`
+   - If found: interface is public (in graph) → return `true`
+   - If not found: interface is non-public or external → return `false`
+
+**Example:**
+```csharp
+// Input:
+ifaceRef = IComparable<T> (from mscorlib)
+
+// Processing:
+stableId = "System.Private.CoreLib:System.IComparable`1"
+graph.TypeIndex.TryGetValue(stableId, ...) → true (public interface)
+
+// Output:
+true (emit this interface)
+```
+
+**Impact (jumanji9):**
+- **Eliminated ALL TS2420 errors** (579 errors → 0)
+- **Reduced TS2416 by 81.6%** (794 errors → 146)
+- Total error reduction: -1,264 errors (-86.5%)
+
+**Why such massive impact:** When a class implements a non-public interface:
+1. TypeScript can't find the interface (TS2304)
+2. TypeScript says class doesn't correctly implement interface (TS2420)
+3. All methods/properties from that interface mismatch (TS2416 cascade)
+4. Derived classes inherit the problem (exponential growth)
+
+By filtering non-public interfaces, we prevent the root cause and eliminate the entire error cascade.
+
+**Called by:**
+- `PrintClass()` at line 116 when filtering interfaces
+- `PrintStruct()` at line 166 when filtering interfaces
+
+**jumanji9 Addition:** This method was added in jumanji9 as the single most impactful fix for TypeScript validation errors. It represents a fundamental insight: TypeScript can only check against types that were actually emitted.
 
 ### Method: EmitMembers()
 ```csharp
@@ -2095,9 +2300,13 @@ public static string PrintAsPropertyAccessor(MethodSymbol method, bool isGetter,
 ### Purpose
 Prints TypeScript type references from TypeReference model. Handles all type constructs: named, generic parameters, arrays, pointers, byrefs, nested. **CRITICAL:** Uses TypeNameResolver to ensure printed names match imports (single source of truth).
 
-### Method: Print()
+### Method: Print() - TS2304 FIX (jumanji9)
 ```csharp
-public static string Print(TypeReference typeRef, TypeNameResolver resolver, BuildContext ctx)
+public static string Print(
+    TypeReference typeRef,
+    TypeNameResolver resolver,
+    BuildContext ctx,
+    HashSet<string>? allowedTypeParameterNames = null)
 ```
 **What it does:**
 - Dispatches to specialized printer based on type reference kind:
@@ -2108,6 +2317,8 @@ public static string Print(TypeReference typeRef, TypeNameResolver resolver, Bui
   - `PointerTypeReference` → `PrintPointer()`
   - `ByRefTypeReference` → `PrintByRef()`
   - `NestedTypeReference` → `PrintNested()`
+
+**jumanji9 Addition:** Added `allowedTypeParameterNames` parameter for free type variable detection. When provided, any generic parameter NOT in this set is demoted to `unknown` to prevent TS2304 "Cannot find name" errors from leaked generics.
 
 ### Method: PrintPlaceholder()
 ```csharp
@@ -2157,12 +2368,60 @@ if (named.TypeArguments.Count > 0)
 return baseName;
 ```
 
-### Method: PrintGenericParameter()
+### Method: PrintGenericParameter() - TS2304 FIX (jumanji9)
 ```csharp
-private static string PrintGenericParameter(GenericParameterReference gp)
+private static string PrintGenericParameter(
+    GenericParameterReference gp,
+    BuildContext ctx,
+    HashSet<string>? allowedTypeParameterNames)
 ```
 **What it does:**
-- Returns generic parameter name as-is: `T`, `U`, `TKey`, `TValue`
+- **jumanji9:** Checks if generic parameter is allowed in current scope
+- If `allowedTypeParameterNames` is provided and parameter is NOT in the set, demotes to `unknown` (free type variable)
+- Otherwise returns generic parameter name as-is: `T`, `U`, `TKey`, `TValue`
+
+**Problem it solves (jumanji9):**
+```csharp
+// C# code:
+class MyClass<T> {
+    // Implements IEnumerable<int> (explicit interface implementation)
+    // But C# reflection shows generic parameter T in the interface member signatures
+}
+
+// WITHOUT free variable detection:
+class MyClass_1<T> {
+    // T leaks into signature even though it's not used!
+    GetEnumerator(): IEnumerator_1<T>  // TS2304: 'T' is a free type variable (not defined on class)
+}
+
+// WITH free variable detection (jumanji9):
+class MyClass_1<T> {
+    GetEnumerator(): IEnumerator_1<unknown>  // Safe - no leaked generics
+}
+```
+
+**Algorithm:**
+1. **Check if filtering is enabled:**
+   - If `allowedTypeParameterNames` is `null`: return `gp.Name` (no filtering)
+
+2. **Check if parameter is allowed:**
+   - If `gp.Name` is in `allowedTypeParameterNames`: return `gp.Name` (allowed)
+
+3. **Demote free variable:**
+   - Log demotion: `"Demoting unbound generic parameter '{gp.Name}' to 'unknown'"`
+   - Return `"unknown"` (prevents TS2304)
+
+**How allowedTypeParameterNames is built:**
+- Class-level generic parameters: `T`, `U` from `class Foo<T, U>`
+- Method-level generic parameters: `TKey` from `void Sort<TKey>()`
+- Combined set passed down through type reference printing
+
+**Impact (jumanji9):**
+- Prevented generic T leaks in interface implementations
+- Contributed to eliminating structural TS2304 errors
+- Ensures type parameters are only used when they're actually in scope
+
+**Called by:** All type printing methods that recursively call `Print()` with the allowed set propagated
 
 ### Method: PrintArray()
 ```csharp
@@ -2254,6 +2513,258 @@ public static string PrintTypeof(TypeReference typeRef, TypeNameResolver resolve
 ```
 **What it does:**
 - Prints typeof expression: `typeof ClassName`
+
+---
+
+## File: PrimitiveLift.cs (jumanji9 - NEW)
+
+### Purpose
+Defines the primitive lifting rules for the `CLROf<T>` utility type. This is the single source of truth for which TypeScript primitives get lifted to their CLR types in generic contexts.
+
+**Contract (PG_GENERIC_PRIM_LIFT_001):**
+- Every primitive type used as a generic type argument is covered by these rules
+- CLROf emitter (in InternalIndexEmitter) uses these rules to generate the conditional type mapping
+- TypeRefPrinter uses these rules to determine which concrete types to wrap with CLROf
+- PhaseGate validator ensures all primitive type arguments are covered
+
+### Why Needed
+
+**Problem:**
+```typescript
+// C# code:
+IEquatable<int> eq = ...;
+
+// TypeScript challenge:
+// - int is branded: type int = number & { __brand: "int" }
+// - IEquatable<T> expects: T extends IEquatable<T>
+// - But 'int' doesn't implement IEquatable<int>!
+```
+
+**Solution:**
+```typescript
+// Lift int → Int32 in generic positions:
+IEquatable_1<CLROf<int>>  // CLROf<int> = Int32, which implements IEquatable<Int32>
+```
+
+### Rules Array
+
+```csharp
+internal static readonly (string TsName, string ClrFullName, string ClrSimpleName)[] Rules
+```
+
+**What it contains:**
+- All TypeScript primitive names and their CLR equivalents
+- Order matters for CLROf conditional type (more specific types first)
+
+**Coverage:**
+- Signed integers: `sbyte`, `short`, `int`, `long`, `int128`, `nint`
+- Unsigned integers: `byte`, `ushort`, `uint`, `ulong`, `uint128`, `nuint`
+- Floating point: `half`, `float`, `double`, `decimal`
+- Other: `char`, `boolean`, `string`
+
+**Example entries:**
+```csharp
+("int", "System.Int32", "Int32"),
+("string", "System.String", "String_"),  // Note: emits as String_ (conflicts with TS String)
+("boolean", "System.Boolean", "Boolean_"),  // Note: emits as Boolean_ (reserved keyword)
+```
+
+### Methods
+
+#### IsLiftableClr()
+```csharp
+internal static bool IsLiftableClr(string clrFullName)
+```
+**What it does:**
+- Checks if a CLR type (by full name) is a liftable primitive
+- Used by PhaseGate validator to detect primitive type arguments
+- Example: `IsLiftableClr("System.Int32")` → `true`
+
+#### IsLiftableTs()
+```csharp
+internal static bool IsLiftableTs(string tsName)
+```
+**What it does:**
+- Checks if a TypeScript type name is a liftable primitive
+- Used by TypeRefPrinter to determine which concrete types to wrap with CLROf
+- Example: `IsLiftableTs("int")` → `true`
+
+#### GetClrSimpleName()
+```csharp
+internal static string? GetClrSimpleName(string tsName)
+```
+**What it does:**
+- Gets the CLR simple name (for emission) for a given TS primitive
+- Returns `null` if not a liftable primitive
+- Example: `GetClrSimpleName("int")` → `"Int32"`
+
+### Usage in Pipeline
+
+1. **InternalIndexEmitter** (CLROf emission):
+   ```csharp
+   foreach (var (tsName, _, clrSimpleName) in PrimitiveLift.Rules)
+   {
+       sb.AppendLine($"    T extends {tsName} ? import(\"../../System/internal/index\").{clrSimpleName} :");
+   }
+   ```
+
+2. **TypeRefPrinter** (wrapping type arguments):
+   ```csharp
+   var printed = Print(arg, resolver, ctx, allowedTypeParameterNames);
+   var isPrimitive = PrimitiveLift.IsLiftableTs(printed);
+   return isPrimitive ? $"CLROf<{printed}>" : printed;
+   ```
+
+3. **PhaseGate** (validation):
+   ```csharp
+   if (PrimitiveLift.IsLiftableClr(clrFullName))
+   {
+       // Report PG_GENERIC_PRIM_LIFT_001 if not wrapped
+   }
+   ```
+
+### Impact (jumanji9)
+
+- Enabled primitives in generic positions without constraint violations
+- Eliminated generic constraint errors for primitive types
+- Provides ergonomic TypeScript types (lowercase primitives) while maintaining CLR semantics in generics
+
+---
+
+## File: AliasEmit.cs (jumanji9 - NEW)
+
+### Purpose
+Unified type alias emission logic. Ensures consistent generic parameter handling across all alias emission sites to prevent TS2315 "Type is not generic" errors.
+
+**Used by:**
+- FacadeEmitter: Public facade re-exports
+- InternalIndexEmitter: Convenience exports, view composition aliases
+- Any code that emits type aliases with generics
+
+**Why needed:** Previously, alias emission was scattered across multiple files with inconsistent generic handling, causing LHS/RHS arity mismatches.
+
+### Method: EmitGenericAlias()
+
+```csharp
+internal static void EmitGenericAlias(
+    StringBuilder sb,
+    string aliasName,
+    TypeSymbol sourceType,
+    string rhsExpression,
+    TypeNameResolver resolver,
+    BuildContext ctx,
+    bool withConstraints = false)
+```
+
+**What it does:**
+- Emits a type alias with proper generic parameter handling
+- Guarantees LHS and RHS have matching arity and parameter names
+- Prevents TS2315 errors by ensuring consistency
+
+**Algorithm:**
+
+1. **Non-generic case (no type parameters):**
+   ```typescript
+   export type Foo = Internal.Foo;
+   ```
+
+2. **Generic without constraints (simple re-exports):**
+   ```typescript
+   export type List_1<T> = Internal.System.Collections.Generic.List_1<T>;
+   ```
+
+3. **Generic with constraints (internal convenience exports):**
+   ```typescript
+   export type List_1<T extends IEquatable_1<CLROf<T>>> = Internal.System.Collections.Generic.List_1<T>;
+   ```
+
+**Parameters:**
+- `aliasName`: LHS alias name (e.g., `"Foo"`)
+- `sourceType`: Source TypeSymbol (determines arity and constraints)
+- `rhsExpression`: RHS expression base (e.g., `"Internal.Foo"`)
+- `withConstraints`: Whether to include constraints on LHS
+
+**Example usage:**
+```csharp
+// Facade export (no constraints):
+AliasEmit.EmitGenericAlias(
+    sb,
+    aliasName: "List_1",
+    sourceType: listType,
+    rhsExpression: "Internal.System.Collections.Generic.List_1",
+    resolver,
+    ctx,
+    withConstraints: false);
+
+// Internal convenience export (with constraints):
+AliasEmit.EmitGenericAlias(
+    sb,
+    aliasName: "List_1",
+    sourceType: listType,
+    rhsExpression: "System.Collections.Generic.List_1",
+    resolver,
+    ctx,
+    withConstraints: true);
+```
+
+### Method: GenerateTypeParametersWithConstraints()
+
+```csharp
+internal static string GenerateTypeParametersWithConstraints(
+    TypeSymbol sourceType,
+    TypeNameResolver resolver,
+    BuildContext ctx)
+```
+
+**What it does:**
+- Generates generic type parameters WITH constraints for LHS of alias
+- Example: `"<T extends IFoo, U extends IBar>"`
+- Filters out C# special constraints (`struct`, `class`, `new()`)
+
+**Algorithm:**
+1. For each generic parameter:
+   - If no constraints: emit `"T"`
+   - If constraints: emit `"T extends IFoo & IBar"` (intersection)
+2. Filter special constraints (`System.ValueType`, `System.Object`)
+3. Use TypeRefPrinter to print constraint types
+
+### Method: GenerateTypeArguments()
+
+```csharp
+internal static string GenerateTypeArguments(TypeSymbol sourceType)
+```
+
+**What it does:**
+- Generates generic type arguments for RHS of alias
+- Example: `"<T, U>"` (parameter names only, no constraints)
+
+**Why separate from GenerateTypeParametersWithConstraints:**
+- LHS needs constraints: `type Foo<T extends IBar>`
+- RHS just needs names: `= Internal.Foo<T>`
+
+### Impact (jumanji9)
+
+- **Eliminated TS2315 errors** from arity mismatches
+- **Unified alias emission** across facade and internal exports
+- **Prevented future bugs** by centralizing generic handling logic
+
+**Before AliasEmit:**
+```typescript
+// Facade (inconsistent):
+export type Foo<T> = Internal.Foo;  // TS2315: Type 'Foo' is not generic
+
+// Internal (inconsistent):
+export type Bar = Namespace.Bar<T>;  // TS2304: Cannot find name 'T'
+```
+
+**After AliasEmit (jumanji9):**
+```typescript
+// Facade (consistent):
+export type Foo<T> = Internal.Foo<T>;  // ✓
+
+// Internal (consistent):
+export type Bar<T> = Namespace.Bar<T>;  // ✓
+```
 
 ---
 

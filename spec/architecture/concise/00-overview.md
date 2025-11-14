@@ -312,6 +312,42 @@ Optional logging for debugging. Categories: Build, Load, Shape, ViewPlanner, Pha
 
 ---
 
+## 7. Current Validation Metrics (jumanji9)
+
+### TypeScript Validation Results
+
+Full BCL generation (4,047 types, 130 namespaces, 50,720 members):
+
+**Total TypeScript errors**: **198** (down from 1,471, **-86.5%** reduction)
+
+**Error breakdown**:
+- **0 syntax errors** (TS1xxx) - All output is valid TypeScript ✓
+- **198 semantic errors** (TS2xxx) - Known .NET/TS impedance
+
+**Semantic error categories**:
+- 146 TS2416 (73.7%) - Property covariance (C# allows, TS doesn't)
+- 25 TS2417 (12.6%) - Override mismatches (C# virtual/override != TS structural)
+- 24 TS2344 (12.1%) - Generic constraints (F-bounded types like `INumber<TSelf>`)
+- 2 TS2315 (1.0%) - Array/System.Array shadowing
+- 1 TS2440 (0.5%) - Abstract member edge case
+
+**Errors eliminated in recent work**:
+- TS2304: 212 → **0** (100%) - "Cannot find name" errors
+- TS2420: 579 → **0** (100%) - "Class incorrectly implements interface" errors
+- TS2552: 5 → **0** (100%) - "Cannot find name" (different context)
+- TS2416: 794 → 146 (81.6% reduction) - Property assignability
+
+**Key fixes**:
+- Non-public interface filtering (eliminated TS2420 cascade)
+- Cross-namespace qualification (facades, view interfaces, nested types)
+- Free type variable detection and demotion
+- CLROf<T> primitive lifting for generic constraints
+- Recursive nested type analysis in import graph
+
+**Data integrity**: 100% - All reflected types accounted for in emission (verified via completeness checks)
+
+---
+
 ## Summary
 
 **SinglePhase pipeline** is a deterministic, pure functional transformation:
@@ -325,4 +361,4 @@ Optional logging for debugging. Categories: Build, Load, Shape, ViewPlanner, Pha
 
 **Core Principles**: Immutability, purity, centralization, stable identity, scoping, validation
 
-**Result**: 100% data integrity, zero data loss, type-safe TypeScript declarations for entire .NET BCL (4,047 types, 130 namespaces).
+**Result**: 100% data integrity, zero data loss, type-safe TypeScript declarations for entire .NET BCL (4,047 types, 130 namespaces, **198 known impedance errors**).

@@ -79,9 +79,10 @@ PhaseGate runs **20+ validation modules** in strict order:
 │   M15: Types.ValidatePrinterNameConsistency()               │
 │   M16: Types.ValidateTypeMapCompliance() - PG_TYPEMAP_001   │
 │   M17: Types.ValidateExternalTypeResolution() - PG_LOAD_001 │
-│   M18: ImportExport.ValidatePublicApiSurface()              │
-│   M19: ImportExport.ValidateImportCompleteness()            │
-│   M20: ImportExport.ValidateExportCompleteness()            │
+│   M18: Types.ValidatePrimitiveGenericLifting() - NEW jumanji9│
+│   M19: ImportExport.ValidatePublicApiSurface()              │
+│   M20: ImportExport.ValidateImportCompleteness()            │
+│   M21: ImportExport.ValidateExportCompleteness()            │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
@@ -469,6 +470,20 @@ method Baz() { EmitScope = ViewOnly, SourceInterface = null }  // ERROR: TBG703
 - External types are resolvable
 - **AFTER TypeMap validation**
 - **Error codes**: TBG704
+
+#### 4. ValidatePrimitiveGenericLifting() - **PG_GENERIC_PRIM_LIFT_001** - **jumanji9 NEW**
+- All primitive type arguments covered by CLROf lifting rules
+- Ensures TypeRefPrinter primitive detection stays in sync with PrimitiveLift configuration
+- Prevents regressions where new primitive is used but not added to CLROf mapping
+- **Error codes**: TBG_PRIM_LIFT (PrimitiveGenericLiftMismatch)
+
+**What it validates**: Every primitive type used as generic type argument (e.g., `IEquatable<int>`) has CLROf mapping rule
+
+**Why needed (jumanji9)**: Prevents primitives from slipping through CLROf conditional type with identity fallback, which would cause runtime type mismatch
+
+**Example**: TypeRefPrinter wraps `IEquatable<int>` → `IEquatable_1<CLROf<int>>` where `CLROf<int> = Int32`. Validation ensures all primitives have this mapping.
+
+**Impact**: Catches configuration errors early (at validation time, not runtime), guards against future BCL additions (e.g., Int256, Float128)
 
 ---
 

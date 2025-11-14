@@ -1378,6 +1378,89 @@ class Foo {
 
 ---
 
+#### 4. `ValidatePrimitiveGenericLifting(BuildContext ctx, SymbolGraph graph, ValidationContext validationCtx)` - jumanji9 NEW
+
+**What it validates:**
+- **PG_GENERIC_PRIM_LIFT_001:** All primitive type arguments are covered by CLROf lifting rules
+- Ensures TypeRefPrinter primitive detection stays in sync with PrimitiveLift configuration
+- Prevents regressions where a new primitive is used but not added to CLROf mapping
+
+**Error codes:**
+- `TBG_PRIM_LIFT` (PrimitiveGenericLiftMismatch) - Primitive used without CLROf coverage (PG_GENERIC_PRIM_LIFT_001)
+
+**Examples of failures:**
+```csharp
+// New primitive added to BCL but not to PrimitiveLift.Rules
+namespace System {
+    public struct NewPrimitive { }  // Hypothetical new primitive
+}
+
+// Somewhere in BCL:
+class Foo {
+    IEquatable<NewPrimitive> prop;  // ERROR: TBG_PRIM_LIFT
+    // NewPrimitive used as type argument but not in CLROf lifting rules!
+}
+
+// Fix: Add to PrimitiveLift.Rules
+("newprimitive", "System.NewPrimitive", "NewPrimitive")
+```
+
+**Algorithm:**
+1. Walk all type references in the graph
+2. For each NamedTypeReference with type arguments:
+   - Check if type argument is a concrete primitive (matches `PrimitiveLift.IsLiftableClr()`)
+   - If YES: Good! Covered by CLROf
+   - If NO but looks like a primitive (`IsPotentialPrimitive()`): ERROR
+3. Recursively check nested generics (e.g., `List<Dictionary<K,V>>`)
+
+**Primitive detection:**
+```csharp
+bool IsPotentialPrimitive(string fullName) =>
+    fullName is "System.SByte" or "System.Byte"
+        or "System.Int16" or "System.UInt16"
+        or "System.Int32" or "System.UInt32"
+        or "System.Int64" or "System.UInt64"
+        or "System.IntPtr" or "System.UIntPtr"
+        or "System.Single" or "System.Double" or "System.Decimal"
+        or "System.Char" or "System.Boolean" or "System.String"
+        or "System.Half" or "System.Int128" or "System.UInt128";
+```
+
+**Why this validation exists (jumanji9):**
+
+**Problem it prevents:**
+```typescript
+// TypeRefPrinter wraps primitives with CLROf<>:
+IEquatable_1<CLROf<int>>  // int is in PrimitiveLift.Rules ✓
+
+// But if someone forgets to add a new primitive to PrimitiveLift:
+IEquatable_1<CLROf<newnumeric>>  // ERROR: CLROf doesn't know about newnumeric
+// Conditional type falls through to identity fallback
+// Runtime mismatch between TS type and CLR constraint
+```
+
+**What CLROf does:**
+```typescript
+// CLROf<T> - Primitive Lifting Utility (emitted in every namespace)
+export type CLROf<T> =
+    T extends int ? Int32 :
+    T extends string ? String_ :
+    // ... all primitives from PrimitiveLift.Rules ...
+    T; // Identity fallback for non-primitives
+```
+
+**Validation ensures:**
+- Every primitive used as a type argument has a CLROf mapping
+- TypeRefPrinter and PrimitiveLift stay in sync
+- No primitives slip through with identity fallback
+
+**Impact (jumanji9):**
+- Catches configuration errors early (at validation time, not runtime)
+- Prevents subtle bugs where primitive constraints don't match
+- Guards against future BCL additions (e.g., Int256, Float128)
+
+---
+
 ### Module: ImportExport.cs
 
 **Purpose:** Import/export validation (public API surface, import completeness, export completeness).

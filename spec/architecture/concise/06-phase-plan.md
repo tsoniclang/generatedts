@@ -129,11 +129,25 @@ Builds cross-namespace dependency graph for import planning. Analyzes type refer
 - **Set-based**: Legacy, used for set operations
 - **Map-based**: O(1) hash lookup for `FindNamespaceForType()` (critical for BCL with 4,000+ types)
 
-### Method: `AnalyzeNamespaceDependencies()`
+### Method: `AnalyzeNamespaceDependencies()` - **jumanji9 UPDATED**
 
 **Comprehensive scanning algorithm**:
 
 For each **public type**:
+1. **jumanji9 TS2304 FIX**: Call `AnalyzeTypeAndNestedRecursively()` to analyze type AND all public nested types recursively
+   - Previously only analyzed top-level types
+   - Now processes nested types (e.g., `ImmutableArray<T>.Builder`)
+   - Ensures nested type members scanned for cross-namespace dependencies
+
+**Result**:
+- `dependencies` set contains all foreign namespace names
+- `CrossNamespaceReferences` has detailed reference records
+
+### Method: `AnalyzeTypeAndNestedRecursively()` - **jumanji9 NEW**
+
+**Recursive type analysis** (including nested types):
+
+For given type:
 1. **Base class analysis**:
    - Call `CollectTypeReferences(type.BaseType)`
    - Recursively finds ALL referenced types (including generic arguments)
@@ -153,9 +167,13 @@ For each **public type**:
    - Call `AnalyzeMemberDependencies()` to scan all members
    - Analyzes methods, properties, fields, events, constructors
 
-**Result**:
-- `dependencies` set contains all foreign namespace names
-- `CrossNamespaceReferences` has detailed reference records
+5. **jumanji9 Nested type recursion**:
+   - For each **public** nested type: call `AnalyzeTypeAndNestedRecursively()` recursively
+   - Ensures deeply nested types fully analyzed (e.g., `Outer<T>.Middle.Inner`)
+
+**Why needed (jumanji9)**: Nested type members can reference cross-namespace types. Without recursive analysis, imports were missing (e.g., `ImmutableArray<T>.Builder.AddRange(IEnumerable<T>)` needs `System.Collections.Generic` import).
+
+**Impact**: Fixed TS2304 errors from nested types referencing cross-namespace types
 
 ### Method: `CollectTypeReferences()`
 
@@ -199,11 +217,18 @@ For each **public type**:
 
 **Why null is valid**: Type might be from external assembly, built-in TS type, type-forwarded, or different assembly version
 
-### Method: `GetOpenGenericClrKey(NamedTypeReference) -> string`
+### Method: `GetOpenGenericClrKey(NamedTypeReference) -> string` - **jumanji9 UPDATED**
 
 **Purpose**: Construct open generic CLR key from NamedTypeReference. Ensures generic types use open form (`List`1`) not constructed form with assembly-qualified type arguments.
 
 **Algorithm**:
+0. **jumanji9 TS2304 FIX - Nested type special handling**:
+   - If `FullName.Contains('+')`: Nested type detected
+   - Use `FullName` directly (already has correct CLR format with `+` separator)
+   - Strip assembly qualification if present
+   - Return (skip reconstruction)
+   - **Why**: For nested types, `Name` is just child part (e.g., `"Builder"`), reconstruction would give wrong result
+
 1. Extract components: `ns`, `name`, `arity`
 2. Validate inputs (defensive): If namespace/name empty, fallback to `FullName`
 3. **Strip assembly qualification from name**: If `name.Contains(',')`, truncate at comma
@@ -216,8 +241,11 @@ For each **public type**:
 - `IEnumerable<T>` → `System.Collections.Generic.IEnumerable`1`
 - `Dictionary<K,V>` → `System.Collections.Generic.Dictionary`2`
 - `Exception` → `System.Exception`
+- **jumanji9**: `ImmutableArray\`1+Builder` → `System.Collections.Immutable.ImmutableArray\`1+Builder` (nested type)
 
 **Why critical**: Without proper key construction, lookups fail → no import → TS2304 error
+
+**jumanji9 Impact**: Fixed nested type import lookups - prevented TS2304 errors from nested types
 
 ---
 

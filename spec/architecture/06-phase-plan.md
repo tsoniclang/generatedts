@@ -348,6 +348,58 @@ private static void AnalyzeNamespaceDependencies(
 
 For each **public type** in namespace:
 
+1. **TS2304 FIX (jumanji9):** Call `AnalyzeTypeAndNestedRecursively()` to analyze the type AND all its public nested types
+   - Previously only analyzed top-level types
+   - Now recursively processes nested types (e.g., `ImmutableArray<T>.Builder`)
+   - Ensures nested type members are scanned for cross-namespace dependencies
+
+**Result:**
+- `dependencies` set contains all foreign namespace names
+- `graphData.CrossNamespaceReferences` has detailed reference records
+- Added to `graphData.NamespaceDependencies[ns.Name]`
+
+#### Method: AnalyzeTypeAndNestedRecursively() - TS2304 FIX (jumanji9 - NEW)
+
+```csharp
+private static void AnalyzeTypeAndNestedRecursively(
+    BuildContext ctx,
+    SymbolGraph graph,
+    ImportGraphData graphData,
+    NamespaceSymbol ns,
+    TypeSymbol type,
+    HashSet<string> dependencies)
+```
+
+**Purpose:** Recursively analyze a type and all its nested types. Ensures nested type members are scanned for cross-namespace dependencies.
+
+**Why needed (jumanji9):**
+
+**Problem:**
+```csharp
+// C# code:
+namespace System.Collections.Immutable {
+    public struct ImmutableArray<T> {
+        public struct Builder {  // Nested type
+            public void AddRange(IEnumerable<T> items) { }  // Cross-namespace reference!
+        }
+    }
+}
+
+// WITHOUT recursive analysis:
+// Builder's AddRange method not scanned
+// IEnumerable<T> reference missed
+// No import generated for System.Collections.Generic
+// TS2304: Cannot find name 'IEnumerable_1'
+
+// WITH recursive analysis (jumanji9):
+// Builder analyzed recursively
+// IEnumerable<T> reference found
+// Import generated correctly
+// No error
+```
+
+**Algorithm:**
+
 1. **Base class analysis:**
    - If type has base class, call `CollectTypeReferences(type.BaseType)`
    - Recursively finds ALL referenced types (including generic arguments)
@@ -368,10 +420,34 @@ For each **public type** in namespace:
    - Call `AnalyzeMemberDependencies()` to scan all members
    - Analyzes methods, properties, fields, events
 
-**Result:**
-- `dependencies` set contains all foreign namespace names
-- `graphData.CrossNamespaceReferences` has detailed reference records
-- Added to `graphData.NamespaceDependencies[ns.Name]`
+5. **Recursive nested type analysis (jumanji9 - NEW):**
+   ```csharp
+   foreach (var nestedType in type.NestedTypes.Where(t => t.Accessibility == Accessibility.Public))
+   {
+       AnalyzeTypeAndNestedRecursively(ctx, graph, graphData, ns, nestedType, dependencies);
+   }
+   ```
+   - **ONLY public nested types** (internal nested types won't be emitted)
+   - Recursive call ensures deeply nested types are analyzed
+   - Example: `Outer<T>.Middle.Inner` will be fully analyzed
+
+**Impact (jumanji9):**
+- Eliminated missing imports for nested type members
+- Fixed TS2304 errors from nested types referencing cross-namespace types
+- Enabled complete dependency tracking for complex type hierarchies
+
+**Example hierarchy:**
+```csharp
+class Outer<T> {
+    // Analyzed recursively
+    class Inner {
+        // Analyzed recursively
+        class DeepNested {
+            void Method(IEnumerable<T> items) { }  // Found!
+        }
+    }
+}
+```
 
 #### Method: AnalyzeMemberDependencies()
 
@@ -549,7 +625,7 @@ _ => null                                                            // Unknown 
 - `T` (GenericParameterReference) → `null` (no import needed)
 - `int*` (PointerTypeReference) → `"System.Int32"` (recurses to pointee)
 
-#### Method: GetOpenGenericClrKey()
+#### Method: GetOpenGenericClrKey() - TS2304 FIX (jumanji9)
 
 ```csharp
 private static string GetOpenGenericClrKey(NamedTypeReference named)
@@ -558,6 +634,27 @@ private static string GetOpenGenericClrKey(NamedTypeReference named)
 **Purpose:** Construct open generic CLR key from NamedTypeReference. This method ensures that generic types use their open form (e.g., `List\`1`) rather than constructed form with assembly-qualified type arguments.
 
 **Algorithm:**
+
+0. **TS2304 FIX (jumanji9 - NEW): Nested type special handling:**
+   ```csharp
+   // For nested types, FullName already has the correct CLR format with '+' separator
+   // (e.g., "System.Collections.Immutable.ImmutableArray`1+Builder")
+   if (named.FullName.Contains('+'))
+   {
+       var fullName = named.FullName;
+
+       // Strip assembly qualification if present (defensive)
+       if (fullName.Contains(','))
+           fullName = fullName.Substring(0, fullName.IndexOf(',')).Trim();
+
+       // FullName already has backtick arity in the correct CLR format
+       return fullName;
+   }
+   ```
+   - **Why needed:** For nested types, `Name` is just the child part (e.g., `"Builder"`)
+   - Reconstructing from `Namespace + Name` would give `"System.Collections.Immutable.Builder"` (WRONG!)
+   - FullName has correct format: `"System.Collections.Immutable.ImmutableArray\`1+Builder"` (RIGHT!)
+   - **jumanji9 fix:** Use FullName directly for nested types instead of reconstruction
 
 1. **Extract components:**
    ```csharp

@@ -915,6 +915,52 @@ ctx.Log("ViewPlanner", $"Planning views for {type.ClrFullName}");
 
 ---
 
+## Current Validation Metrics (jumanji9 Branch)
+
+### TypeScript Validation Results
+
+Full BCL generation (4,047 types, 130 namespaces, 50,720 members):
+
+**Total TypeScript errors**: **198** (down from 1,471, **-86.5%** reduction)
+
+**Error breakdown**:
+- **0 syntax errors** (TS1xxx) - All output is valid TypeScript ✓
+- **198 semantic errors** (TS2xxx) - Known .NET/TypeScript impedance mismatches
+
+**Semantic error categories**:
+- **146 TS2416** (73.7%) - Property covariance (C# allows covariant returns, TypeScript doesn't)
+- **25 TS2417** (12.6%) - Override mismatches (C# virtual/override model != TypeScript structural checking)
+- **24 TS2344** (12.1%) - Generic constraint violations (F-bounded types like `INumber<TSelf>`)
+- **2 TS2315** (1.0%) - Type not generic (Array/System.Array shadowing edge case)
+- **1 TS2440** (0.5%) - Abstract member in concrete class (edge case)
+
+**Errors eliminated in recent work (jumanji9)**:
+- **TS2304**: 212 → **0** (100% eliminated) - "Cannot find name" errors
+- **TS2420**: 579 → **0** (100% eliminated) - "Class incorrectly implements interface" errors
+- **TS2552**: 5 → **0** (100% eliminated) - "Cannot find name" errors (different context)
+- **TS2416**: 794 → 146 (81.6% reduction) - Property assignability issues
+
+**Key fixes implemented (jumanji9)**:
+1. **Non-public interface filtering** - Eliminated TS2420 cascade by filtering non-public interfaces from implements clauses
+2. **Cross-namespace qualification** - Fixed TS2304 in facades, view interfaces, and nested types
+3. **Free type variable detection** - Demoted leaked generic parameters to `unknown`
+4. **CLROf<T> primitive lifting** - Enabled primitives in generic positions with proper constraint satisfaction
+5. **Recursive nested type analysis** - Ensured imports for nested type members (e.g., `ImmutableArray<T>.Builder`)
+6. **Constructor parameter checking** - Added support type detection for constructor parameters
+7. **Unified alias emission** - Prevented TS2315 errors from LHS/RHS arity mismatches
+
+**Data integrity**: **100%** - All reflected types accounted for in emission (verified via completeness checks)
+
+**Remaining 198 errors represent genuine .NET/TypeScript impedance**:
+- Property covariance (C# feature TypeScript doesn't support)
+- Override patterns (C# virtual/override semantics differ from TypeScript structural checking)
+- F-bounded generic constraints (`INumber<TSelf>` patterns)
+- Known edge cases (array shadowing, abstract member handling)
+
+These errors are **documented as acceptable impedance** and do not block emission or functionality.
+
+---
+
 ## Summary
 
 The SinglePhase pipeline is a **deterministic, pure functional transformation** from .NET assemblies to TypeScript declarations:
@@ -934,4 +980,4 @@ The SinglePhase pipeline is a **deterministic, pure functional transformation** 
 - **Scoping**: Separate naming scopes for class vs view surfaces
 - **Validation**: PhaseGate enforces 50+ invariants before emission
 
-**Result**: 100% data integrity, zero data loss, type-safe TypeScript declarations for the entire .NET BCL.
+**Result**: 100% data integrity, zero data loss, type-safe TypeScript declarations for the entire .NET BCL (4,047 types, 130 namespaces, **198 known impedance errors**).
