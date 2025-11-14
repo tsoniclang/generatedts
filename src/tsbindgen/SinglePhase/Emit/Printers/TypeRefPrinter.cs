@@ -15,18 +15,27 @@ public static class TypeRefPrinter
     /// Print a TypeReference to TypeScript syntax.
     /// CRITICAL: Always pass TypeNameResolver - never use CLR names directly.
     /// </summary>
-    public static string Print(TypeReference typeRef, TypeNameResolver resolver, BuildContext ctx)
+    /// <param name="allowedTypeParameterNames">
+    /// TS2304 FIX: Optional set of allowed generic parameter names (class + method level).
+    /// If provided, any GenericParameterReference NOT in this set will be demoted to 'unknown'.
+    /// This prevents "free type variables" from leaking into signatures.
+    /// </param>
+    public static string Print(
+        TypeReference typeRef,
+        TypeNameResolver resolver,
+        BuildContext ctx,
+        HashSet<string>? allowedTypeParameterNames = null)
     {
         return typeRef switch
         {
             // Defensive guard: Placeholders should never reach output after ConstraintCloser
             PlaceholderTypeReference placeholder => PrintPlaceholder(placeholder, ctx),
-            NamedTypeReference named => PrintNamed(named, resolver, ctx),
-            GenericParameterReference gp => PrintGenericParameter(gp),
-            ArrayTypeReference arr => PrintArray(arr, resolver, ctx),
-            PointerTypeReference ptr => PrintPointer(ptr, resolver, ctx),
-            ByRefTypeReference byref => PrintByRef(byref, resolver, ctx),
-            NestedTypeReference nested => PrintNested(nested, resolver, ctx),
+            NamedTypeReference named => PrintNamed(named, resolver, ctx, allowedTypeParameterNames),
+            GenericParameterReference gp => PrintGenericParameter(gp, ctx, allowedTypeParameterNames),
+            ArrayTypeReference arr => PrintArray(arr, resolver, ctx, allowedTypeParameterNames),
+            PointerTypeReference ptr => PrintPointer(ptr, resolver, ctx, allowedTypeParameterNames),
+            ByRefTypeReference byref => PrintByRef(byref, resolver, ctx, allowedTypeParameterNames),
+            NestedTypeReference nested => PrintNested(nested, resolver, ctx, allowedTypeParameterNames),
             _ => "any" // Fallback for unknown types
         };
     }
@@ -43,7 +52,11 @@ public static class TypeRefPrinter
         return "any";
     }
 
-    private static string PrintNamed(NamedTypeReference named, TypeNameResolver resolver, BuildContext ctx)
+    private static string PrintNamed(
+        NamedTypeReference named,
+        TypeNameResolver resolver,
+        BuildContext ctx,
+        HashSet<string>? allowedTypeParameterNames)
     {
         // Map CLR primitive types to TypeScript built-in types (short-circuit)
         var primitiveType = TypeNameResolver.TryMapPrimitive(named.FullName);
@@ -86,7 +99,7 @@ public static class TypeRefPrinter
         // Uses PrimitiveLift.IsLiftableTs as single source of truth (PG_GENERIC_PRIM_LIFT_001)
         var argParts = named.TypeArguments.Select(arg =>
         {
-            var printed = Print(arg, resolver, ctx);
+            var printed = Print(arg, resolver, ctx, allowedTypeParameterNames);
             // Only wrap liftable primitives with CLROf<>
             var isPrimitive = PrimitiveLift.IsLiftableTs(printed);
             return isPrimitive ? $"CLROf<{printed}>" : printed;
@@ -106,15 +119,32 @@ public static class TypeRefPrinter
         return $"{baseName}<{args}>";
     }
 
-    private static string PrintGenericParameter(GenericParameterReference gp)
+    private static string PrintGenericParameter(
+        GenericParameterReference gp,
+        BuildContext ctx,
+        HashSet<string>? allowedTypeParameterNames)
     {
+        // TS2304 FIX: Check if this generic parameter is allowed in current scope
+        // If allowedTypeParameterNames is provided and this parameter is NOT in the set,
+        // it's a "free type variable" that leaked from an interface implementation.
+        // Demote to 'unknown' to prevent TS2304 errors.
+        if (allowedTypeParameterNames != null && !allowedTypeParameterNames.Contains(gp.Name))
+        {
+            ctx.Log("TS2304Fix", $"Demoting unbound generic parameter '{gp.Name}' to 'unknown'");
+            return "unknown";
+        }
+
         // Generic parameters use their declared name: T, U, TKey, TValue
         return gp.Name;
     }
 
-    private static string PrintArray(ArrayTypeReference arr, TypeNameResolver resolver, BuildContext ctx)
+    private static string PrintArray(
+        ArrayTypeReference arr,
+        TypeNameResolver resolver,
+        BuildContext ctx,
+        HashSet<string>? allowedTypeParameterNames)
     {
-        var elementType = Print(arr.ElementType, resolver, ctx);
+        var elementType = Print(arr.ElementType, resolver, ctx, allowedTypeParameterNames);
 
         // Multi-dimensional arrays: T[][], T[][][]
         if (arr.Rank == 1)
@@ -129,29 +159,41 @@ public static class TypeRefPrinter
         return result;
     }
 
-    private static string PrintPointer(PointerTypeReference ptr, TypeNameResolver resolver, BuildContext ctx)
+    private static string PrintPointer(
+        PointerTypeReference ptr,
+        TypeNameResolver resolver,
+        BuildContext ctx,
+        HashSet<string>? allowedTypeParameterNames)
     {
         // TypeScript has no pointer types
         // Use branded marker type: TSUnsafePointer<T> = unknown
         // This preserves type information while being type-safe (forces explicit handling)
-        var pointeeType = Print(ptr.PointeeType, resolver, ctx);
+        var pointeeType = Print(ptr.PointeeType, resolver, ctx, allowedTypeParameterNames);
         return $"TSUnsafePointer<{pointeeType}>";
     }
 
-    private static string PrintByRef(ByRefTypeReference byref, TypeNameResolver resolver, BuildContext ctx)
+    private static string PrintByRef(
+        ByRefTypeReference byref,
+        TypeNameResolver resolver,
+        BuildContext ctx,
+        HashSet<string>? allowedTypeParameterNames)
     {
         // TypeScript has no ref types (ref/out/in parameters)
         // Use branded marker type: TSByRef<T> = unknown
         // This preserves type information while being type-safe
-        var referencedType = Print(byref.ReferencedType, resolver, ctx);
+        var referencedType = Print(byref.ReferencedType, resolver, ctx, allowedTypeParameterNames);
         return $"TSByRef<{referencedType}>";
     }
 
-    private static string PrintNested(NestedTypeReference nested, TypeNameResolver resolver, BuildContext ctx)
+    private static string PrintNested(
+        NestedTypeReference nested,
+        TypeNameResolver resolver,
+        BuildContext ctx,
+        HashSet<string>? allowedTypeParameterNames)
     {
         // CRITICAL: Nested types use resolver just like named types
         // The FullReference is a NamedTypeReference that the resolver will handle correctly
-        return PrintNamed(nested.FullReference, resolver, ctx);
+        return PrintNamed(nested.FullReference, resolver, ctx, allowedTypeParameterNames);
     }
 
     /// <summary>
@@ -177,18 +219,27 @@ public static class TypeRefPrinter
     /// Print a list of type references separated by commas.
     /// Used for generic parameter lists, method parameters, etc.
     /// </summary>
-    public static string PrintList(IEnumerable<TypeReference> typeRefs, TypeNameResolver resolver, BuildContext ctx)
+    public static string PrintList(
+        IEnumerable<TypeReference> typeRefs,
+        TypeNameResolver resolver,
+        BuildContext ctx,
+        HashSet<string>? allowedTypeParameterNames = null)
     {
-        return string.Join(", ", typeRefs.Select(t => Print(t, resolver, ctx)));
+        return string.Join(", ", typeRefs.Select(t => Print(t, resolver, ctx, allowedTypeParameterNames)));
     }
 
     /// <summary>
     /// Print a type reference with optional nullability.
     /// Used for nullable value types and reference types.
     /// </summary>
-    public static string PrintNullable(TypeReference typeRef, bool isNullable, TypeNameResolver resolver, BuildContext ctx)
+    public static string PrintNullable(
+        TypeReference typeRef,
+        bool isNullable,
+        TypeNameResolver resolver,
+        BuildContext ctx,
+        HashSet<string>? allowedTypeParameterNames = null)
     {
-        var baseType = Print(typeRef, resolver, ctx);
+        var baseType = Print(typeRef, resolver, ctx, allowedTypeParameterNames);
         return isNullable ? $"{baseType} | null" : baseType;
     }
 
@@ -196,45 +247,65 @@ public static class TypeRefPrinter
     /// Print a readonly array type.
     /// Used for ReadonlyArray<T> mappings from IEnumerable<T>, etc.
     /// </summary>
-    public static string PrintReadonlyArray(TypeReference elementType, TypeNameResolver resolver, BuildContext ctx)
+    public static string PrintReadonlyArray(
+        TypeReference elementType,
+        TypeNameResolver resolver,
+        BuildContext ctx,
+        HashSet<string>? allowedTypeParameterNames = null)
     {
-        var element = Print(elementType, resolver, ctx);
+        var element = Print(elementType, resolver, ctx, allowedTypeParameterNames);
         return $"ReadonlyArray<{element}>";
     }
 
     /// <summary>
     /// Print a Promise type for Task<T> mappings.
     /// </summary>
-    public static string PrintPromise(TypeReference resultType, TypeNameResolver resolver, BuildContext ctx)
+    public static string PrintPromise(
+        TypeReference resultType,
+        TypeNameResolver resolver,
+        BuildContext ctx,
+        HashSet<string>? allowedTypeParameterNames = null)
     {
-        var result = Print(resultType, resolver, ctx);
+        var result = Print(resultType, resolver, ctx, allowedTypeParameterNames);
         return $"Promise<{result}>";
     }
 
     /// <summary>
     /// Print a tuple type for ValueTuple mappings.
     /// </summary>
-    public static string PrintTuple(IReadOnlyList<TypeReference> elementTypes, TypeNameResolver resolver, BuildContext ctx)
+    public static string PrintTuple(
+        IReadOnlyList<TypeReference> elementTypes,
+        TypeNameResolver resolver,
+        BuildContext ctx,
+        HashSet<string>? allowedTypeParameterNames = null)
     {
-        var elements = string.Join(", ", elementTypes.Select(t => Print(t, resolver, ctx)));
+        var elements = string.Join(", ", elementTypes.Select(t => Print(t, resolver, ctx, allowedTypeParameterNames)));
         return $"[{elements}]";
     }
 
     /// <summary>
     /// Print a union type for TypeScript union types.
     /// </summary>
-    public static string PrintUnion(IReadOnlyList<TypeReference> types, TypeNameResolver resolver, BuildContext ctx)
+    public static string PrintUnion(
+        IReadOnlyList<TypeReference> types,
+        TypeNameResolver resolver,
+        BuildContext ctx,
+        HashSet<string>? allowedTypeParameterNames = null)
     {
-        var parts = string.Join(" | ", types.Select(t => Print(t, resolver, ctx)));
+        var parts = string.Join(" | ", types.Select(t => Print(t, resolver, ctx, allowedTypeParameterNames)));
         return parts;
     }
 
     /// <summary>
     /// Print an intersection type for TypeScript intersection types.
     /// </summary>
-    public static string PrintIntersection(IReadOnlyList<TypeReference> types, TypeNameResolver resolver, BuildContext ctx)
+    public static string PrintIntersection(
+        IReadOnlyList<TypeReference> types,
+        TypeNameResolver resolver,
+        BuildContext ctx,
+        HashSet<string>? allowedTypeParameterNames = null)
     {
-        var parts = string.Join(" & ", types.Select(t => Print(t, resolver, ctx)));
+        var parts = string.Join(" & ", types.Select(t => Print(t, resolver, ctx, allowedTypeParameterNames)));
         return parts;
     }
 
@@ -242,9 +313,13 @@ public static class TypeRefPrinter
     /// Print a typeof expression for static class references.
     /// Used for: typeof ClassName → (typeof ClassName)
     /// </summary>
-    public static string PrintTypeof(TypeReference typeRef, TypeNameResolver resolver, BuildContext ctx)
+    public static string PrintTypeof(
+        TypeReference typeRef,
+        TypeNameResolver resolver,
+        BuildContext ctx,
+        HashSet<string>? allowedTypeParameterNames = null)
     {
-        var typeName = Print(typeRef, resolver, ctx);
+        var typeName = Print(typeRef, resolver, ctx, allowedTypeParameterNames);
         return $"typeof {typeName}";
     }
 }

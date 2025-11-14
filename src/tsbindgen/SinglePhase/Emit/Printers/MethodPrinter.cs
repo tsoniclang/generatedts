@@ -92,6 +92,19 @@ public static class MethodPrinter
     {
         var sb = new StringBuilder();
 
+        // TS2304 FIX: Compute allowed type parameters for this method signature
+        // Include both class-level and method-level generic parameters
+        // Any GenericParameterReference NOT in this set will be demoted to 'unknown'
+        var allowedTypeParams = new HashSet<string>();
+        foreach (var gp in declaringType.GenericParameters)
+        {
+            allowedTypeParams.Add(gp.Name);
+        }
+        foreach (var gp in method.GenericParameters)
+        {
+            allowedTypeParams.Add(gp.Name);
+        }
+
         // Modifiers
         // IMPORTANT: Don't emit static/abstract modifiers for interface members
         // - TypeScript interfaces don't support static members (C# 11 feature)
@@ -120,13 +133,15 @@ public static class MethodPrinter
         }
 
         // Parameters: (a: int, b: string)
+        // TS2304 FIX: Pass allowed type parameters to catch free type variables
         sb.Append('(');
-        sb.Append(string.Join(", ", method.Parameters.Select(p => PrintParameter(p, resolver, ctx))));
+        sb.Append(string.Join(", ", method.Parameters.Select(p => PrintParameter(p, resolver, ctx, allowedTypeParams))));
         sb.Append(')');
 
         // Return type: : int
+        // TS2304 FIX: Pass allowed type parameters to catch free type variables
         sb.Append(": ");
-        sb.Append(TypeRefPrinter.Print(method.ReturnType, resolver, ctx));
+        sb.Append(TypeRefPrinter.Print(method.ReturnType, resolver, ctx, allowedTypeParams));
 
         return sb.ToString();
     }
@@ -157,7 +172,11 @@ public static class MethodPrinter
         return sb.ToString();
     }
 
-    private static string PrintParameter(ParameterSymbol param, TypeNameResolver resolver, BuildContext ctx)
+    private static string PrintParameter(
+        ParameterSymbol param,
+        TypeNameResolver resolver,
+        BuildContext ctx,
+        HashSet<string>? allowedTypeParams = null)
     {
         var sb = new StringBuilder();
 
@@ -176,18 +195,18 @@ public static class MethodPrinter
         {
             // TypeScript has no ref/out
             // Map to { value: T } wrapper (metadata tracks original semantics)
-            var innerType = TypeRefPrinter.Print(param.Type, resolver, ctx);
+            var innerType = TypeRefPrinter.Print(param.Type, resolver, ctx, allowedTypeParams);
             sb.Append($"{{ value: {innerType} }}");
         }
         else if (param.IsParams)
         {
             // params T[] → ...args: T[]
             // Note: params keyword handled by caller (adds ... to parameter name)
-            sb.Append(TypeRefPrinter.Print(param.Type, resolver, ctx));
+            sb.Append(TypeRefPrinter.Print(param.Type, resolver, ctx, allowedTypeParams));
         }
         else
         {
-            sb.Append(TypeRefPrinter.Print(param.Type, resolver, ctx));
+            sb.Append(TypeRefPrinter.Print(param.Type, resolver, ctx, allowedTypeParams));
         }
 
         return sb.ToString();
@@ -204,6 +223,17 @@ public static class MethodPrinter
 
         if (!hasParams)
             return Print(method, declaringType, resolver, ctx);
+
+        // TS2304 FIX: Compute allowed type parameters
+        var allowedTypeParams = new HashSet<string>();
+        foreach (var gp in declaringType.GenericParameters)
+        {
+            allowedTypeParams.Add(gp.Name);
+        }
+        foreach (var gp in method.GenericParameters)
+        {
+            allowedTypeParams.Add(gp.Name);
+        }
 
         // Build method signature with params expansion
         var sb = new StringBuilder();
@@ -240,7 +270,7 @@ public static class MethodPrinter
         if (method.Parameters.Length > 1)
         {
             var regularParams = method.Parameters.Take(method.Parameters.Length - 1);
-            sb.Append(string.Join(", ", regularParams.Select(p => PrintParameter(p, resolver, ctx))));
+            sb.Append(string.Join(", ", regularParams.Select(p => PrintParameter(p, resolver, ctx, allowedTypeParams))));
             sb.Append(", ");
         }
 
@@ -249,13 +279,13 @@ public static class MethodPrinter
         sb.Append("...");
         sb.Append(paramsParam.Name);
         sb.Append(": ");
-        sb.Append(TypeRefPrinter.Print(paramsParam.Type, resolver, ctx));
+        sb.Append(TypeRefPrinter.Print(paramsParam.Type, resolver, ctx, allowedTypeParams));
 
         sb.Append(')');
 
         // Return type
         sb.Append(": ");
-        sb.Append(TypeRefPrinter.Print(method.ReturnType, resolver, ctx));
+        sb.Append(TypeRefPrinter.Print(method.ReturnType, resolver, ctx, allowedTypeParams));
 
         return sb.ToString();
     }
@@ -276,8 +306,19 @@ public static class MethodPrinter
     /// Print method as a property getter/setter.
     /// Used for property accessors in interfaces.
     /// </summary>
-    public static string PrintAsPropertyAccessor(MethodSymbol method, bool isGetter, TypeNameResolver resolver, BuildContext ctx)
+    public static string PrintAsPropertyAccessor(MethodSymbol method, bool isGetter, TypeSymbol declaringType, TypeNameResolver resolver, BuildContext ctx)
     {
+        // TS2304 FIX: Compute allowed type parameters
+        var allowedTypeParams = new HashSet<string>();
+        foreach (var gp in declaringType.GenericParameters)
+        {
+            allowedTypeParams.Add(gp.Name);
+        }
+        foreach (var gp in method.GenericParameters)
+        {
+            allowedTypeParams.Add(gp.Name);
+        }
+
         var sb = new StringBuilder();
 
         // Get property name from method name (get_Foo → Foo)
@@ -298,13 +339,13 @@ public static class MethodPrinter
         if (isGetter)
         {
             // Getter returns the property type
-            sb.Append(TypeRefPrinter.Print(method.ReturnType, resolver, ctx));
+            sb.Append(TypeRefPrinter.Print(method.ReturnType, resolver, ctx, allowedTypeParams));
         }
         else
         {
             // Setter takes property type as parameter
             if (method.Parameters.Length > 0)
-                sb.Append(TypeRefPrinter.Print(method.Parameters[0].Type, resolver, ctx));
+                sb.Append(TypeRefPrinter.Print(method.Parameters[0].Type, resolver, ctx, allowedTypeParams));
             else
                 sb.Append("any"); // Fallback
         }
