@@ -81,6 +81,7 @@ public sealed class TypeNameResolver
 
         if (!_graph.TypeIndex.TryGetValue(stableId, out var typeSymbol))
         {
+            _ctx.Log("TypeNameResolver", $"External type (not in graph): {stableId}");
             // Type not in graph - this is an EXTERNAL type from another assembly
             // Use the CLR name as-is (it will be in imports if needed)
 

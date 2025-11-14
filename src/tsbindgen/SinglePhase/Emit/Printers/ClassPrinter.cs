@@ -111,10 +111,15 @@ public static class ClassPrinter
         }
 
         // Interfaces: implements IFoo, IBar
-        if (type.Interfaces.Length > 0)
+        // TS2304 FIX: Filter out non-public interfaces (not in graph)
+        var publicInterfaces = type.Interfaces
+            .Where(i => IsInterfaceInGraph(i, graph))
+            .ToArray();
+
+        if (publicInterfaces.Length > 0)
         {
             sb.Append(" implements ");
-            var interfaceNames = type.Interfaces.Select(i =>
+            var interfaceNames = publicInterfaces.Select(i =>
             {
                 var name = TypeRefPrinter.Print(i, resolver, ctx);
                 // TS2693 FIX (Same-Namespace): For same-namespace types with views, use instance class name
@@ -156,10 +161,15 @@ public static class ClassPrinter
         }
 
         // Interfaces
-        if (type.Interfaces.Length > 0)
+        // TS2304 FIX: Filter out non-public interfaces (not in graph)
+        var publicInterfaces = type.Interfaces
+            .Where(i => IsInterfaceInGraph(i, graph))
+            .ToArray();
+
+        if (publicInterfaces.Length > 0)
         {
             sb.Append(" implements ");
-            sb.Append(string.Join(", ", type.Interfaces.Select(i => TypeRefPrinter.Print(i, resolver, ctx))));
+            sb.Append(string.Join(", ", publicInterfaces.Select(i => TypeRefPrinter.Print(i, resolver, ctx))));
         }
 
         sb.AppendLine(" {");
@@ -1167,6 +1177,22 @@ public static class ClassPrinter
         }
 
         return resolvedName;
+    }
+
+    /// <summary>
+    /// TS2304 FIX: Check if an interface reference is in the graph (publicly visible).
+    /// Non-public interfaces are not emitted and shouldn't appear in implements clauses.
+    /// </summary>
+    private static bool IsInterfaceInGraph(TypeReference ifaceRef, SymbolGraph graph)
+    {
+        if (ifaceRef is not NamedTypeReference named)
+            return true; // Non-named types (generic parameters, etc.) are always allowed
+
+        // Build StableId: "AssemblyName:FullName"
+        var stableId = $"{named.AssemblyName}:{named.FullName}";
+
+        // Check if type exists in graph (public types only)
+        return graph.TypeIndex.TryGetValue(stableId, out _);
     }
 
     /// <summary>

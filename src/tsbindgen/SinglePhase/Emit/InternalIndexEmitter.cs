@@ -392,13 +392,61 @@ public static class InternalIndexEmitter
             var matchedInterface = FindMatchingInterface(type, view.InterfaceReference);
             var interfaceToEmit = matchedInterface ?? view.InterfaceReference;
 
-            sb.Append(Printers.TypeRefPrinter.Print(interfaceToEmit, resolver, ctx));
+            // TS2304 FIX: View interfaces need namespace qualification
+            // Some view interfaces (like IEnumerable) are transitively implemented and not in
+            // ValueImportQualifiedNames, so we need to manually qualify cross-namespace types
+            var viewTypeName = QualifyViewInterface(interfaceToEmit, type.Namespace, resolver, ctx);
+            sb.Append(viewTypeName);
             sb.AppendLine(";");
         }
 
         sb.Append("}");
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// TS2304 FIX: Qualify view interface types with namespace alias if cross-namespace.
+    /// View interfaces that are transitively implemented (not directly in implements clause)
+    /// don't get added to ValueImportQualifiedNames, so we need manual qualification.
+    /// </summary>
+    private static string QualifyViewInterface(
+        Model.Types.TypeReference interfaceRef,
+        string currentNamespace,
+        TypeNameResolver resolver,
+        BuildContext ctx)
+    {
+        // Try to get the base type name first
+        var baseName = Printers.TypeRefPrinter.Print(interfaceRef, resolver, ctx);
+
+        // If it's a NamedTypeReference, check if it's cross-namespace
+        if (interfaceRef is Model.Types.NamedTypeReference named)
+        {
+            // Extract namespace from CLR full name
+            var fullName = named.FullName;
+            var commaIndex = fullName.IndexOf(',');
+            if (commaIndex >= 0)
+            {
+                fullName = fullName.Substring(0, commaIndex).Trim();
+            }
+
+            var interfaceNamespace = fullName.Contains('.')
+                ? fullName.Substring(0, fullName.LastIndexOf('.'))
+                : "";
+
+            // If cross-namespace and not already qualified (doesn't contain '.'), qualify it
+            if (!string.IsNullOrEmpty(interfaceNamespace) &&
+                interfaceNamespace != currentNamespace &&
+                !baseName.Contains('.'))
+            {
+                // Generate namespace alias (e.g., "System.Collections" → "System_Collections_Internal")
+                var namespaceAlias = interfaceNamespace.Replace('.', '_') + "_Internal";
+                var qualifiedName = $"{namespaceAlias}.{interfaceNamespace}.{baseName}";
+                return qualifiedName;
+            }
+        }
+
+        return baseName;
     }
 
     /// <summary>
