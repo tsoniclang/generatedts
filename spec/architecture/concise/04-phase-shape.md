@@ -136,17 +136,17 @@ Flatten interface hierarchies - remove `extends` chains. Copy all inherited memb
 **Problem Without FIX D**:
 ```csharp
 // C#:
-interface IBase<T> { T GetValue(); }
+interface IBase<T> { T GetValue; }
 interface IDerived : IBase<string> { }
 
 // WITHOUT FIX D:
 interface IDerived {
-  GetValue(): T;  // ERROR: T orphaned
+  GetValue: T;  // ERROR: T orphaned
 }
 
 // WITH FIX D:
 interface IDerived {
-  GetValue(): string;  // CORRECT
+  GetValue: string;  // CORRECT
 }
 ```
 
@@ -648,7 +648,7 @@ Close generic constraints for TypeScript. Resolve raw `System.Type` constraints 
 ### Interface Flattening
 ```typescript
 // Before: interface IEnumerable<T> extends IEnumerable { }
-// After:  interface IEnumerable_1<T> { GetEnumerator(): IEnumerator_1<T>; GetEnumerator(): IEnumerator; }
+// After:  interface IEnumerable_1<T> { GetEnumerator: IEnumerator_1<T>; GetEnumerator: IEnumerator; }
 ```
 
 ### ViewOnly Synthesis

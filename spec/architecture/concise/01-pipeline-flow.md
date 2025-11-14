@@ -4,12 +4,12 @@
 
 Pipeline executes in **strict sequential order** through 5 main phases. Each phase is **pure** (immutable data) except Phase 5 (Emit) with file I/O side effects.
 
-**Entry Point**: `SinglePhaseBuilder.Build()` in `src/tsbindgen/SinglePhase/SinglePhaseBuilder.cs`
+**Entry Point**: `SinglePhaseBuilder.Build` in `src/tsbindgen/SinglePhase/SinglePhaseBuilder.cs`
 
 ## Phase Sequence
 
 ```
-1. BuildContext.Create()
+1. BuildContext.Create
    ↓
 2. PHASE 1: LOAD (Reflection)
    ↓
@@ -62,7 +62,7 @@ Pipeline executes in **strict sequential order** through 5 main phases. Each pha
 **Mutability**: Pure (immutable)
 
 **Key Operations**:
-1. `graph.WithIndices()` → NamespaceIndex, TypeIndex
+1. `graph.WithIndices` → NamespaceIndex, TypeIndex
 2. Build GlobalInterfaceIndex (interface inheritance)
 3. Build InterfaceDeclIndex (interface member declarations)
 
@@ -111,11 +111,11 @@ Pipeline executes in **strict sequential order** through 5 main phases. Each pha
 **Mutability**: Side effect (Renamer) + pure (returns new graph)
 
 **Key Operations**:
-1. For each type: `Renamer.ReserveTypeName()`
-2. For each member: `Renamer.ReserveMemberName()` (correct scope)
+1. For each type: `Renamer.ReserveTypeName`
+2. For each member: `Renamer.ReserveMemberName` (correct scope)
 3. Apply style transforms, sanitize reserved words
 4. Audit completeness (fail fast if missing)
-5. `Application.ApplyNamesToGraph()` → set `TsEmitName`
+5. `Application.ApplyNamesToGraph` → set `TsEmitName`
 
 **Files**: `Normalize/NameReservation.cs`, `Normalize/Naming/*.cs`
 
@@ -133,8 +133,8 @@ Pipeline executes in **strict sequential order** through 5 main phases. Each pha
 
 **Key Operations**:
 1. Build `ImportGraph` (cross-namespace dependencies)
-2. `ImportPlanner.PlanImports()` (imports, exports, aliases)
-3. `EmitOrderPlanner.PlanOrder()` (stable order)
+2. `ImportPlanner.PlanImports` (imports, exports, aliases)
+3. `EmitOrderPlanner.PlanOrder` (stable order)
 
 **Files**: `Plan/ImportGraph.cs`, `Plan/ImportPlanner.cs`, `Plan/EmitOrderPlanner.cs`
 
@@ -202,7 +202,7 @@ Pipeline executes in **strict sequential order** through 5 main phases. Each pha
 
 **Files**: `Emit/SupportTypesEmitter.cs`, `Emit/InternalIndexEmitter.cs`, `Emit/FacadeEmitter.cs`, `Emit/MetadataEmitter.cs`, `Emit/BindingEmitter.cs`, `Emit/ModuleStubEmitter.cs`
 
-**Critical Rule**: Only executes if `ctx.Diagnostics.HasErrors() == false`
+**Critical Rule**: Only executes if `ctx.Diagnostics.HasErrors == false`
 
 ---
 
@@ -241,7 +241,7 @@ Pipeline executes in **strict sequential order** through 5 main phases. Each pha
 - **BEFORE** Emit phase
 
 ### Emit Phase Gating
-**ONLY** executes if `ctx.Diagnostics.HasErrors() == false`
+**ONLY** executes if `ctx.Diagnostics.HasErrors == false`
 
 ---
 

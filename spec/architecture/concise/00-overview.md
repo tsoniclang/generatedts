@@ -89,7 +89,7 @@ TypeScript names reserved in **scopes** for uniqueness:
 - **Class Instance**: `type:System.Decimal#instance`
 - **View**: `view:CoreLib:System.Decimal:CoreLib:IConvertible#instance`
 
-Enables class member `ToString()` and view member `ToString()` to coexist.
+Enables class member `ToString` and view member `ToString` to coexist.
 
 ---
 
@@ -218,7 +218,7 @@ TypeScript lacks explicit interface implementations. **ViewPlanner** generates v
 
 ```typescript
 class Decimal {
-    ToString(): string;  // ClassSurface
+    ToString: string;  // ClassSurface
 
     As_IConvertible: {   // ViewOnly members
         ToBoolean(provider: IFormatProvider | null): boolean;
@@ -235,9 +235,9 @@ Separate scopes enable name reuse:
 
 ```typescript
 class Decimal {
-    ToString(): string;  // Scope: type:Decimal#instance
+    ToString: string;  // Scope: type:Decimal#instance
     As_IConvertible: {
-        ToString(): string;  // Scope: view:Decimal:IConvertible#instance
+        ToString: string;  // Scope: view:Decimal:IConvertible#instance
     };
     static Parse(s: string): Decimal;  // Scope: type:Decimal#static
 }
@@ -312,7 +312,7 @@ Optional logging for debugging. Categories: Build, Load, Shape, ViewPlanner, Pha
 
 ---
 
-## 7. Current Validation Metrics (jumanji9)
+## 7. Current Validation Metrics
 
 ### TypeScript Validation Results
 

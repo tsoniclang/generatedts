@@ -195,7 +195,7 @@ var reserved = renamer.ListReservedNames(
 
 ### Private Methods
 
-#### ResolveNameWithConflicts()
+#### ResolveNameWithConflicts
 
 Core name resolution algorithm with collision handling.
 
@@ -301,11 +301,11 @@ Centralized scope construction for `SymbolRenamer`. **NO MANUAL SCOPE STRINGS** 
 
 ### USAGE PATTERN
 
-**Reservations**: Use BASE scopes (no `#instance`/`#static` suffix) - `ReserveMemberName()` adds it
+**Reservations**: Use BASE scopes (no `#instance`/`#static` suffix) - `ReserveMemberName` adds it
 
-**Lookups**: Use SURFACE scopes (with `#instance`/`#static` suffix) - use `ClassSurface()`/`ViewSurface()`
+**Lookups**: Use SURFACE scopes (with `#instance`/`#static` suffix) - use `ClassSurface`/`ViewSurface`
 
-**M5 CRITICAL**: View members MUST be looked up with `ViewSurface()`, not `ClassSurface()`.
+**M5 CRITICAL**: View members MUST be looked up with `ViewSurface`, not `ClassSurface`.
 
 ---
 
@@ -332,7 +332,7 @@ Creates BASE class scope for member reservations (no side suffix).
 
 **Format**: `"type:{TypeFullName}"` (ReserveMemberName will add `#instance`/`#static`)
 
-**Use for**: `ReserveMemberName()` calls
+**Use for**: `ReserveMemberName` calls
 
 **Example**:
 ```csharp
@@ -349,7 +349,7 @@ Creates FULL class scope based on member's `isStatic` flag.
 
 **Format**: `"type:{TypeFullName}#instance"` or `"#static"`
 
-**Use for**: `GetFinalMemberName()`, `TryGetDecision()` calls when `isStatic` is dynamic
+**Use for**: `GetFinalMemberName`, `TryGetDecision` calls when `isStatic` is dynamic
 
 **Preferred over manual ternary** - cleaner call-sites.
 
@@ -365,7 +365,7 @@ Creates BASE view scope for member reservations (no side suffix).
 
 **Format**: `"view:{TypeStableId}:{InterfaceStableId}"` (ReserveMemberName will add `#instance`/`#static`)
 
-**Use for**: `ReserveMemberName()` calls for ViewOnly members
+**Use for**: `ReserveMemberName` calls for ViewOnly members
 
 **Example**:
 ```csharp
@@ -382,9 +382,9 @@ Creates FULL view scope for explicit interface view member lookups.
 
 **Format**: `"view:{TypeStableId}:{InterfaceStableId}#instance"` or `"#static"`
 
-**Use for**: `GetFinalMemberName()`, `TryGetDecision()` calls for ViewOnly members
+**Use for**: `GetFinalMemberName`, `TryGetDecision` calls for ViewOnly members
 
-**M5 FIX**: This is what emitters were missing - they were using `ClassInstance()`/`ClassStatic()` for view members, causing PG_NAME_004 collisions.
+**M5 FIX**: This is what emitters were missing - they were using `ClassInstance`/`ClassStatic` for view members, causing PG_NAME_004 collisions.
 
 **Example**:
 ```csharp
@@ -481,11 +481,11 @@ Therefore, Renamer uses separate sub-scopes:
 
 **Reservation Phase** (during NameReservation):
 - Use BASE scopes: `ClassBase(type)`, `ViewBase(type, ifaceId)`
-- `ReserveMemberName()` adds `#instance` or `#static` suffix internally
+- `ReserveMemberName` adds `#instance` or `#static` suffix internally
 
 **Lookup Phase** (during Emit):
 - Use SURFACE scopes: `ClassSurface(type, isStatic)`, `ViewSurface(type, ifaceId, isStatic)`
-- `GetFinalMemberName()` requires exact scope with suffix
+- `GetFinalMemberName` requires exact scope with suffix
 
 ---
 
@@ -496,7 +496,7 @@ Therefore, Renamer uses separate sub-scopes:
 **Solution**: Changed `_decisions` dictionary to key by `(StableId, ScopeKey)` tuple instead of just `StableId`, allowing:
 1. Same member reserved in multiple scopes (class + view)
 2. Different final names per scope
-3. Correct lookup via scope-aware `GetFinalMemberName()`
+3. Correct lookup via scope-aware `GetFinalMemberName`
 
 **Impact**: Eliminated 100+ PG_NAME_004 collisions, enabled proper dual-scope naming.
 

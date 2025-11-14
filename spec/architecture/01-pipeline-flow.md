@@ -4,14 +4,14 @@
 
 The tsbindgen pipeline executes in **strict sequential order** through 5 main phases, with sub-phases executing in deterministic order within each main phase. Each phase is **pure** (returns new immutable data) except for Phase 5 (Emit) which has file I/O side effects.
 
-**Entry Point**: `SinglePhaseBuilder.Build()` in `src/tsbindgen/SinglePhase/SinglePhaseBuilder.cs`
+**Entry Point**: `SinglePhaseBuilder.Build` in `src/tsbindgen/SinglePhase/SinglePhaseBuilder.cs`
 
 ## Sequential Phase Execution
 
-The exact order of execution as implemented in `SinglePhaseBuilder.Build()`:
+The exact order of execution as implemented in `SinglePhaseBuilder.Build`:
 
 ```
-1. BuildContext.Create()
+1. BuildContext.Create
    ↓
 2. PHASE 1: LOAD
    ↓
@@ -49,8 +49,8 @@ The exact order of execution as implemented in `SinglePhaseBuilder.Build()`:
 **Key Operations**:
 1. Create `MetadataLoadContext` with reference paths
 2. Load transitive closure of assemblies (seed + dependencies)
-3. Reflect over all types and members via `ReflectionReader.ReadAssemblies()`
-4. Substitute closed generic interface members (`InterfaceMemberSubstitution.SubstituteClosedInterfaces()`)
+3. Reflect over all types and members via `ReflectionReader.ReadAssemblies`
+4. Substitute closed generic interface members (`InterfaceMemberSubstitution.SubstituteClosedInterfaces`)
 5. Build initial SymbolGraph with:
    - Namespaces
    - Types (classes, interfaces, structs, enums, delegates)
@@ -83,14 +83,14 @@ The exact order of execution as implemented in `SinglePhaseBuilder.Build()`:
 **Mutability**: Pure function (returns new immutable SymbolGraph with indices)
 
 **Key Operations**:
-1. Call `graph.WithIndices()` to populate:
+1. Call `graph.WithIndices` to populate:
    - `NamespaceIndex`: namespace name → NamespaceSymbol
    - `TypeIndex`: CLR full name → TypeSymbol (includes nested types)
 2. Build `GlobalInterfaceIndex` (interface inheritance lookups)
 3. Build `InterfaceDeclIndex` (interface member declarations)
 
 **Files Involved**:
-- `src/tsbindgen/SinglePhase/Model/SymbolGraph.cs` (`WithIndices()` method)
+- `src/tsbindgen/SinglePhase/Model/SymbolGraph.cs` (`WithIndices` method)
 - `src/tsbindgen/SinglePhase/Shape/GlobalInterfaceIndex.cs`
 - `src/tsbindgen/SinglePhase/Shape/InterfaceDeclIndex.cs`
 
@@ -124,99 +124,99 @@ The exact order of execution as implemented in `SinglePhaseBuilder.Build()`:
 
 Each pass executes sequentially and returns a new immutable SymbolGraph:
 
-#### Pass 1: GlobalInterfaceIndex.Build()
+#### Pass 1: GlobalInterfaceIndex.Build
 - **Purpose**: Build global interface inheritance lookup
 - **Input**: SymbolGraph (original hierarchy)
 - **Output**: Side effect in BuildContext (populates GlobalInterfaceIndex)
 - **Files**: `src/tsbindgen/SinglePhase/Shape/GlobalInterfaceIndex.cs`
 
-#### Pass 2: InterfaceDeclIndex.Build()
+#### Pass 2: InterfaceDeclIndex.Build
 - **Purpose**: Build interface member declaration lookup
 - **Input**: SymbolGraph (original hierarchy)
 - **Output**: Side effect in BuildContext (populates InterfaceDeclIndex)
 - **Files**: `src/tsbindgen/SinglePhase/Shape/InterfaceDeclIndex.cs`
 
-#### Pass 3: StructuralConformance.Analyze()
+#### Pass 3: StructuralConformance.Analyze
 - **Purpose**: Synthesize ViewOnly members for structural interface conformance
 - **Input**: SymbolGraph (original hierarchy)
 - **Output**: SymbolGraph (with synthesized ViewOnly members)
 - **Files**: `src/tsbindgen/SinglePhase/Shape/StructuralConformance.cs`
 - **Key**: Must run BEFORE interface flattening so `FindDeclaringInterface` can walk hierarchy
 
-#### Pass 4: InterfaceInliner.Inline()
+#### Pass 4: InterfaceInliner.Inline
 - **Purpose**: Flatten interface hierarchies (copy inherited members into each interface)
 - **Input**: SymbolGraph (original hierarchy)
 - **Output**: SymbolGraph (flattened interfaces)
 - **Files**: `src/tsbindgen/SinglePhase/Shape/InterfaceInliner.cs`
 - **Key**: Must run AFTER indices and conformance
 
-#### Pass 5: ExplicitImplSynthesizer.Synthesize()
+#### Pass 5: ExplicitImplSynthesizer.Synthesize
 - **Purpose**: Synthesize ViewOnly members for explicit interface implementations
 - **Input**: SymbolGraph (flattened interfaces)
 - **Output**: SymbolGraph (with explicit impl ViewOnly members)
 - **Files**: `src/tsbindgen/SinglePhase/Shape/ExplicitImplSynthesizer.cs`
 
-#### Pass 6: DiamondResolver.Resolve()
+#### Pass 6: DiamondResolver.Resolve
 - **Purpose**: Resolve diamond inheritance (same member from multiple interfaces)
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (diamond conflicts resolved)
 - **Files**: `src/tsbindgen/SinglePhase/Shape/DiamondResolver.cs`
 
-#### Pass 7: BaseOverloadAdder.AddOverloads()
+#### Pass 7: BaseOverloadAdder.AddOverloads
 - **Purpose**: Add base class method overloads for interface compatibility
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (with base overloads)
 - **Files**: `src/tsbindgen/SinglePhase/Shape/BaseOverloadAdder.cs`
 
-#### Pass 8: StaticSideAnalyzer.Analyze()
+#### Pass 8: StaticSideAnalyzer.Analyze
 - **Purpose**: Analyze static members and constructors
 - **Input**: SymbolGraph
 - **Output**: Side effect only (updates BuildContext)
 - **Files**: `src/tsbindgen/SinglePhase/Shape/StaticSideAnalyzer.cs`
 
-#### Pass 9: IndexerPlanner.Plan()
+#### Pass 9: IndexerPlanner.Plan
 - **Purpose**: Mark indexers for omission (TypeScript limitation)
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (indexers marked for omission)
 - **Files**: `src/tsbindgen/SinglePhase/Shape/IndexerPlanner.cs`
 
-#### Pass 10: HiddenMemberPlanner.Plan()
+#### Pass 10: HiddenMemberPlanner.Plan
 - **Purpose**: Handle C# 'new' keyword hiding (rename hidden members)
 - **Input**: SymbolGraph
 - **Output**: Side effect only (creates rename decisions in Renamer)
 - **Files**: `src/tsbindgen/SinglePhase/Shape/HiddenMemberPlanner.cs`
 
-#### Pass 11: FinalIndexersPass.Run()
+#### Pass 11: FinalIndexersPass.Run
 - **Purpose**: Remove any indexer properties that leaked through
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (indexer properties removed)
 - **Files**: `src/tsbindgen/SinglePhase/Shape/FinalIndexersPass.cs`
 
-#### Pass 12: ClassSurfaceDeduplicator.Deduplicate()
+#### Pass 12: ClassSurfaceDeduplicator.Deduplicate
 - **Purpose**: Resolve name collisions on class surface (pick winner, demote rest to ViewOnly)
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (duplicates demoted)
 - **Files**: `src/tsbindgen/SinglePhase/Shape/ClassSurfaceDeduplicator.cs`
 
-#### Pass 13: ConstraintCloser.Close()
+#### Pass 13: ConstraintCloser.Close
 - **Purpose**: Complete generic constraint closures
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (constraints closed)
 - **Files**: `src/tsbindgen/SinglePhase/Shape/ConstraintCloser.cs`
 
-#### Pass 14: OverloadReturnConflictResolver.Resolve()
+#### Pass 14: OverloadReturnConflictResolver.Resolve
 - **Purpose**: Resolve method overloads with conflicting return types
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (return conflicts resolved)
 - **Files**: `src/tsbindgen/SinglePhase/Shape/OverloadReturnConflictResolver.cs`
 
-#### Pass 15: ViewPlanner.Plan()
+#### Pass 15: ViewPlanner.Plan
 - **Purpose**: Plan explicit interface views (one interface per view)
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (views planned)
 - **Files**: `src/tsbindgen/SinglePhase/Shape/ViewPlanner.cs`
 
-#### Pass 16: MemberDeduplicator.Deduplicate()
+#### Pass 16: MemberDeduplicator.Deduplicate
 - **Purpose**: Remove any duplicate members introduced by Shape passes
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (final deduplication)
@@ -244,14 +244,14 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 - Pure: Returns new SymbolGraph with `TsEmitName` set
 
 **Key Operations**:
-1. For each type: Apply syntax transforms and reserve name via `Renamer.ReserveTypeName()`
+1. For each type: Apply syntax transforms and reserve name via `Renamer.ReserveTypeName`
 2. For each member:
    - Skip members already renamed by earlier passes (HiddenMemberPlanner, IndexerPlanner)
    - Apply syntax transforms (`` ` `` → `_`, `+` → `_`, etc.)
    - Apply reserved word sanitization (add `_` suffix if needed)
-   - Reserve name via `Renamer.ReserveMemberName()` with correct scope
+   - Reserve name via `Renamer.ReserveMemberName` with correct scope
 3. Audit completeness (fail fast if any emitted member lacks rename decision)
-4. Apply names to SymbolGraph (`Application.ApplyNamesToGraph()`)
+4. Apply names to SymbolGraph (`Application.ApplyNamesToGraph`)
 
 **Files Involved**:
 - `src/tsbindgen/SinglePhase/Normalize/NameReservation.cs`
@@ -288,8 +288,8 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 
 **Key Operations**:
 1. Build `ImportGraph` (cross-namespace dependencies)
-2. Plan imports and exports via `ImportPlanner.PlanImports()`
-3. Determine stable emission order via `EmitOrderPlanner.PlanOrder()`
+2. Plan imports and exports via `ImportPlanner.PlanImports`
+3. Determine stable emission order via `EmitOrderPlanner.PlanOrder`
 
 **Files Involved**:
 - `src/tsbindgen/SinglePhase/Plan/ImportGraph.cs`
@@ -404,7 +404,7 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 - `src/tsbindgen/SinglePhase/Emit/ModuleStubEmitter.cs`
 
 **Critical Rule**:
-- Only executes if `ctx.Diagnostics.HasErrors() == false`
+- Only executes if `ctx.Diagnostics.HasErrors == false`
 - If errors present, Build returns immediately with `Success = false`
 
 ---
@@ -433,11 +433,11 @@ Assembly Paths (string[])
     ├─────────────────────────────────────────────┐
     │ PHASE 1: LOAD                               │
     │                                             │
-    │ AssemblyLoader.LoadClosure()                │
+    │ AssemblyLoader.LoadClosure                │
     │   → MetadataLoadContext                     │
-    │ ReflectionReader.ReadAssemblies()           │
+    │ ReflectionReader.ReadAssemblies           │
     │   → Read all types/members                  │
-    │ InterfaceMemberSubstitution.Substitute()    │
+    │ InterfaceMemberSubstitution.Substitute    │
     │   → Substitute closed generics              │
     │                                             │
     │ Output: SymbolGraph (pure CLR)              │
@@ -448,11 +448,11 @@ Assembly Paths (string[])
     ┌─────────────────┴───────────────────────────┐
     │ PHASE 2: NORMALIZE                          │
     │                                             │
-    │ SymbolGraph.WithIndices()                   │
+    │ SymbolGraph.WithIndices                   │
     │   → Build NamespaceIndex, TypeIndex         │
-    │ GlobalInterfaceIndex.Build()                │
+    │ GlobalInterfaceIndex.Build                │
     │   → Build interface inheritance lookup      │
-    │ InterfaceDeclIndex.Build()                  │
+    │ InterfaceDeclIndex.Build                  │
     │   → Build interface member declaration map  │
     │                                             │
     │ Output: SymbolGraph (indexed)               │
@@ -463,35 +463,35 @@ Assembly Paths (string[])
     ┌─────────────────┴───────────────────────────┐
     │ PHASE 3: SHAPE (14 passes)                  │
     │                                             │
-    │ 1.  GlobalInterfaceIndex.Build()            │
-    │ 2.  InterfaceDeclIndex.Build()              │
-    │ 3.  StructuralConformance.Analyze()         │
+    │ 1.  GlobalInterfaceIndex.Build            │
+    │ 2.  InterfaceDeclIndex.Build              │
+    │ 3.  StructuralConformance.Analyze         │
     │       → Synthesize ViewOnly members         │
-    │ 4.  InterfaceInliner.Inline()               │
+    │ 4.  InterfaceInliner.Inline               │
     │       → Flatten interface hierarchies       │
-    │ 5.  ExplicitImplSynthesizer.Synthesize()    │
+    │ 5.  ExplicitImplSynthesizer.Synthesize    │
     │       → Explicit impl ViewOnly members      │
-    │ 6.  DiamondResolver.Resolve()               │
+    │ 6.  DiamondResolver.Resolve               │
     │       → Resolve diamond inheritance         │
-    │ 7.  BaseOverloadAdder.AddOverloads()        │
+    │ 7.  BaseOverloadAdder.AddOverloads        │
     │       → Add base overloads                  │
-    │ 8.  StaticSideAnalyzer.Analyze()            │
+    │ 8.  StaticSideAnalyzer.Analyze            │
     │       → Analyze static members              │
-    │ 9.  IndexerPlanner.Plan()                   │
+    │ 9.  IndexerPlanner.Plan                   │
     │       → Mark indexers for omission          │
-    │ 10. HiddenMemberPlanner.Plan()              │
+    │ 10. HiddenMemberPlanner.Plan              │
     │       → Rename hidden members (new keyword) │
-    │ 11. FinalIndexersPass.Run()                 │
+    │ 11. FinalIndexersPass.Run                 │
     │       → Remove leaked indexer properties    │
-    │ 12. ClassSurfaceDeduplicator.Deduplicate()  │
+    │ 12. ClassSurfaceDeduplicator.Deduplicate  │
     │       → Demote duplicate members            │
-    │ 13. ConstraintCloser.Close()                │
+    │ 13. ConstraintCloser.Close                │
     │       → Complete constraint closures        │
-    │ 14. OverloadReturnConflictResolver.Resolve()│
+    │ 14. OverloadReturnConflictResolver.Resolve│
     │       → Resolve return conflicts            │
-    │ 15. ViewPlanner.Plan()                      │
+    │ 15. ViewPlanner.Plan                      │
     │       → Plan explicit interface views       │
-    │ 16. MemberDeduplicator.Deduplicate()        │
+    │ 16. MemberDeduplicator.Deduplicate        │
     │       → Final deduplication                 │
     │                                             │
     │ Output: SymbolGraph (TS-ready, unnamed)     │
@@ -502,12 +502,12 @@ Assembly Paths (string[])
     ┌─────────────────┴───────────────────────────┐
     │ PHASE 3.5: NAME RESERVATION                 │
     │                                             │
-    │ NameReservation.ReserveAllNames()           │
+    │ NameReservation.ReserveAllNames           │
     │   → For each type:                          │
-    │       Renamer.ReserveTypeName()             │
+    │       Renamer.ReserveTypeName             │
     │   → For each member:                        │
-    │       Renamer.ReserveMemberName()           │
-    │   → Application.ApplyNamesToGraph()         │
+    │       Renamer.ReserveMemberName           │
+    │   → Application.ApplyNamesToGraph         │
     │       Set TsEmitName on all symbols         │
     │                                             │
     │ Output: SymbolGraph (fully named)           │
@@ -518,11 +518,11 @@ Assembly Paths (string[])
     ┌─────────────────┴───────────────────────────┐
     │ PHASE 4: PLAN                               │
     │                                             │
-    │ ImportGraph.Build()                         │
+    │ ImportGraph.Build                         │
     │   → Build cross-namespace dependencies      │
-    │ ImportPlanner.PlanImports()                 │
+    │ ImportPlanner.PlanImports                 │
     │   → Plan imports, exports, aliases          │
-    │ EmitOrderPlanner.PlanOrder()                │
+    │ EmitOrderPlanner.PlanOrder                │
     │   → Determine stable emission order         │
     │                                             │
     │ Output: EmissionPlan                        │
@@ -534,7 +534,7 @@ Assembly Paths (string[])
     ┌─────────────────┴───────────────────────────┐
     │ PHASE 4.5: OVERLOAD UNIFICATION             │
     │                                             │
-    │ OverloadUnifier.UnifyOverloads()            │
+    │ OverloadUnifier.UnifyOverloads            │
     │   → Merge method overloads                  │
     │                                             │
     │ Output: SymbolGraph (overloads unified)     │
@@ -545,7 +545,7 @@ Assembly Paths (string[])
     ┌─────────────────┴───────────────────────────┐
     │ PHASE 4.6: CONSTRAINT AUDIT                 │
     │                                             │
-    │ InterfaceConstraintAuditor.Audit()          │
+    │ InterfaceConstraintAuditor.Audit          │
     │   → Audit constructor constraints           │
     │                                             │
     │ Output: ConstraintFindings                  │
@@ -556,14 +556,14 @@ Assembly Paths (string[])
     ┌─────────────────┴───────────────────────────┐
     │ PHASE 4.7: PHASEGATE VALIDATION             │
     │                                             │
-    │ PhaseGate.Validate()                        │
+    │ PhaseGate.Validate                        │
     │   → 26 validation checks                    │
     │   → Record diagnostics                      │
     │                                             │
     │ Side effect: ctx.Diagnostics populated      │
     └─────────────────┬───────────────────────────┘
                       │
-                      ↓ Check: ctx.Diagnostics.HasErrors()?
+                      ↓ Check: ctx.Diagnostics.HasErrors?
                       │
             ┌─────────┴─────────┐
             │ Has Errors?       │
@@ -573,17 +573,17 @@ Assembly Paths (string[])
     ┌───────────────┐   ┌─────────────────┴───────────────────────────┐
     │ Return        │   │ PHASE 5: EMIT                               │
     │ Success=false │   │                                             │
-    └───────────────┘   │ SupportTypesEmit.Emit()                     │
+    └───────────────┘   │ SupportTypesEmit.Emit                     │
                         │   → _support/types.d.ts                     │
-                        │ InternalIndexEmitter.Emit()                 │
+                        │ InternalIndexEmitter.Emit                 │
                         │   → <ns>/internal/index.d.ts                │
-                        │ FacadeEmitter.Emit()                        │
+                        │ FacadeEmitter.Emit                        │
                         │   → <ns>/index.d.ts                         │
-                        │ MetadataEmitter.Emit()                      │
+                        │ MetadataEmitter.Emit                      │
                         │   → <ns>/metadata.json                      │
-                        │ BindingEmitter.Emit()                       │
+                        │ BindingEmitter.Emit                       │
                         │   → <ns>/bindings.json                      │
-                        │ ModuleStubEmitter.Emit()                    │
+                        │ ModuleStubEmitter.Emit                    │
                         │   → <ns>/index.js                           │
                         │                                             │
                         │ Side effects: File I/O                      │
@@ -628,7 +628,7 @@ These passes MUST execute in order due to dependencies:
 ### 4. Emit Phase Gating
 
 **Critical**: Emit phase (Phase 5) ONLY executes if:
-- `ctx.Diagnostics.HasErrors() == false`
+- `ctx.Diagnostics.HasErrors == false`
 - If errors present, Build returns `Success = false` immediately
 
 ---
@@ -661,7 +661,7 @@ public static SymbolGraph Inline(BuildContext ctx, SymbolGraph graph)
     // Build new namespaces with flattened interfaces
     var newNamespaces = graph.Namespaces
         .Select(ns => ns with { Types = FlattenTypes(ns.Types) })
-        .ToImmutableArray();
+        .ToImmutableArray;
 
     // Return new graph (original unchanged)
     return graph with { Namespaces = newNamespaces };

@@ -20,7 +20,7 @@
 ### Purpose
 Creates `MetadataLoadContext` for loading assemblies in isolation. Handles reference pack resolution for .NET BCL. Implements transitive closure loading via BFS. Validates assembly identity consistency.
 
-### Method: CreateLoadContext()
+### Method: CreateLoadContext
 ```csharp
 public MetadataLoadContext CreateLoadContext(IReadOnlyList<string> assemblyPaths)
 ```
@@ -28,7 +28,7 @@ Creates MetadataLoadContext for given assemblies. Uses `PathAssemblyResolver` to
 1. Directory containing target assemblies
 2. Reference assemblies directory (same as target for version consistency)
 
-### Method: LoadClosure()
+### Method: LoadClosure
 ```csharp
 public LoadClosureResult LoadClosure(
     IReadOnlyList<string> seedPaths,
@@ -76,7 +76,7 @@ public LoadClosureResult LoadClosure(
 ### Purpose
 Reflects over loaded assemblies to build `SymbolGraph`. Extracts types, members, type references. Handles MetadataLoadContext specifics (external types, unresolved references).
 
-### Method: ReadAssemblies()
+### Method: ReadAssemblies
 ```csharp
 public static SymbolGraph ReadAssemblies(
     BuildContext ctx,
@@ -88,17 +88,17 @@ public static SymbolGraph ReadAssemblies(
 
 **Algorithm**:
 1. For each assembly:
-   - Get all types via `assembly.GetTypes()` (includes nested)
+   - Get all types via `assembly.GetTypes` (includes nested)
    - Filter to public types only
    - Group types by namespace
    - For each namespace:
      - Build NamespaceSymbol
-     - For each type: Build TypeSymbol (via `BuildTypeSymbol()`)
-     - For each member: Build MemberSymbol (via `BuildMemberSymbol()`)
+     - For each type: Build TypeSymbol (via `BuildTypeSymbol`)
+     - For each member: Build MemberSymbol (via `BuildMemberSymbol`)
 2. Build SymbolGraph with all namespaces
 3. Return SymbolGraph
 
-### Method: BuildTypeSymbol()
+### Method: BuildTypeSymbol
 ```csharp
 private static TypeSymbol BuildTypeSymbol(Type type, BuildContext ctx)
 ```
@@ -113,17 +113,17 @@ Extracts type metadata:
 
 **Key**: All type references built via `TypeReferenceFactory.Create(type, ctx)`
 
-### Method: BuildMemberSymbol()
+### Method: BuildMemberSymbol
 ```csharp
 private static MemberSymbol BuildMemberSymbol(MemberInfo member, BuildContext ctx)
 ```
 
 Dispatches to specialized builders based on member type:
-- **MethodInfo** → `BuildMethodSymbol()`
-- **PropertyInfo** → `BuildPropertySymbol()`
-- **FieldInfo** → `BuildFieldSymbol()`
-- **EventInfo** → `BuildEventSymbol()`
-- **ConstructorInfo** → `BuildConstructorSymbol()`
+- **MethodInfo** → `BuildMethodSymbol`
+- **PropertyInfo** → `BuildPropertySymbol`
+- **FieldInfo** → `BuildFieldSymbol`
+- **EventInfo** → `BuildEventSymbol`
+- **ConstructorInfo** → `BuildConstructorSymbol`
 
 Each builder extracts:
 - Name, CLR name, accessibility, modifiers
@@ -138,7 +138,7 @@ Each builder extracts:
 ### Purpose
 Builds `TypeReference` objects from `System.Type` instances. Handles all type forms (named, generic, array, pointer, byref). Resolves external types (not in current assembly set).
 
-### Method: Create()
+### Method: Create
 ```csharp
 public static TypeReference Create(Type type, BuildContext ctx)
 ```
@@ -183,9 +183,9 @@ Builds GenericTypeReference for constructed generic types (List<int>, Dictionary
 - `TypeArguments`: Array of TypeReferences (int, string, etc.)
 
 **Algorithm**:
-1. Get generic type definition via `type.GetGenericTypeDefinition()`
+1. Get generic type definition via `type.GetGenericTypeDefinition`
 2. Create NamedTypeReference for definition
-3. Get type arguments via `type.GetGenericArguments()`
+3. Get type arguments via `type.GetGenericArguments`
 4. Recursively create TypeReferences for each argument
 5. Return GenericTypeReference
 
@@ -201,7 +201,7 @@ Builds GenericTypeReference for constructed generic types (List<int>, Dictionary
 ### Purpose
 Resolves declaring assembly for types across assembly boundaries. Handles cross-assembly dependencies and external type references.
 
-### Method: ResolveDeclaringAssembly()
+### Method: ResolveDeclaringAssembly
 ```csharp
 public static string ResolveDeclaringAssembly(
     Type type,
@@ -228,7 +228,7 @@ public static string ResolveDeclaringAssembly(
 ## File: InterfaceMemberSubstitution.cs
 
 ### Purpose
-Substitutes type parameters in closed generic interface members. Handles cases like `IEnumerable<int>.GetEnumerator()` → `IEnumerator<int>` (not `IEnumerator<T>`).
+Substitutes type parameters in closed generic interface members. Handles cases like `IEnumerable<int>.GetEnumerator` → `IEnumerator<int>` (not `IEnumerator<T>`).
 
 ### Why Needed
 When reflecting over closed generic interfaces, member signatures contain open type parameters:
@@ -236,16 +236,16 @@ When reflecting over closed generic interfaces, member signatures contain open t
 // Given: class List<int> : IEnumerable<int>
 // Without substitution:
 interface IEnumerable<T> {
-    GetEnumerator(): IEnumerator<T>  // Wrong - returns IEnumerator<T> not IEnumerator<int>
+    GetEnumerator: IEnumerator<T>  // Wrong - returns IEnumerator<T> not IEnumerator<int>
 }
 
 // With substitution:
 interface IEnumerable<int> {
-    GetEnumerator(): IEnumerator<int>  // Correct - substituted T → int
+    GetEnumerator: IEnumerator<int>  // Correct - substituted T → int
 }
 ```
 
-### Method: SubstituteClosedInterfaces()
+### Method: SubstituteClosedInterfaces
 ```csharp
 public static SymbolGraph SubstituteClosedInterfaces(
     BuildContext ctx,
@@ -275,9 +275,9 @@ public static SymbolGraph SubstituteClosedInterfaces(
 - Assembly DLL paths (string[])
 
 ### Process
-1. **AssemblyLoader.LoadClosure()** → Load all assemblies
-2. **ReflectionReader.ReadAssemblies()** → Extract types/members
-3. **InterfaceMemberSubstitution.SubstituteClosedInterfaces()** → Fix generic interfaces
+1. **AssemblyLoader.LoadClosure** → Load all assemblies
+2. **ReflectionReader.ReadAssemblies** → Extract types/members
+3. **InterfaceMemberSubstitution.SubstituteClosedInterfaces** → Fix generic interfaces
 
 ### Output
 - **SymbolGraph** containing:
@@ -343,11 +343,11 @@ Types not in current assembly set. Marked with `IsExternal = true`. Validated la
 
 | File | Purpose | Key Methods |
 |------|---------|-------------|
-| **AssemblyLoader.cs** | Assembly loading, closure resolution | LoadClosure(), ResolveClosure(), ValidateAssemblyIdentity() |
-| **ReflectionReader.cs** | Reflection over types/members | ReadAssemblies(), BuildTypeSymbol(), BuildMemberSymbol() |
-| **TypeReferenceFactory.cs** | Build TypeReference objects | Create(), CreateNamed(), CreateGeneric() |
-| **DeclaringAssemblyResolver.cs** | Cross-assembly type resolution | ResolveDeclaringAssembly() |
-| **InterfaceMemberSubstitution.cs** | Substitute generic interface members | SubstituteClosedInterfaces() |
+| **AssemblyLoader.cs** | Assembly loading, closure resolution | LoadClosure, ResolveClosure, ValidateAssemblyIdentity |
+| **ReflectionReader.cs** | Reflection over types/members | ReadAssemblies, BuildTypeSymbol, BuildMemberSymbol |
+| **TypeReferenceFactory.cs** | Build TypeReference objects | Create, CreateNamed, CreateGeneric |
+| **DeclaringAssemblyResolver.cs** | Cross-assembly type resolution | ResolveDeclaringAssembly |
+| **InterfaceMemberSubstitution.cs** | Substitute generic interface members | SubstituteClosedInterfaces |
 
 ---
 

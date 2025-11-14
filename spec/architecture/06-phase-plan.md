@@ -27,7 +27,7 @@ Plans import statements and aliasing for TypeScript declarations. Generates impo
 
 Static class with core import planning logic.
 
-#### Method: PlanImports()
+#### Method: PlanImports
 
 ```csharp
 public static ImportPlan PlanImports(
@@ -44,17 +44,17 @@ public static ImportPlan PlanImports(
    - `ImportAliases` - maps namespace name to alias dictionary
 
 2. For each namespace in the graph:
-   - Calls `PlanNamespaceImports()` to analyze dependencies
-   - Calls `PlanNamespaceExports()` to catalog public types
+   - Calls `PlanNamespaceImports` to analyze dependencies
+   - Calls `PlanNamespaceExports` to catalog public types
 
 3. Returns complete `ImportPlan` with all import/export data
 
 **Key data flow:**
 - Uses `ImportGraphData.NamespaceDependencies` to find which namespaces each namespace depends on
 - Uses `ImportGraphData.CrossNamespaceReferences` to get specific types referenced
-- Looks up TypeScript emit names via `ctx.Renamer.GetFinalTypeName()`
+- Looks up TypeScript emit names via `ctx.Renamer.GetFinalTypeName`
 
-#### Method: PlanNamespaceImports()
+#### Method: PlanNamespaceImports
 
 ```csharp
 private static void PlanNamespaceImports(
@@ -81,7 +81,7 @@ private static void PlanNamespaceImports(
 
 4. **Check for name collisions:**
    - For each referenced type, get TypeScript emit name from Renamer
-   - Call `DetermineAlias()` to check if alias is needed
+   - Call `DetermineAlias` to check if alias is needed
    - Create `TypeImport(TypeName, Alias)` record
 
 5. **Build import statement:**
@@ -98,7 +98,7 @@ Aliases are needed when:
 Alias format: `{TypeName}_{TargetNamespaceShortName}`
 - Example: `List_Generic` when importing `List` from `System.Collections.Generic`
 
-#### Method: PlanNamespaceExports()
+#### Method: PlanNamespaceExports
 
 ```csharp
 private static void PlanNamespaceExports(
@@ -112,7 +112,7 @@ private static void PlanNamespaceExports(
 1. Iterate through all types in namespace
 2. Filter to public types only (`Accessibility.Public`)
 3. For each public type:
-   - Get final TypeScript name via `ctx.Renamer.GetFinalTypeName()`
+   - Get final TypeScript name via `ctx.Renamer.GetFinalTypeName`
    - Determine export kind based on type kind (class/interface/enum/type)
    - Create `ExportStatement(ExportName, ExportKind)`
 4. Add all exports to `plan.NamespaceExports[ns.Name]`
@@ -124,7 +124,7 @@ private static void PlanNamespaceExports(
 - `Enum` → `ExportKind.Enum`
 - `Delegate` → `ExportKind.Type` (delegates emit as type aliases)
 
-#### Method: GetTypeScriptNameForExternalType()
+#### Method: GetTypeScriptNameForExternalType
 
 ```csharp
 private static string GetTypeScriptNameForExternalType(string clrFullName)
@@ -185,12 +185,12 @@ GetTypeScriptNameForExternalType("System.Func`3")
 → "Func_3"
 ```
 
-**Used in:** `PlanNamespaceImports()` at line 101 when type is not found in local graph
+**Used in:** `PlanNamespaceImports` at line 101 when type is not found in local graph
 
 **Integration:**
 
 ```csharp
-// In PlanNamespaceImports():
+// In PlanNamespaceImports:
 if (graph.TryGetType(clrName, out var typeSymbol) && typeSymbol != null)
 {
     // Type is in local graph - use Renamer's final name
@@ -265,7 +265,7 @@ Builds cross-namespace dependency graph for import planning. Analyzes type refer
 
 Static class with graph building logic.
 
-#### Method: Build()
+#### Method: Build
 
 ```csharp
 public static ImportGraphData Build(BuildContext ctx, SymbolGraph graph)
@@ -282,13 +282,13 @@ public static ImportGraphData Build(BuildContext ctx, SymbolGraph graph)
    - `UnresolvedToAssembly` - unresolved type → assembly mapping
 
 2. **Build namespace type index first**:
-   - Call `BuildNamespaceTypeIndex()` to catalog all public types
+   - Call `BuildNamespaceTypeIndex` to catalog all public types
    - Creates TWO lookups:
      - Set-based: `NamespaceTypeIndex[ns] = {type1, type2, ...}` (legacy)
      - Map-based: `ClrFullNameToNamespace["Type`1"] = "Namespace"` (fast lookup)
 
 3. **Analyze dependencies**:
-   - For each namespace, call `AnalyzeNamespaceDependencies()`
+   - For each namespace, call `AnalyzeNamespaceDependencies`
    - Recursively scans all type references in signatures
    - Tracks unresolved types in `UnresolvedClrKeys`
 
@@ -299,7 +299,7 @@ public static ImportGraphData Build(BuildContext ctx, SymbolGraph graph)
 - Unresolved type tracking for cross-assembly resolution
 - Constructor parameter analysis for complete import coverage
 
-#### Method: BuildNamespaceTypeIndex()
+#### Method: BuildNamespaceTypeIndex
 
 ```csharp
 private static void BuildNamespaceTypeIndex(
@@ -324,7 +324,7 @@ private static void BuildNamespaceTypeIndex(
 
 **Dual indexing:**
 - **Set-based** (`NamespaceTypeIndex`): Legacy, used for set operations
-- **Map-based** (`ClrFullNameToNamespace`): Enables O(1) lookups in `FindNamespaceForType()`
+- **Map-based** (`ClrFullNameToNamespace`): Enables O(1) lookups in `FindNamespaceForType`
   - Dictionary lookup provides O(1) access vs O(n) iteration
   - Critical for BCL generation with 4,000+ types
 
@@ -334,7 +334,7 @@ private static void BuildNamespaceTypeIndex(
 - **Nested types**: Use `+` separator (e.g., `"ImmutableArray\`1+Builder"`)
 - This matches `TypeSymbol.ClrFullName` and `NamedTypeReference.FullName` format
 
-#### Method: AnalyzeNamespaceDependencies()
+#### Method: AnalyzeNamespaceDependencies
 
 ```csharp
 private static void AnalyzeNamespaceDependencies(
@@ -348,7 +348,7 @@ private static void AnalyzeNamespaceDependencies(
 
 For each **public type** in namespace:
 
-1. **TS2304 FIX (jumanji9):** Call `AnalyzeTypeAndNestedRecursively()` to analyze the type AND all its public nested types
+1. **TS2304 FIX:** Call `AnalyzeTypeAndNestedRecursively` to analyze the type AND all its public nested types
    - Previously only analyzed top-level types
    - Now recursively processes nested types (e.g., `ImmutableArray<T>.Builder`)
    - Ensures nested type members are scanned for cross-namespace dependencies
@@ -358,7 +358,7 @@ For each **public type** in namespace:
 - `graphData.CrossNamespaceReferences` has detailed reference records
 - Added to `graphData.NamespaceDependencies[ns.Name]`
 
-#### Method: AnalyzeTypeAndNestedRecursively() - TS2304 FIX (jumanji9 - NEW)
+#### Method: AnalyzeTypeAndNestedRecursively - TS2304 FIX (- NEW)
 
 ```csharp
 private static void AnalyzeTypeAndNestedRecursively(
@@ -372,7 +372,7 @@ private static void AnalyzeTypeAndNestedRecursively(
 
 **Purpose:** Recursively analyze a type and all its nested types. Ensures nested type members are scanned for cross-namespace dependencies.
 
-**Why needed (jumanji9):**
+**Why needed:**
 
 **Problem:**
 ```csharp
@@ -391,7 +391,7 @@ namespace System.Collections.Immutable {
 // No import generated for System.Collections.Generic
 // TS2304: Cannot find name 'IEnumerable_1'
 
-// WITH recursive analysis (jumanji9):
+// WITH recursive analysis:
 // Builder analyzed recursively
 // IEnumerable<T> reference found
 // Import generated correctly
@@ -407,20 +407,20 @@ namespace System.Collections.Immutable {
    - Reference kind: `ReferenceKind.BaseClass`
 
 2. **Interface analysis:**
-   - For each implemented interface, call `CollectTypeReferences()`
+   - For each implemented interface, call `CollectTypeReferences`
    - Same recursive collection of nested type references
    - Reference kind: `ReferenceKind.Interface`
 
 3. **Generic constraint analysis:**
    - For each type generic parameter with constraints
-   - Call `CollectTypeReferences()` on each constraint
+   - Call `CollectTypeReferences` on each constraint
    - Reference kind: `ReferenceKind.GenericConstraint`
 
 4. **Member analysis:**
-   - Call `AnalyzeMemberDependencies()` to scan all members
+   - Call `AnalyzeMemberDependencies` to scan all members
    - Analyzes methods, properties, fields, events
 
-5. **Recursive nested type analysis (jumanji9 - NEW):**
+5. **Recursive nested type analysis (- NEW):**
    ```csharp
    foreach (var nestedType in type.NestedTypes.Where(t => t.Accessibility == Accessibility.Public))
    {
@@ -431,7 +431,7 @@ namespace System.Collections.Immutable {
    - Recursive call ensures deeply nested types are analyzed
    - Example: `Outer<T>.Middle.Inner` will be fully analyzed
 
-**Impact (jumanji9):**
+**Impact:**
 - Eliminated missing imports for nested type members
 - Fixed TS2304 errors from nested types referencing cross-namespace types
 - Enabled complete dependency tracking for complex type hierarchies
@@ -449,7 +449,7 @@ class Outer<T> {
 }
 ```
 
-#### Method: AnalyzeMemberDependencies()
+#### Method: AnalyzeMemberDependencies
 
 ```csharp
 private static void AnalyzeMemberDependencies(
@@ -491,7 +491,7 @@ private static void AnalyzeMemberDependencies(
    - Event handler type: `CollectTypeReferences(event.EventHandlerType)`
      - Reference kind: `ReferenceKind.EventType`
 
-#### Method: CollectTypeReferences()
+#### Method: CollectTypeReferences
 
 ```csharp
 private static void CollectTypeReferences(
@@ -515,7 +515,7 @@ This is the **critical deep scanning function** that finds ALL foreign types.
      if (clrKey.Contains('[') || clrKey.Contains(','))
          ERROR: "INVARIANT VIOLATION: assembly-qualified key detected"
      ```
-     - Detects if `GetOpenGenericClrKey()` failed to strip assembly info
+     - Detects if `GetOpenGenericClrKey` failed to strip assembly info
      - Example bad key: `"IEnumerable\`1[[System.String, mscorlib, ...]]"`
      - Example good key: `"System.Collections.Generic.IEnumerable\`1"`
    - Add to collected set: `collected.Add((clrKey, ns))`
@@ -561,7 +561,7 @@ This is the **critical deep scanning function** that finds ALL foreign types.
 - Arrays can contain generic types: `List<T>[]`
 - Constraints can reference complex types: `where T : IEnumerable<string>`
 
-#### Method: FindNamespaceForType()
+#### Method: FindNamespaceForType
 
 ```csharp
 private static string? FindNamespaceForType(
@@ -592,7 +592,7 @@ private static string? FindNamespaceForType(
 - Could be type-forwarded or from different assembly version
 - ImportPlanner will handle missing types appropriately
 
-#### Method: GetClrLookupKey()
+#### Method: GetClrLookupKey
 
 ```csharp
 private static string? GetClrLookupKey(TypeReference typeRef)
@@ -625,7 +625,7 @@ _ => null                                                            // Unknown 
 - `T` (GenericParameterReference) → `null` (no import needed)
 - `int*` (PointerTypeReference) → `"System.Int32"` (recurses to pointee)
 
-#### Method: GetOpenGenericClrKey() - TS2304 FIX (jumanji9)
+#### Method: GetOpenGenericClrKey - TS2304 FIX
 
 ```csharp
 private static string GetOpenGenericClrKey(NamedTypeReference named)
@@ -635,7 +635,7 @@ private static string GetOpenGenericClrKey(NamedTypeReference named)
 
 **Algorithm:**
 
-0. **TS2304 FIX (jumanji9 - NEW): Nested type special handling:**
+0. **TS2304 FIX (- NEW): Nested type special handling:**
    ```csharp
    // For nested types, FullName already has the correct CLR format with '+' separator
    // (e.g., "System.Collections.Immutable.ImmutableArray`1+Builder")
@@ -645,7 +645,7 @@ private static string GetOpenGenericClrKey(NamedTypeReference named)
 
        // Strip assembly qualification if present (defensive)
        if (fullName.Contains(','))
-           fullName = fullName.Substring(0, fullName.IndexOf(',')).Trim();
+           fullName = fullName.Substring(0, fullName.IndexOf(',')).Trim;
 
        // FullName already has backtick arity in the correct CLR format
        return fullName;
@@ -654,7 +654,7 @@ private static string GetOpenGenericClrKey(NamedTypeReference named)
    - **Why needed:** For nested types, `Name` is just the child part (e.g., `"Builder"`)
    - Reconstructing from `Namespace + Name` would give `"System.Collections.Immutable.Builder"` (WRONG!)
    - FullName has correct format: `"System.Collections.Immutable.ImmutableArray\`1+Builder"` (RIGHT!)
-   - **jumanji9 fix:** Use FullName directly for nested types instead of reconstruction
+   - **fix:** Use FullName directly for nested types instead of reconstruction
 
 1. **Extract components:**
    ```csharp
@@ -672,7 +672,7 @@ private static string GetOpenGenericClrKey(NamedTypeReference named)
 3. **Strip assembly qualification from name (defensive):**
    ```csharp
    if (name.Contains(','))
-       name = name.Substring(0, name.IndexOf(',')).Trim();
+       name = name.Substring(0, name.IndexOf(',')).Trim;
    ```
    - Prevents garbage like `"IEnumerable, mscorlib, Version=..."`
    - Defensive guard against malformed TypeReferences
@@ -713,13 +713,13 @@ private static string GetOpenGenericClrKey(NamedTypeReference named)
 - No import generated
 - TS2304 error
 
-**With GetOpenGenericClrKey():**
+**With GetOpenGenericClrKey:**
 - Uses open generic form: `"System.Collections.Generic.IEnumerable\`1"`
 - Matches index key exactly
 - Import generated correctly
 - No error
 
-#### Method: GetTypeFullName()
+#### Method: GetTypeFullName
 
 Helper to extract CLR full name from various TypeReference kinds. Used for logging and diagnostics, not for lookups.
 
@@ -743,9 +743,9 @@ Result of import graph analysis.
 3. **ClrFullNameToNamespace**: `Dictionary<string, string>`
    - **Fast O(1) lookup map**: CLR full name (backtick form) → owning namespace
    - Example: `"System.Collections.Generic.IEnumerable\`1" → "System.Collections.Generic"`
-   - Built once during `BuildNamespaceTypeIndex()` for O(1) lookups
+   - Built once during `BuildNamespaceTypeIndex` for O(1) lookups
    - Provides O(1) hash lookup for namespace resolution
-   - Used by `FindNamespaceForType()` for all namespace resolution
+   - Used by `FindNamespaceForType` for all namespace resolution
 
 4. **CrossNamespaceReferences**: `List<CrossNamespaceReference>`
    - Detailed record of every foreign type reference
@@ -757,13 +757,13 @@ Result of import graph analysis.
    - Set of CLR keys that couldn't be resolved to a namespace in the current graph
    - Example: `{ "System.Runtime.CompilerServices.Unsafe", "System.Reflection.Metadata.MetadataReader" }`
    - These are candidates for cross-assembly resolution
-   - Populated during `CollectTypeReferences()` when `FindNamespaceForType()` returns null
+   - Populated during `CollectTypeReferences` when `FindNamespaceForType` returns null
    - Used by `DeclaringAssemblyResolver` to find declaring assemblies via reflection
 
 6. **UnresolvedToAssembly**: `Dictionary<string, string>`
    - Maps unresolved CLR key → declaring assembly name (resolved via MetadataLoadContext)
    - Example: `{ "System.Runtime.CompilerServices.Unsafe" → "System.Runtime.CompilerServices.Unsafe" }`
-   - Populated by `DeclaringAssemblyResolver.ResolveBatch()` after import graph analysis
+   - Populated by `DeclaringAssemblyResolver.ResolveBatch` after import graph analysis
    - Enables cross-assembly type resolution for external dependencies
    - Used for cross-assembly import generation
 
@@ -786,7 +786,7 @@ Categorizes where in the type system a reference occurs:
 - `BaseClass` - Inheritance: `class Foo : Bar`
 - `Interface` - Implementation: `class Foo : IBar`
 - `GenericConstraint` - Constraint: `class Foo<T> where T : Bar`
-- `MethodReturn` - Return type: `Bar GetBar()`
+- `MethodReturn` - Return type: `Bar GetBar`
 - `MethodParameter` - Parameter: `void SetBar(Bar b)`
 - `ConstructorParameter` - Constructor parameter: `new Foo(Bar b)`
   - **Why important**: Constructors require all parameter types to be imported
@@ -800,7 +800,7 @@ Categorizes where in the type system a reference occurs:
 ## File: EmitOrderPlanner.cs
 
 ### Purpose
-Plans stable, deterministic emission order for all symbols. Ensures reproducible .d.ts files across runs by using `Renamer.GetFinalTypeName()` for sorting.
+Plans stable, deterministic emission order for all symbols. Ensures reproducible .d.ts files across runs by using `Renamer.GetFinalTypeName` for sorting.
 
 ### Class: EmitOrderPlanner
 
@@ -814,7 +814,7 @@ public EmitOrderPlanner(BuildContext ctx)
 
 Stores BuildContext to access Renamer during sorting.
 
-#### Method: PlanOrder()
+#### Method: PlanOrder
 
 ```csharp
 public EmitOrder PlanOrder(SymbolGraph graph)
@@ -825,7 +825,7 @@ public EmitOrder PlanOrder(SymbolGraph graph)
 1. Create empty list of `NamespaceEmitOrder`
 2. **Sort namespaces** by namespace name alphabetically
 3. For each namespace:
-   - Call `OrderTypes()` to sort types within namespace
+   - Call `OrderTypes` to sort types within namespace
    - Create `NamespaceEmitOrder(Namespace, OrderedTypes)`
 4. Return `EmitOrder` with ordered namespaces
 
@@ -834,7 +834,7 @@ public EmitOrder PlanOrder(SymbolGraph graph)
 - Each namespace → one directory → one `index.d.ts`
 - Namespaces are independent (imports handle cross-references)
 
-#### Method: OrderTypes()
+#### Method: OrderTypes
 
 ```csharp
 private List<TypeEmitOrder> OrderTypes(IReadOnlyList<TypeSymbol> types)
@@ -844,7 +844,7 @@ private List<TypeEmitOrder> OrderTypes(IReadOnlyList<TypeSymbol> types)
 
 **Primary sort keys (in order):**
 
-1. **Kind sort order** (see `GetKindSortOrder()`):
+1. **Kind sort order** (see `GetKindSortOrder`):
    - Enums first (0)
    - Delegates next (1)
    - Interfaces (2)
@@ -872,7 +872,7 @@ private List<TypeEmitOrder> OrderTypes(IReadOnlyList<TypeSymbol> types)
 - Alphabetical by final name: Predictable, git-friendly
 - Arity disambiguation: Handles generic overloads
 
-#### Method: OrderMembers()
+#### Method: OrderMembers
 
 ```csharp
 private MemberEmitOrder OrderMembers(TypeSymbol type)
@@ -893,7 +893,7 @@ private MemberEmitOrder OrderMembers(TypeSymbol type)
    - Matches typical TypeScript class structure
    - Matches C# convention
 
-2. **Final TypeScript member name** via `ctx.Renamer.GetFinalMemberName()`:
+2. **Final TypeScript member name** via `ctx.Renamer.GetFinalMemberName`:
    - Must compute proper `EmitScope` for renaming context
    - Uses `ScopeFactory.ClassSurface(type, isStatic)`
    - Gets name after collision resolution
@@ -902,7 +902,7 @@ private MemberEmitOrder OrderMembers(TypeSymbol type)
 
 4. **Canonical signature** (for overloads): From `StableId.CanonicalSignature`
    - Disambiguates overloaded methods
-   - Example: `DoWork()`, `DoWork(int)`, `DoWork(string, bool)`
+   - Example: `DoWork`, `DoWork(int)`, `DoWork(string, bool)`
 
 **Filtering:**
 - Only include members with `EmitScope == ClassSurface` or `StaticSurface`
@@ -912,7 +912,7 @@ private MemberEmitOrder OrderMembers(TypeSymbol type)
 **Result:**
 - `MemberEmitOrder` record with ordered lists for each member kind
 
-#### Method: GetKindSortOrder()
+#### Method: GetKindSortOrder
 
 ```csharp
 private int GetKindSortOrder(TypeKind kind)
@@ -983,7 +983,7 @@ Plans module specifiers for TypeScript imports. Generates relative paths based o
 
 Static class with path computation logic.
 
-#### Method: GetSpecifier()
+#### Method: GetSpecifier
 
 ```csharp
 public static string GetSpecifier(string sourceNamespace, string targetNamespace)
@@ -1032,7 +1032,7 @@ public static string GetSpecifier(string sourceNamespace, string targetNamespace
 - Import statements always target internal (full type definitions)
 - Public API re-exports from internal
 
-#### Method: GetNamespaceDirectory()
+#### Method: GetNamespaceDirectory
 
 ```csharp
 public static string GetNamespaceDirectory(string namespaceName)
@@ -1042,7 +1042,7 @@ Returns directory name for namespace on disk:
 - Empty/null → `"_root"`
 - Named namespace → namespace name as-is
 
-#### Method: GetInternalSubdirectory()
+#### Method: GetInternalSubdirectory
 
 ```csharp
 public static string GetInternalSubdirectory(string namespaceName)
@@ -1061,7 +1061,7 @@ Returns subdirectory name for internal declarations:
 ## File: InterfaceConstraintAuditor.cs
 
 ### Purpose
-Audits constructor constraint loss per (Type, Interface) pair. Detects when TypeScript loses C# `new()` constraint information. Prevents duplicate diagnostics for view members by auditing at interface implementation level.
+Audits constructor constraint loss per (Type, Interface) pair. Detects when TypeScript loses C# `new` constraint information. Prevents duplicate diagnostics for view members by auditing at interface implementation level.
 
 **M4/M5 Fix:** Constructor-constraint loss is assessed ONCE per implemented interface, not per cloned view member.
 
@@ -1069,7 +1069,7 @@ Audits constructor constraint loss per (Type, Interface) pair. Detects when Type
 
 Static class with constraint auditing logic.
 
-#### Method: Audit()
+#### Method: Audit
 
 ```csharp
 public static InterfaceConstraintFindings Audit(
@@ -1079,7 +1079,7 @@ public static InterfaceConstraintFindings Audit(
 
 **Algorithm:**
 
-1. Create findings builder: `ImmutableArray.CreateBuilder<InterfaceConstraintFinding>()`
+1. Create findings builder: `ImmutableArray.CreateBuilder<InterfaceConstraintFinding>`
 2. Initialize counters for logging
 
 3. **For each namespace:**
@@ -1087,7 +1087,7 @@ public static InterfaceConstraintFindings Audit(
      - Skip if type implements no interfaces
      - **For each interface reference:**
        - Resolve interface TypeSymbol: `ResolveInterface(graph, ifaceRef)`
-       - Check constraints: `CheckInterfaceConstraints()`
+       - Check constraints: `CheckInterfaceConstraints`
        - If finding detected, add to builder
 
 4. Return `InterfaceConstraintFindings` with all findings
@@ -1097,7 +1097,7 @@ public static InterfaceConstraintFindings Audit(
 - Same type implementing multiple interfaces → separate findings
 - Prevents finding duplication when multiple view members exist
 
-#### Method: CheckInterfaceConstraints()
+#### Method: CheckInterfaceConstraints
 
 ```csharp
 private static InterfaceConstraintFinding? CheckInterfaceConstraints(
@@ -1134,33 +1134,33 @@ private static InterfaceConstraintFinding? CheckInterfaceConstraints(
 
 C# code:
 ```csharp
-interface IFactory<T> where T : new() {
-    T Create();
+interface IFactory<T> where T : new {
+    T Create;
 }
 
 class StringFactory : IFactory<string> {
-    public string Create() => new string();
+    public string Create => new string;
 }
 ```
 
 TypeScript output (constraint lost):
 ```typescript
-interface IFactory_1<T> { // No way to express "new()" constraint
-    Create(): T;
+interface IFactory_1<T> { // No way to express "new" constraint
+    Create: T;
 }
 
 class StringFactory implements IFactory_1<string> {
-    Create(): string { ... }
+    Create: string { ... }
 }
 ```
 
 **Why this matters:**
-- TypeScript can't enforce `new()` constraint at compile time
+- TypeScript can't enforce `new` constraint at compile time
 - Runtime binding code needs to know constraint exists
 - Metadata sidecar tracks this information
 - PhaseGate emits PG_CT_001 diagnostic
 
-#### Method: ResolveInterface()
+#### Method: ResolveInterface
 
 ```csharp
 private static TypeSymbol? ResolveInterface(
@@ -1180,7 +1180,7 @@ private static TypeSymbol? ResolveInterface(
 - Interface from external assembly not in graph
 - Interface from system library (e.g., `IDisposable`)
 
-#### Method: GetTypeReferenceName()
+#### Method: GetTypeReferenceName
 
 Helper to extract full name from TypeReference (handles Named/Nested types).
 
@@ -1199,7 +1199,7 @@ Single finding for a (Type, Interface) pair with constructor constraint loss.
 - `ImplementingTypeStableId: StableId` - Type implementing interface
 - `InterfaceStableId: StableId` - Interface being implemented
 - `LossKind: ConstraintLossKind` - What kind of constraint is lost
-- `GenericParameterName: string` - Which type parameter has `new()` constraint
+- `GenericParameterName: string` - Which type parameter has `new` constraint
 - `TypeFullName: string` - CLR full name for reporting
 - `InterfaceFullName: string` - CLR full name for reporting
 
@@ -1225,7 +1225,7 @@ TypeScript assignability checking for erased type shapes. Implements simplified 
 
 Static class with assignability logic.
 
-#### Method: IsAssignable()
+#### Method: IsAssignable
 
 ```csharp
 public static bool IsAssignable(TsTypeShape source, TsTypeShape target)
@@ -1295,7 +1295,7 @@ if (source is TsTypeShape.Named sourceNamed &&
 }
 ```
 
-#### Method: IsWideningConversion()
+#### Method: IsWideningConversion
 
 ```csharp
 private static bool IsWideningConversion(string sourceFullName, string targetFullName)
@@ -1338,7 +1338,7 @@ private static bool IsWideningConversion(string sourceFullName, string targetFul
 - Checks if overridden methods satisfy base contracts
 - Detects breaking changes in TypeScript world
 
-#### Method: IsMethodAssignable()
+#### Method: IsMethodAssignable
 
 ```csharp
 public static bool IsMethodAssignable(
@@ -1396,7 +1396,7 @@ public static bool IsMethodAssignable(
 - TypeScript allows contravariance, but we're more strict
 - Prevents subtle runtime errors
 
-#### Method: IsPropertyAssignable()
+#### Method: IsPropertyAssignable
 
 ```csharp
 public static bool IsPropertyAssignable(
@@ -1503,7 +1503,7 @@ public static TsTypeShape EraseType(TypeReference typeRef)
 NamedTypeReference named when named.TypeArguments.Count > 0 =>
     new TsTypeShape.GenericApplication(
         new TsTypeShape.Named(named.FullName),
-        named.TypeArguments.Select(EraseType).ToList())
+        named.TypeArguments.Select(EraseType).ToList)
 ```
 - Constructed generic: `List<int>` → `GenericApplication(Named("List`1"), [Named("Int32")])`
 - **Recursively erase type arguments**
@@ -1556,7 +1556,7 @@ ByRefTypeReference byref =>
 
 **8. Fallback:**
 ```csharp
-_ => new TsTypeShape.Unknown(typeRef.ToString() ?? "unknown")
+_ => new TsTypeShape.Unknown(typeRef.ToString ?? "unknown")
 ```
 
 ### Record: TsMethodSignature
@@ -1632,7 +1632,7 @@ Validates the symbol graph before emission. Performs comprehensive validation ch
 
 Static class with master validation orchestration.
 
-#### Method: Validate()
+#### Method: Validate
 
 ```csharp
 public static void Validate(
@@ -1649,60 +1649,60 @@ public static void Validate(
    var validationContext = new ValidationContext {
        ErrorCount = 0,
        WarningCount = 0,
-       Diagnostics = new List<string>(),
+       Diagnostics = new List<string>,
        SanitizedNameCount = 0,
-       InterfaceConformanceIssuesByType = new Dictionary<string, List<string>>()
+       InterfaceConformanceIssuesByType = new Dictionary<string, List<string>>
    };
    ```
 
 2. **Run core validation checks** (delegated to `Validation.Core`):
-   - `ValidateTypeNames()` - Check type naming rules
-   - `ValidateMemberNames()` - Check member naming rules
-   - `ValidateGenericParameters()` - Validate generic parameter constraints
-   - `ValidateInterfaceConformance()` - Check interface implementation correctness
-   - `ValidateInheritance()` - Validate inheritance hierarchies
-   - `ValidateEmitScopes()` - Check EmitScope assignments
-   - `ValidateImports()` - Validate import consistency
-   - `ValidatePolicyCompliance()` - Enforce policy rules
+   - `ValidateTypeNames` - Check type naming rules
+   - `ValidateMemberNames` - Check member naming rules
+   - `ValidateGenericParameters` - Validate generic parameter constraints
+   - `ValidateInterfaceConformance` - Check interface implementation correctness
+   - `ValidateInheritance` - Validate inheritance hierarchies
+   - `ValidateEmitScopes` - Check EmitScope assignments
+   - `ValidateImports` - Validate import consistency
+   - `ValidatePolicyCompliance` - Enforce policy rules
 
 3. **Run PhaseGate Hardening checks** (50+ additional rules):
 
    **M1: Identifier sanitization:**
-   - `Names.ValidateIdentifiers()` - PG_NAME_001/002
+   - `Names.ValidateIdentifiers` - PG_NAME_001/002
 
    **M2: Overload collision detection:**
-   - `Names.ValidateOverloadCollisions()` - PG_NAME_006
+   - `Names.ValidateOverloadCollisions` - PG_NAME_006
 
    **M3: View integrity validation:**
-   - `Views.Validate()` - Basic view checks
-   - `Views.ValidateIntegrity()` - PG_VIEW_001/002/003 (3 hard rules)
+   - `Views.Validate` - Basic view checks
+   - `Views.ValidateIntegrity` - PG_VIEW_001/002/003 (3 hard rules)
 
    **M4: Constructor constraint loss:**
-   - `Constraints.EmitDiagnostics()` - PG_CT_001/002
+   - `Constraints.EmitDiagnostics` - PG_CT_001/002
 
    **M5: Scoping and naming:**
-   - `Views.ValidateMemberScoping()` - PG_NAME_003/004
-   - `Scopes.ValidateEmitScopeInvariants()` - PG_INT_002/003
-   - `Scopes.ValidateScopeMismatches()` - PG_SCOPE_003/004
-   - `Names.ValidateClassSurfaceUniqueness()` - PG_NAME_005
+   - `Views.ValidateMemberScoping` - PG_NAME_003/004
+   - `Scopes.ValidateEmitScopeInvariants` - PG_INT_002/003
+   - `Scopes.ValidateScopeMismatches` - PG_SCOPE_003/004
+   - `Names.ValidateClassSurfaceUniqueness` - PG_NAME_005
 
    **M6: Finalization sweep:**
-   - `Finalization.Validate()` - PG_FIN_001 through PG_FIN_009
+   - `Finalization.Validate` - PG_FIN_001 through PG_FIN_009
    - Catches symbols without proper finalization
 
    **M7: Type reference validation:**
-   - `Types.ValidatePrinterNameConsistency()` - PG_PRINT_001
-   - `Types.ValidateTypeMapCompliance()` - PG_TYPEMAP_001 (MUST RUN EARLY)
-   - `Types.ValidateExternalTypeResolution()` - PG_LOAD_001 (AFTER TypeMap)
+   - `Types.ValidatePrinterNameConsistency` - PG_PRINT_001
+   - `Types.ValidateTypeMapCompliance` - PG_TYPEMAP_001 (MUST RUN EARLY)
+   - `Types.ValidateExternalTypeResolution` - PG_LOAD_001 (AFTER TypeMap)
 
    **M8: Public API surface:**
-   - `ImportExport.ValidatePublicApiSurface()` - PG_API_001/002 (BEFORE imports)
+   - `ImportExport.ValidatePublicApiSurface` - PG_API_001/002 (BEFORE imports)
 
    **M9: Import completeness:**
-   - `ImportExport.ValidateImportCompleteness()` - PG_IMPORT_001
+   - `ImportExport.ValidateImportCompleteness` - PG_IMPORT_001
 
    **M10: Export completeness:**
-   - `ImportExport.ValidateExportCompleteness()` - PG_EXPORT_001
+   - `ImportExport.ValidateExportCompleteness` - PG_EXPORT_001
 
 4. **Report results:**
    ```csharp
@@ -1726,8 +1726,8 @@ public static void Validate(
    ```
 
 7. **Write diagnostic files:**
-   - `Context.WriteDiagnosticsFile()` - Full detailed report
-   - `Context.WriteSummaryJson()` - Machine-readable summary for CI
+   - `Context.WriteDiagnosticsFile` - Full detailed report
+   - `Context.WriteSummaryJson` - Machine-readable summary for CI
 
 **Why this order matters:**
 - TypeMap validation must run before external type checks (foundational)
@@ -1910,7 +1910,7 @@ Import specifiers:
 
 **Algorithm: Detect when TypeScript loses C# generic constraints**
 
-**Focus:** Constructor constraints (`new()`) only
+**Focus:** Constructor constraints (`new`) only
 
 **Input:** (Type, Interface) pair where Type implements Interface
 
@@ -1920,7 +1920,7 @@ Import specifiers:
 
 1. **Get interface generic parameters:**
    - If interface has no generic parameters: skip (no constraints)
-   - For each generic parameter: `interface IFactory<T> where T : new()`
+   - For each generic parameter: `interface IFactory<T> where T : new`
 
 2. **Check SpecialConstraints:**
    ```csharp
@@ -1942,7 +1942,7 @@ Import specifiers:
    - Runtime binding code can enforce constraint if needed
 
 **Why constructor constraint specifically:**
-- `new()` constraint guarantees type has parameterless constructor
+- `new` constraint guarantees type has parameterless constructor
 - TypeScript has no equivalent concept
 - Information is lost in TypeScript declarations
 - Must be tracked separately for runtime binding
@@ -1956,7 +1956,7 @@ Import specifiers:
 **Future expansion:**
 - Could track `class` constraint for runtime checks
 - Could track `struct` constraint for boxing/unboxing decisions
-- Currently only `new()` is critical for binding
+- Currently only `new` is critical for binding
 
 ---
 

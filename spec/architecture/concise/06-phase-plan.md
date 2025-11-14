@@ -30,11 +30,11 @@ Plans import statements and aliasing for TS declarations. Generates import/expor
    - `NamespaceExports` - namespace → list of export statements
    - `ImportAliases` - namespace → alias dictionary
 2. For each namespace:
-   - Call `PlanNamespaceImports()` to analyze dependencies
-   - Call `PlanNamespaceExports()` to catalog public types
+   - Call `PlanNamespaceImports` to analyze dependencies
+   - Call `PlanNamespaceExports` to catalog public types
 3. Return complete `ImportPlan`
 
-### Method: `PlanNamespaceImports()`
+### Method: `PlanNamespaceImports`
 
 **Foreign type detection algorithm**:
 1. **Get dependencies**: Look up namespace in `importGraph.NamespaceDependencies`
@@ -45,7 +45,7 @@ Plans import statements and aliasing for TS declarations. Generates import/expor
 3. **Determine import path**: Call `PathPlanner.GetSpecifier(sourceNs, targetNs)` → relative path like `"../System.Collections/internal/index"`
 4. **Check name collisions**:
    - Get TS emit name from Renamer
-   - Call `DetermineAlias()` to check if alias needed
+   - Call `DetermineAlias` to check if alias needed
    - Create `TypeImport(TypeName, Alias)`
 5. **Build import statement**:
    - Group all imports from same target
@@ -58,13 +58,13 @@ Plans import statements and aliasing for TS declarations. Generates import/expor
 
 Alias format: `{TypeName}_{TargetNamespaceShortName}`
 
-### Method: `PlanNamespaceExports()`
+### Method: `PlanNamespaceExports`
 
 **Algorithm**:
 1. Iterate all types in namespace
 2. Filter to public types only
 3. For each public type:
-   - Get final TS name via `ctx.Renamer.GetFinalTypeName()`
+   - Get final TS name via `ctx.Renamer.GetFinalTypeName`
    - Determine export kind based on type kind
    - Create `ExportStatement(ExportName, ExportKind)`
 4. Add to `plan.NamespaceExports[ns.Name]`
@@ -84,7 +84,7 @@ Alias format: `{TypeName}_{TargetNamespaceShortName}`
 1. Extract simple name from full CLR name: `"System.Collections.Generic.IEnumerable`1"` → `"IEnumerable`1"`
 2. Sanitize backtick to underscore: `"IEnumerable`1"` → `"IEnumerable_1"`
 3. Handle nested types (replace `+` with `$`): `"Dictionary_2+Enumerator"` → `"Dictionary_2$Enumerator"`
-4. Check TS reserved words: `TypeScriptReservedWords.Sanitize()`
+4. Check TS reserved words: `TypeScriptReservedWords.Sanitize`
 
 **Examples**:
 - `"System.Collections.Generic.IEnumerable`1"` → `"IEnumerable_1"`
@@ -111,11 +111,11 @@ Builds cross-namespace dependency graph for import planning. Analyzes type refer
    - `CrossNamespaceReferences` - list of all foreign type references
    - `UnresolvedClrKeys` - types not found in graph
    - `UnresolvedToAssembly` - unresolved type → assembly mapping
-2. **Build namespace type index**: Call `BuildNamespaceTypeIndex()` to catalog all public types (creates TWO lookups: set-based and map-based)
-3. **Analyze dependencies**: For each namespace, call `AnalyzeNamespaceDependencies()` - recursively scans all type references, tracks unresolved types
+2. **Build namespace type index**: Call `BuildNamespaceTypeIndex` to catalog all public types (creates TWO lookups: set-based and map-based)
+3. **Analyze dependencies**: For each namespace, call `AnalyzeNamespaceDependencies` - recursively scans all type references, tracks unresolved types
 4. Return complete `ImportGraphData`
 
-### Method: `BuildNamespaceTypeIndex()`
+### Method: `BuildNamespaceTypeIndex`
 
 **Algorithm**:
 1. For each namespace:
@@ -127,14 +127,14 @@ Builds cross-namespace dependency graph for import planning. Analyzes type refer
 
 **Dual indexing**:
 - **Set-based**: Legacy, used for set operations
-- **Map-based**: O(1) hash lookup for `FindNamespaceForType()` (critical for BCL with 4,000+ types)
+- **Map-based**: O(1) hash lookup for `FindNamespaceForType` (critical for BCL with 4,000+ types)
 
-### Method: `AnalyzeNamespaceDependencies()` - **jumanji9 UPDATED**
+### Method: `AnalyzeNamespaceDependencies` - **UPDATED**
 
 **Comprehensive scanning algorithm**:
 
 For each **public type**:
-1. **jumanji9 TS2304 FIX**: Call `AnalyzeTypeAndNestedRecursively()` to analyze type AND all public nested types recursively
+1. **TS2304 FIX**: Call `AnalyzeTypeAndNestedRecursively` to analyze type AND all public nested types recursively
    - Previously only analyzed top-level types
    - Now processes nested types (e.g., `ImmutableArray<T>.Builder`)
    - Ensures nested type members scanned for cross-namespace dependencies
@@ -143,7 +143,7 @@ For each **public type**:
 - `dependencies` set contains all foreign namespace names
 - `CrossNamespaceReferences` has detailed reference records
 
-### Method: `AnalyzeTypeAndNestedRecursively()` - **jumanji9 NEW**
+### Method: `AnalyzeTypeAndNestedRecursively` - **NEW**
 
 **Recursive type analysis** (including nested types):
 
@@ -155,34 +155,34 @@ For given type:
    - Reference kind: `ReferenceKind.BaseClass`
 
 2. **Interface analysis**:
-   - For each interface, call `CollectTypeReferences()`
+   - For each interface, call `CollectTypeReferences`
    - Reference kind: `ReferenceKind.Interface`
 
 3. **Generic constraint analysis**:
    - For each type generic parameter with constraints
-   - Call `CollectTypeReferences()` on each constraint
+   - Call `CollectTypeReferences` on each constraint
    - Reference kind: `ReferenceKind.GenericConstraint`
 
 4. **Member analysis**:
-   - Call `AnalyzeMemberDependencies()` to scan all members
+   - Call `AnalyzeMemberDependencies` to scan all members
    - Analyzes methods, properties, fields, events, constructors
 
-5. **jumanji9 Nested type recursion**:
-   - For each **public** nested type: call `AnalyzeTypeAndNestedRecursively()` recursively
+5. **Nested type recursion**:
+   - For each **public** nested type: call `AnalyzeTypeAndNestedRecursively` recursively
    - Ensures deeply nested types fully analyzed (e.g., `Outer<T>.Middle.Inner`)
 
-**Why needed (jumanji9)**: Nested type members can reference cross-namespace types. Without recursive analysis, imports were missing (e.g., `ImmutableArray<T>.Builder.AddRange(IEnumerable<T>)` needs `System.Collections.Generic` import).
+**Why needed**: Nested type members can reference cross-namespace types. Without recursive analysis, imports were missing (e.g., `ImmutableArray<T>.Builder.AddRange(IEnumerable<T>)` needs `System.Collections.Generic` import).
 
 **Impact**: Fixed TS2304 errors from nested types referencing cross-namespace types
 
-### Method: `CollectTypeReferences()`
+### Method: `CollectTypeReferences`
 
 **Recursive type tree traversal** - finds ALL foreign types.
 
 **Algorithm by TypeReference kind**:
 
 1. **NamedTypeReference**:
-   - Find namespace: `FindNamespaceForType()`
+   - Find namespace: `FindNamespaceForType`
    - Get open generic CLR key: `GetOpenGenericClrKey(named)`
    - **INVARIANT GUARD**: If `clrKey.Contains('[')` or `clrKey.Contains(',')` → ERROR (assembly-qualified key detected)
    - Add to collected: `collected.Add((clrKey, ns))`
@@ -190,7 +190,7 @@ For given type:
    - **Recurse into type arguments**: For `List<Dictionary<K, V>>`, recursively processes Dictionary, K, V
 
 2. **NestedTypeReference**:
-   - Find namespace: `FindNamespaceForType()`
+   - Find namespace: `FindNamespaceForType`
    - Get open generic CLR key from full reference
    - **INVARIANT GUARD**: Same check as NamedTypeReference
    - Add to collected, track unresolved
@@ -217,12 +217,12 @@ For given type:
 
 **Why null is valid**: Type might be from external assembly, built-in TS type, type-forwarded, or different assembly version
 
-### Method: `GetOpenGenericClrKey(NamedTypeReference) -> string` - **jumanji9 UPDATED**
+### Method: `GetOpenGenericClrKey(NamedTypeReference) -> string` - **UPDATED**
 
 **Purpose**: Construct open generic CLR key from NamedTypeReference. Ensures generic types use open form (`List`1`) not constructed form with assembly-qualified type arguments.
 
 **Algorithm**:
-0. **jumanji9 TS2304 FIX - Nested type special handling**:
+0. **TS2304 FIX - Nested type special handling**:
    - If `FullName.Contains('+')`: Nested type detected
    - Use `FullName` directly (already has correct CLR format with `+` separator)
    - Strip assembly qualification if present
@@ -241,18 +241,18 @@ For given type:
 - `IEnumerable<T>` → `System.Collections.Generic.IEnumerable`1`
 - `Dictionary<K,V>` → `System.Collections.Generic.Dictionary`2`
 - `Exception` → `System.Exception`
-- **jumanji9**: `ImmutableArray\`1+Builder` → `System.Collections.Immutable.ImmutableArray\`1+Builder` (nested type)
+- ****: `ImmutableArray\`1+Builder` → `System.Collections.Immutable.ImmutableArray\`1+Builder` (nested type)
 
 **Why critical**: Without proper key construction, lookups fail → no import → TS2304 error
 
-**jumanji9 Impact**: Fixed nested type import lookups - prevented TS2304 errors from nested types
+**Impact**: Fixed nested type import lookups - prevented TS2304 errors from nested types
 
 ---
 
 ## File: EmitOrderPlanner.cs
 
 ### Purpose
-Plans stable, deterministic emission order for all symbols. Ensures reproducible .d.ts files using `Renamer.GetFinalTypeName()` for sorting.
+Plans stable, deterministic emission order for all symbols. Ensures reproducible .d.ts files using `Renamer.GetFinalTypeName` for sorting.
 
 ### Method: `PlanOrder(SymbolGraph) -> EmitOrder`
 
@@ -260,7 +260,7 @@ Plans stable, deterministic emission order for all symbols. Ensures reproducible
 1. Create empty list of `NamespaceEmitOrder`
 2. **Sort namespaces** alphabetically
 3. For each namespace:
-   - Call `OrderTypes()` to sort types
+   - Call `OrderTypes` to sort types
    - Create `NamespaceEmitOrder(Namespace, OrderedTypes)`
 4. Return `EmitOrder` with ordered namespaces
 
@@ -269,7 +269,7 @@ Plans stable, deterministic emission order for all symbols. Ensures reproducible
 **Stable deterministic sorting**:
 
 **Primary sort keys (in order)**:
-1. **Kind sort order** (`GetKindSortOrder()`):
+1. **Kind sort order** (`GetKindSortOrder`):
    - Enums first (0), Delegates (1), Interfaces (2), Structs (3), Classes (4), Static namespaces last (5)
 2. **Final TS name** from `ctx.Renamer.GetFinalTypeName(type)` (uses finalized, post-collision name)
 3. **Arity** (generic parameter count)
@@ -295,7 +295,7 @@ Plans stable, deterministic emission order for all symbols. Ensures reproducible
 
 **Within each category, sort by**:
 1. **IsStatic**: Instance first, then static
-2. **Final TS member name** via `ctx.Renamer.GetFinalMemberName()` (must compute proper `EmitScope` for renaming context)
+2. **Final TS member name** via `ctx.Renamer.GetFinalMemberName` (must compute proper `EmitScope` for renaming context)
 3. **Arity** (for methods): Method-level generic parameter count
 4. **Canonical signature** (for overloads): From `StableId.CanonicalSignature`
 
@@ -338,7 +338,7 @@ Plans module specifiers for TS imports. Generates relative paths based on source
 ## File: InterfaceConstraintAuditor.cs
 
 ### Purpose
-Audits constructor constraint loss per (Type, Interface) pair. Detects when TS loses C# `new()` constraint information. Prevents duplicate diagnostics for view members by auditing at interface implementation level.
+Audits constructor constraint loss per (Type, Interface) pair. Detects when TS loses C# `new` constraint information. Prevents duplicate diagnostics for view members by auditing at interface implementation level.
 
 ### Method: `Audit(BuildContext, SymbolGraph) -> InterfaceConstraintFindings`
 
@@ -348,13 +348,13 @@ Audits constructor constraint loss per (Type, Interface) pair. Detects when TS l
    - Skip if no interfaces
    - For each interface reference:
      - Resolve interface TypeSymbol
-     - Check constraints: `CheckInterfaceConstraints()`
+     - Check constraints: `CheckInterfaceConstraints`
      - If finding detected, add to builder
 3. Return `InterfaceConstraintFindings`
 
 **Why (Type, Interface) pairs**: Same interface implemented by multiple types → separate findings. Same type implementing multiple interfaces → separate findings. Prevents finding duplication when multiple view members exist.
 
-### Method: `CheckInterfaceConstraints()`
+### Method: `CheckInterfaceConstraints`
 
 **Constraint loss detection**:
 1. **Skip if interface has no generic parameters**
@@ -374,7 +374,7 @@ Audits constructor constraint loss per (Type, Interface) pair. Detects when TS l
    ```
 
 **What is constructor constraint loss**:
-- C# `new()` constraint guarantees type has parameterless constructor
+- C# `new` constraint guarantees type has parameterless constructor
 - TS has no equivalent
 - Information lost in TS declarations
 - Must be tracked separately for runtime binding
@@ -395,7 +395,7 @@ TS assignability checking for erased type shapes. Implements simplified TS struc
 3. **Type parameter compatibility**: Match by name (`T` compatible with `T`)
 4. **Array covariance**: TS arrays are readonly in model → covariant (`string[]` assignable to `object[]`)
 5. **Generic application**: Base generic must match, type arguments checked pairwise (invariant)
-6. **Named type widening**: Call `IsWideningConversion()`
+6. **Named type widening**: Call `IsWideningConversion`
 
 ### Method: `IsWideningConversion(string sourceFullName, string targetFullName) -> bool`
 

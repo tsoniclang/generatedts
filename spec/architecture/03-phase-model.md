@@ -42,24 +42,24 @@ public sealed record SymbolGraph
 
 - **`NamespaceIndex: ImmutableDictionary<string, NamespaceSymbol>`**
   - Quick lookup: namespace name → namespace symbol
-  - Built once during construction via `WithIndices()`
+  - Built once during construction via `WithIndices`
   - Enables O(1) namespace lookups by name
   - Example key: `"System.Collections.Generic"`
 
 - **`TypeIndex: ImmutableDictionary<string, TypeSymbol>`**
   - Quick lookup: CLR full name → type symbol
-  - Built once during construction via `WithIndices()`
+  - Built once during construction via `WithIndices`
   - Enables O(1) type lookups by CLR full name
   - Includes nested types recursively
   - Example key: `"System.Collections.Generic.List`1"`
 
 ### Methods
 
-**`WithIndices(): SymbolGraph`**
+**`WithIndices: SymbolGraph`**
 - Pure function that returns a new graph with populated indices
 - Iterates all namespaces and types (including nested) to build lookup dictionaries
 - **MUST be called after creating a new graph** to enable efficient lookups
-- Example usage: `var indexedGraph = rawGraph.WithIndices();`
+- Example usage: `var indexedGraph = rawGraph.WithIndices;`
 
 **`TryGetNamespace(string name, out NamespaceSymbol? ns): bool`**
 - Try to find a namespace by name using the index
@@ -86,7 +86,7 @@ public sealed record SymbolGraph
       type.WithAddedMethods(new[] { syntheticMethod }));
   ```
 
-**`GetStatistics(): SymbolGraphStatistics`**
+**`GetStatistics: SymbolGraphStatistics`**
 - Calculates statistics about the graph (namespace count, type count, member counts)
 - Recursively counts nested types and their members
 - Used for diagnostics and progress reporting
@@ -157,7 +157,7 @@ public readonly record struct AssemblyKey(
   - Missing culture → `"neutral"`
   - Missing version → `"0.0.0.0"`
 
-**`ToString(): string`**
+**`ToString: string`**
 - Returns full identity string in GAC format
 - Example: `"System.Private.CoreLib, PublicKeyToken=7cec85d7bea7798e, Culture=neutral, Version=10.0.0.0"`
 
@@ -415,7 +415,7 @@ public sealed record GenericParameterSymbol
   - Variance: `None`, `Covariant` (out T), `Contravariant` (in T)
 
 - **`SpecialConstraints: GenericParameterConstraints`**
-  - Flags for special constraints: `struct`, `class`, `new()`, `notnull`
+  - Flags for special constraints: `struct`, `class`, `new`, `notnull`
 
 ### Enum: Variance
 
@@ -437,7 +437,7 @@ public enum GenericParameterConstraints
     None = 0,
     ReferenceType = 1,      // class constraint
     ValueType = 2,          // struct constraint
-    DefaultConstructor = 4, // new() constraint
+    DefaultConstructor = 4, // new constraint
     NotNullable = 8         // notnull constraint
 }
 ```
@@ -1175,7 +1175,7 @@ public sealed record GenericParameterId
 
 **Methods:**
 
-**`ToString(): string`**
+**`ToString: string`**
 - Format: `"DeclaringTypeName#Position"` (with `"M"` suffix if method parameter)
 - Example: `"System.Collections.Generic.List`1#0"`, `"System.Linq.Enumerable.Select`2#1M"`
 
@@ -1219,7 +1219,7 @@ public sealed record TypeStableId : StableId
 
 **Methods:**
 
-**`ToString(): string`**
+**`ToString: string`**
 - Format: `"AssemblyName:ClrFullName"`
 - Example: `"System.Private.CoreLib:System.Collections.Generic.List`1"`
 
@@ -1261,7 +1261,7 @@ public sealed record MemberStableId : StableId
 
 **Methods:**
 
-**`ToString(): string`**
+**`ToString: string`**
 - Format: `"AssemblyName:DeclaringClrFullName::MemberName[CanonicalSignature]"`
 - Example: `"System.Private.CoreLib:System.String::Substring(System.Int32,System.Int32)->System.String"`
 
@@ -1269,7 +1269,7 @@ public sealed record MemberStableId : StableId
 - Compares `AssemblyName`, `DeclaringClrFullName`, `MemberName`, `CanonicalSignature`
 - **Intentionally excludes `MetadataToken`** from comparison (semantic equality)
 
-**`GetHashCode(): int`** (overridden)
+**`GetHashCode: int`** (overridden)
 - Hash combines `AssemblyName`, `DeclaringClrFullName`, `MemberName`, `CanonicalSignature`
 - **Intentionally excludes `MetadataToken`** from hash
 
@@ -1310,11 +1310,11 @@ public sealed record MemberStableId : StableId
 **For Properties:**
 - Format: `"(IndexParam1,IndexParam2,...)->PropertyType"`
 - Example: `"(System.Int32)->System.Char"` for `char this[int index]`
-- Normal properties: `"()->PropertyType"`
+- Normal properties: `"->PropertyType"`
 
 **For Fields/Events:**
 - Format: `"->FieldType"` or empty
-- Example: `"()->System.Int32"` for `int Length`
+- Example: `"->System.Int32"` for `int Length`
 
 **Purpose:**
 - Disambiguate overloads
@@ -1395,7 +1395,7 @@ Emit → (PhaseGate validates: no Unspecified allowed)
 3. **Name application** sets `TsEmitName` on all types/members
 4. **Constraint resolution** resolves `GenericParameterSymbol.Constraints`
 5. **Emit scope assignment** sets all `EmitScope` to non-Unspecified values
-6. **Graph updates** use `WithUpdatedType()` for pure transformations
+6. **Graph updates** use `WithUpdatedType` for pure transformations
 
 ### Emit Phase (Reads Model)
 
@@ -1421,6 +1421,6 @@ The **Model** phase provides:
 All Model structures are designed for:
 - **Immutability** (records with init-only properties)
 - **Structural equality** (record equality semantics)
-- **Functional transformations** (wither methods, `WithUpdatedType()`)
+- **Functional transformations** (wither methods, `WithUpdatedType`)
 - **Type safety** (no nulls except where semantically required)
 - **Performance** (immutable collections, pre-computed indices)

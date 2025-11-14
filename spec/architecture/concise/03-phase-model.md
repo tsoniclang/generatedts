@@ -35,7 +35,7 @@ public sealed record SymbolGraph
 
 ### Key Methods
 
-**`WithIndices(): SymbolGraph`**
+**`WithIndices: SymbolGraph`**
 - Pure function returning new graph with populated indices
 - **MUST be called after creating new graph** for efficient lookups
 
@@ -50,7 +50,7 @@ public sealed record SymbolGraph
       type.WithAddedMethods(new[] { syntheticMethod }));
   ```
 
-**`GetStatistics(): SymbolGraphStatistics`**
+**`GetStatistics: SymbolGraphStatistics`**
 - Counts namespaces, types, members recursively
 
 ### Record: SymbolGraphStatistics
@@ -86,7 +86,7 @@ public readonly record struct AssemblyKey(
 **Methods**:
 
 - **`static From(AssemblyName asm): AssemblyKey`** - Create from System.Reflection.AssemblyName
-- **`ToString(): string`** - GAC format: `"Name, PublicKeyToken=..., Culture=..., Version=..."`
+- **`ToString: string`** - GAC format: `"Name, PublicKeyToken=..., Culture=..., Version=..."`
 
 ---
 
@@ -218,7 +218,7 @@ public sealed record GenericParameterSymbol
 - **`Constraints: ImmutableArray<TypeReference>`** - Type constraints (resolved by ConstraintCloser)
 - **`RawConstraintTypes: System.Type[]?`** - Raw CLR constraints from reflection (null after resolution)
 - **`Variance: Variance`** - None, Covariant (out T), Contravariant (in T)
-- **`SpecialConstraints: GenericParameterConstraints`** - Flags: struct, class, new(), notnull
+- **`SpecialConstraints: GenericParameterConstraints`** - Flags: struct, class, new, notnull
 
 ### Enum: Variance
 
@@ -235,7 +235,7 @@ public enum GenericParameterConstraints
     None = 0,
     ReferenceType = 1,      // class
     ValueType = 2,          // struct
-    DefaultConstructor = 4, // new()
+    DefaultConstructor = 4, // new
     NotNullable = 8         // notnull
 }
 ```
@@ -618,7 +618,7 @@ public sealed record GenericParameterId
 
 **Methods**:
 
-**`ToString(): string`**
+**`ToString: string`**
 - Format: `"DeclaringTypeName#Position"` (with "M" suffix if method parameter)
 - Example: `"System.Collections.Generic.List`1#0"`, `"System.Linq.Enumerable.Select`2#1M"`
 
@@ -656,7 +656,7 @@ public sealed record TypeStableId : StableId
 
 **Methods**:
 
-**`ToString(): string`**
+**`ToString: string`**
 - Format: `"AssemblyName:ClrFullName"`
 - Example: `"System.Private.CoreLib:System.Collections.Generic.List`1"`
 
@@ -684,7 +684,7 @@ public sealed record MemberStableId : StableId
 
 **Methods**:
 
-**`ToString(): string`**
+**`ToString: string`**
 - Format: `"AssemblyName:DeclaringClrFullName::MemberName[CanonicalSignature]"`
 - Example: `"System.Private.CoreLib:System.String::Substring(System.Int32,System.Int32)->System.String"`
 
@@ -692,7 +692,7 @@ public sealed record MemberStableId : StableId
 - Compares AssemblyName, DeclaringClrFullName, MemberName, CanonicalSignature
 - **Excludes MetadataToken** (semantic equality)
 
-**`GetHashCode(): int`** (overridden)
+**`GetHashCode: int`** (overridden)
 - Hash combines AssemblyName, DeclaringClrFullName, MemberName, CanonicalSignature
 - **Excludes MetadataToken**
 
@@ -728,7 +728,7 @@ Uniquely identify members among overloads:
 
 **Properties**: `"(IndexParam1,...)->PropertyType"`
 - Indexers: `"(System.Int32)->System.Char"` for `char this[int index]`
-- Normal: `"()->PropertyType"`
+- Normal: `"->PropertyType"`
 
 **Fields/Events**: `"->FieldType"` or empty
 
@@ -790,7 +790,7 @@ Tracks member origins:
 3. Name application sets `TsEmitName` on all types/members
 4. Constraint resolution resolves `GenericParameterSymbol.Constraints`
 5. Emit scope assignment sets all `EmitScope` to non-Unspecified
-6. Graph updates use `WithUpdatedType()` for pure transformations
+6. Graph updates use `WithUpdatedType` for pure transformations
 
 ### Emit Phase (Reads Model)
 

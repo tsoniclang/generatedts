@@ -46,7 +46,7 @@ Used by later passes for:
 - Stores in global dictionary keyed by `ClrFullName`
 
 **Algorithm:**
-1. Clear previous index (`_globalIndex.Clear()`)
+1. Clear previous index (`_globalIndex.Clear`)
 2. Collect all interfaces from `graph.Namespaces.SelectMany(ns => ns.Types).Where(t => t.Kind == Interface)`
 3. For each interface:
    - Compute `MethodSignatures` using `CanonicalizeMethod`
@@ -65,8 +65,8 @@ Used by later passes for:
 
 **Returns:** True if interface exists in index
 
-#### `GlobalInterfaceIndex.GetAllInterfaces()`
-**Signature:** `public static IEnumerable<InterfaceInfo> GetAllInterfaces()`
+#### `GlobalInterfaceIndex.GetAllInterfaces`
+**Signature:** `public static IEnumerable<InterfaceInfo> GetAllInterfaces`
 
 **Returns:** All indexed interfaces
 
@@ -121,7 +121,7 @@ Build index of interface members that are DECLARED (not inherited). Used to reso
 **Signature:** `public static void Build(BuildContext ctx, SymbolGraph graph)`
 
 **Algorithm:**
-1. Clear previous index (`_declIndex.Clear()`)
+1. Clear previous index (`_declIndex.Clear`)
 2. For each interface:
    - Collect inherited signatures from `CollectInheritedSignatures(iface)`
    - For each method/property in interface:
@@ -198,7 +198,7 @@ Analyze structural conformance for interfaces. For each interface that cannot be
 1. Filter classes/structs: `graph.Namespaces.SelectMany(ns => ns.Types).Where(t => t.Kind == Class || Struct)`
 2. For each type: call `AnalyzeType(ctx, graph, type)` → returns (updated type, synthesized count)
 3. Build updated namespaces immutably
-4. Return new graph with indices: `(graph with { Namespaces = ... }).WithIndices()`
+4. Return new graph with indices: `(graph with { Namespaces = ... }).WithIndices`
 
 **Called by:** Shape phase (after InterfaceInliner)
 
@@ -368,21 +368,21 @@ Flatten interface hierarchies - remove `extends` chains. Copies all inherited me
 ```
 Before:
   interface IEnumerable<T> : IEnumerable {
-    // Only declares GetEnumerator() : IEnumerator<T>
+    // Only declares GetEnumerator : IEnumerator<T>
   }
   interface IEnumerable {
-    // Declares GetEnumerator() : IEnumerator
+    // Declares GetEnumerator : IEnumerator
   }
 
 After:
   interface IEnumerable_1<T> {
     // Both members inlined:
-    GetEnumerator() : IEnumerator_1<T>
-    GetEnumerator() : IEnumerator
+    GetEnumerator : IEnumerator_1<T>
+    GetEnumerator : IEnumerator
   }
   interface IEnumerable {
     // Just its member:
-    GetEnumerator() : IEnumerator
+    GetEnumerator : IEnumerator
   }
 ```
 
@@ -393,17 +393,17 @@ After:
 **Problem Without FIX D:**
 ```csharp
 // C# definition:
-interface IBase<T> { T GetValue(); }
+interface IBase<T> { T GetValue; }
 interface IDerived : IBase<string> { }
 
 // WITHOUT FIX D - Generic parameter not substituted:
 interface IDerived {
-  GetValue(): T;  // ERROR: T is orphaned (not declared in IDerived)
+  GetValue: T;  // ERROR: T is orphaned (not declared in IDerived)
 }
 
 // WITH FIX D - Correctly substituted:
 interface IDerived {
-  GetValue(): string;  // CORRECT
+  GetValue: string;  // CORRECT
 }
 ```
 
@@ -413,7 +413,7 @@ interface IDerived {
 3. **Chained generic substitution:** Grandparent generics substituted through parent
 4. **Method-level generic protection:** Ensures method's own type parameters aren't substituted
 
-**Integration in InlineInterface():**
+**Integration in InlineInterface:**
 ```csharp
 // Lines 83-87: Build substitution map for each base interface
 var substitutionMap = BuildSubstitutionMapForInterface(baseIface, baseIfaceRef);
@@ -537,14 +537,14 @@ current = { "T" -> T }  // IEnumerable's own generic param
 ```csharp
 // Base interface:
 interface IBase<T> {
-  T GetValue();  // T is type-level generic
+  T GetValue;  // T is type-level generic
 }
 
 // Derived interface:
 interface IDerived : IBase<string> { }
 
 // Substitution map: { "T" -> string }
-// Result: string GetValue();
+// Result: string GetValue;
 ```
 
 **Example - Method-level protection:**
@@ -592,7 +592,7 @@ interface IDerived : IBase<string> { }
    ```csharp
    var newParameters = method.Parameters
        .Select(p => p with { Type = SubstituteTypeReference(p.Type, filteredMap) })
-       .ToImmutableArray();
+       .ToImmutableArray;
    ```
 
    f. **Create substituted method symbol:**
@@ -620,7 +620,7 @@ int Parse<int>(string input);  // ERROR: <int> conflicts with method's generic p
 int Parse<T>(string input);  // Method's T preserved, return type T substituted
 ```
 
-**Delegates to:** `InterfaceMemberSubstitution.SubstituteTypeReference()` for recursive substitution
+**Delegates to:** `InterfaceMemberSubstitution.SubstituteTypeReference` for recursive substitution
 
 ---
 
@@ -667,7 +667,7 @@ interface IDerived : IBase<string> { }
        .Select(p => p with {
            Type = SubstituteTypeReference(p.Type, substitutionMap)
        })
-       .ToImmutableArray();
+       .ToImmutableArray;
    ```
 
    c. **Create substituted property symbol:**
@@ -759,7 +759,7 @@ interface IDerived : IBase<string> { }
 // Result: event Action<string, int> SomeEvent;
 ```
 
-**Recursive substitution:** `SubstituteTypeReference()` handles nested generics in delegate types automatically.
+**Recursive substitution:** `SubstituteTypeReference` handles nested generics in delegate types automatically.
 
 ---
 
@@ -770,7 +770,7 @@ interface IDerived : IBase<string> { }
 ```csharp
 // C# BCL interfaces:
 interface IEnumerable<T> {
-  IEnumerator<T> GetEnumerator();
+  IEnumerator<T> GetEnumerator;
 }
 
 interface ICollection<T> : IEnumerable<T> {
@@ -800,12 +800,12 @@ class MyStringList : IList<string> { }
 - Build current substitution: `{ "T" -> T }` (IEnumerable's param)
 - Compose substitutions: `{ "T" -> string }` (parent overrides current)
 - Substitute IEnumerable members:
-  - `IEnumerator<T> GetEnumerator()` → `IEnumerator<string> GetEnumerator()`
+  - `IEnumerator<T> GetEnumerator` → `IEnumerator<string> GetEnumerator`
 
 **Step 3: Collect all members in IList<string>**
 - Own members: `string this[int index] { get; set; }`
 - From ICollection: `int Count { get; }`, `void Add(string item)`
-- From IEnumerable: `IEnumerator<string> GetEnumerator()`
+- From IEnumerable: `IEnumerator<string> GetEnumerator`
 
 **Step 4: Deduplicate and finalize**
 - Remove duplicates by signature
@@ -822,7 +822,7 @@ interface IList_1<T> {
   Add(item: string): void;
 
   // From IEnumerable (substituted):
-  GetEnumerator(): IEnumerator_1<string>;
+  GetEnumerator: IEnumerator_1<string>;
 }
 ```
 
@@ -832,20 +832,20 @@ interface IList_1<T> {
 
 ### Integration Notes
 
-**Called by:** `InterfaceInliner.InlineInterface()` during BFS traversal of interface hierarchy
+**Called by:** `InterfaceInliner.InlineInterface` during BFS traversal of interface hierarchy
 
 **Call sequence:**
 1. For each base interface reference in queue:
-   - `BuildSubstitutionMapForInterface()` - Create param→arg mapping
-   - `ComposeSubstitutions()` - Compose with parent substitution
-   - `SubstituteMethodMembers()` - Substitute method signatures
-   - `SubstitutePropertyMembers()` - Substitute property types
-   - `SubstituteEventMembers()` - Substitute event handler types
+   - `BuildSubstitutionMapForInterface` - Create param→arg mapping
+   - `ComposeSubstitutions` - Compose with parent substitution
+   - `SubstituteMethodMembers` - Substitute method signatures
+   - `SubstitutePropertyMembers` - Substitute property types
+   - `SubstituteEventMembers` - Substitute event handler types
    - Add substituted members to collection
    - Queue grandparents with composed substitution map
 
 **Dependencies:**
-- `InterfaceMemberSubstitution.SubstituteTypeReference()` - Recursive type reference substitution
+- `InterfaceMemberSubstitution.SubstituteTypeReference` - Recursive type reference substitution
 - Uses immutable records (`with` expressions) for all transformations
 
 **Related to ClassPrinter FIX D:** ClassPrinter has similar substitution logic for class members that come from interfaces/base classes. InterfaceInliner handles interface→interface inheritance, ClassPrinter handles interface/base→class inheritance.
@@ -882,9 +882,9 @@ Filter internal BCL interfaces from type interface lists. Internal interfaces ar
      - Count after: `afterCount = filtered.Interfaces.Length`
      - Track removed: `totalRemoved += (beforeCount - afterCount)`
      - Add filtered type to namespace types list
-   - Create new namespace: `ns with { Types = filteredTypes.ToImmutableArray() }`
+   - Create new namespace: `ns with { Types = filteredTypes.ToImmutableArray }`
 2. Log summary: `"Removed {totalRemoved} internal interfaces across {namespaceCount} namespaces"`
-3. Return new graph: `graph with { Namespaces = filteredNamespaces.ToImmutableArray() }`
+3. Return new graph: `graph with { Namespaces = filteredNamespaces.ToImmutableArray }`
 
 **Called by:** Shape phase (early pass, before interface indexes built)
 
@@ -904,7 +904,7 @@ Filter internal BCL interfaces from type interface lists. Internal interfaces ar
      - If internal: increment `removedCount`, log removal
      - If public: add to `filtered` list
 3. If nothing removed: `if (removedCount == 0) return type`
-4. Return updated type: `type with { Interfaces = filtered.ToImmutableArray() }`
+4. Return updated type: `type with { Interfaces = filtered.ToImmutableArray }`
 
 **Logging:** Each removal logged with interface name and declaring type for traceability
 
@@ -1247,7 +1247,7 @@ private record MissingMembers(
 ### Purpose
 Resolve interface members to their declaring interface. Determines which interface in an inheritance chain actually declares a member.
 
-**Why needed?** When IList<T> : ICollection<T> both have Add(), we need to know which interface declared it first.
+**Why needed?** When IList<T> : ICollection<T> both have Add, we need to know which interface declared it first.
 
 ### Public API
 
@@ -1281,8 +1281,8 @@ public static TypeReference? FindDeclaringInterface(
    - Multiple candidates → pick most ancestral (first in chain)
 6. Cache result and return
 
-#### `InterfaceResolver.ClearCache()`
-**Signature:** `public static void ClearCache()`
+#### `InterfaceResolver.ClearCache`
+**Signature:** `public static void ClearCache`
 
 **Purpose:** Clear cache for testing or when rebuilding index
 
@@ -1331,7 +1331,7 @@ Resolve diamond inheritance conflicts. When multiple inheritance paths bring the
    \    /
    Class
 ```
-If IA and IB both override IBase.Method() with different signatures, we have a conflict.
+If IA and IB both override IBase.Method with different signatures, we have a conflict.
 
 ### Public API
 
@@ -1517,7 +1517,7 @@ string GetValue(string key);  // Different return type
 1. Group methods by signature excluding return type:
    - `type.Members.Methods.Where(m => m.EmitScope == scope).GroupBy(m => GetSignatureWithoutReturn(ctx, m))`
 2. For each group with multiple methods:
-   - Get return types: `methods.Select(m => GetTypeFullName(m.ReturnType)).Distinct()`
+   - Get return types: `methods.Select(m => GetTypeFullName(m.ReturnType)).Distinct`
    - If multiple return types → conflict detected
    - Log conflict (PhaseGate will validate)
 3. Same process for indexer properties (check property type conflicts)
@@ -1627,7 +1627,7 @@ Plan explicit interface views (As_IInterface properties). Creates As_IInterface 
      new ExplicitView(
          InterfaceReference: ifaceRef,
          ViewPropertyName: CreateViewName(ifaceRef),
-         ViewMembers: viewMembers.ToImmutableArray())
+         ViewMembers: viewMembers.ToImmutableArray)
      ```
 5. Return planned views
 
@@ -1725,7 +1725,7 @@ class Foo {
 **Algorithm:**
 1. Group class-surface properties by emitted name (camelCase):
    - `type.Members.Properties.Where(p => p.EmitScope == ClassSurface).GroupBy(p => ApplyCamelCase(p.ClrName))`
-2. Filter groups with duplicates: `.Where(g => g.Count() > 1)`
+2. Filter groups with duplicates: `.Where(g => g.Count > 1)`
 3. For each duplicate group:
    - Pick winner: `PickWinner(candidates)`
    - Demote all losers to ViewOnly: add to demotions set
@@ -2086,15 +2086,15 @@ Close generic constraints for TypeScript. Computes final constraint sets by:
 **Before:**
 ```typescript
 interface IEnumerable<T> extends IEnumerable {
-    // Only GetEnumerator(): IEnumerator<T>
+    // Only GetEnumerator: IEnumerator<T>
 }
 ```
 **After:**
 ```typescript
 interface IEnumerable_1<T> {
     // Both members inlined:
-    GetEnumerator(): IEnumerator_1<T>
-    GetEnumerator(): IEnumerator
+    GetEnumerator: IEnumerator_1<T>
+    GetEnumerator: IEnumerator
 }
 ```
 

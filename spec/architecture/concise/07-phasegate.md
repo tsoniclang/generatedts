@@ -49,40 +49,40 @@ PhaseGate runs **20+ validation modules** in strict order:
 ┌─────────────────────────────────────────────────────────────┐
 │ 1. CORE VALIDATIONS (8 functions)                          │
 ├─────────────────────────────────────────────────────────────┤
-│   1.1 ValidateTypeNames()                                   │
-│   1.2 ValidateMemberNames()                                 │
-│   1.3 ValidateGenericParameters()                           │
-│   1.4 ValidateInterfaceConformance()                        │
-│   1.5 ValidateInheritance()                                 │
-│   1.6 ValidateEmitScopes()                                  │
-│   1.7 ValidateImports()                                     │
-│   1.8 ValidatePolicyCompliance()                            │
+│   1.1 ValidateTypeNames                                   │
+│   1.2 ValidateMemberNames                                 │
+│   1.3 ValidateGenericParameters                           │
+│   1.4 ValidateInterfaceConformance                        │
+│   1.5 ValidateInheritance                                 │
+│   1.6 ValidateEmitScopes                                  │
+│   1.7 ValidateImports                                     │
+│   1.8 ValidatePolicyCompliance                            │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
 │ 2. HARDENING VALIDATIONS (M1-M18)                          │
 ├─────────────────────────────────────────────────────────────┤
-│   M1:  Views.Validate() - ViewOnly orphans                  │
-│   M2:  Names.ValidateFinalNames() - Renamer coverage        │
-│   M3:  Names.ValidateAliases() - Import aliases             │
-│   M4:  Names.ValidateIdentifiers() - Reserved words         │
-│   M5:  Names.ValidateOverloadCollisions() - Erased sigs     │
-│   M6:  Views.ValidateIntegrity() - 3 hard rules             │
-│   M7:  Constraints.EmitDiagnostics() - Constraint loss      │
-│   M8:  Views.ValidateMemberScoping() - Name collisions      │
-│   M9:  Scopes.ValidateEmitScopeInvariants() - Dual-role     │
-│   M10: Scopes.ValidateScopeMismatches() - Scope keys        │
-│   M11: Names.ValidateClassSurfaceUniqueness() - Dedup       │
-│   M12: Names.ValidateClrSurfaceNamePolicy() - NEW CLR-NAME  │
-│   M13: Names.ValidateNoNumericSuffixesOnSurface() - NEW CLR │
-│   M14: Finalization.Validate() - PG_FIN_001-009             │
-│   M15: Types.ValidatePrinterNameConsistency()               │
-│   M16: Types.ValidateTypeMapCompliance() - PG_TYPEMAP_001   │
-│   M17: Types.ValidateExternalTypeResolution() - PG_LOAD_001 │
-│   M18: Types.ValidatePrimitiveGenericLifting() - NEW jumanji9│
-│   M19: ImportExport.ValidatePublicApiSurface()              │
-│   M20: ImportExport.ValidateImportCompleteness()            │
-│   M21: ImportExport.ValidateExportCompleteness()            │
+│   M1:  Views.Validate - ViewOnly orphans                  │
+│   M2:  Names.ValidateFinalNames - Renamer coverage        │
+│   M3:  Names.ValidateAliases - Import aliases             │
+│   M4:  Names.ValidateIdentifiers - Reserved words         │
+│   M5:  Names.ValidateOverloadCollisions - Erased sigs     │
+│   M6:  Views.ValidateIntegrity - 3 hard rules             │
+│   M7:  Constraints.EmitDiagnostics - Constraint loss      │
+│   M8:  Views.ValidateMemberScoping - Name collisions      │
+│   M9:  Scopes.ValidateEmitScopeInvariants - Dual-role     │
+│   M10: Scopes.ValidateScopeMismatches - Scope keys        │
+│   M11: Names.ValidateClassSurfaceUniqueness - Dedup       │
+│   M12: Names.ValidateClrSurfaceNamePolicy - NEW CLR-NAME  │
+│   M13: Names.ValidateNoNumericSuffixesOnSurface - NEW CLR │
+│   M14: Finalization.Validate - PG_FIN_001-009             │
+│   M15: Types.ValidatePrinterNameConsistency               │
+│   M16: Types.ValidateTypeMapCompliance - PG_TYPEMAP_001   │
+│   M17: Types.ValidateExternalTypeResolution - PG_LOAD_001 │
+│   M18: Types.ValidatePrimitiveGenericLifting - NEW │
+│   M19: ImportExport.ValidatePublicApiSurface              │
+│   M20: ImportExport.ValidateImportCompleteness            │
+│   M21: ImportExport.ValidateExportCompleteness            │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
@@ -105,24 +105,24 @@ PhaseGate runs **20+ validation modules** in strict order:
 
 **Key Functions**:
 
-#### 1. ValidateTypeNames()
+#### 1. ValidateTypeNames
 - All types have non-empty `TsEmitName`
 - No duplicate type names within namespace
 - TS reserved words properly sanitized
 - **Error codes**: TBG405, TBG102, TBG120
 
-#### 2. ValidateMemberNames()
+#### 2. ValidateMemberNames
 - All methods/properties/fields have non-empty `TsEmitName`
 - No overload collisions within same scope
 - **Error codes**: TBG405, TBG101 (WARNING)
 
-#### 3. ValidateGenericParameters()
+#### 3. ValidateGenericParameters
 - All generic parameters have names
 - Constraints are representable in TS
 - No illegal constraint narrowing
 - **Error codes**: TBG405, TBG404 (WARNING), TBG410 (INFO)
 
-#### 4. ValidateInterfaceConformance()
+#### 4. ValidateInterfaceConformance
 - Classes structurally conform to claimed interfaces
 - All interface methods/properties present on class surface
 - Method signatures are TS-assignable
@@ -131,21 +131,21 @@ PhaseGate runs **20+ validation modules** in strict order:
 
 **Special**: Interfaces with explicit views are SKIPPED (satisfied via `As_IInterface` properties)
 
-#### 5. ValidateInheritance()
+#### 5. ValidateInheritance
 - Base classes are actually classes (not interfaces/structs)
 - No circular inheritance
 - **Error codes**: TBG201
 
-#### 6. ValidateEmitScopes()
+#### 6. ValidateEmitScopes
 - Counts members by EmitScope (ClassSurface vs ViewOnly)
 - No validation errors - just metrics
 
-#### 7. ValidateImports()
+#### 7. ValidateImports
 - No circular dependencies in import graph
 - Import/export counts
 - **Error codes**: TBG201 (WARNING for cycles)
 
-#### 8. ValidatePolicyCompliance()
+#### 8. ValidatePolicyCompliance
 - Policy constraints are met (extensible)
 - **Error codes**: TBG400
 
@@ -157,13 +157,13 @@ PhaseGate runs **20+ validation modules** in strict order:
 
 **Key Functions**:
 
-#### 1. Validate()
+#### 1. Validate
 - ViewOnly members without views (orphans)
 - ViewOnly members belong to correct view (SourceInterface matches)
 - View interface types are resolvable
 - **Error codes**: TBG510, TBG202 (WARNING), TBG302
 
-#### 2. ValidateIntegrity() - **3 HARD RULES**
+#### 2. ValidateIntegrity - **3 HARD RULES**
 
 **PG_VIEW_001**: Non-empty (must contain ≥1 ViewMember)
 ```csharp
@@ -184,7 +184,7 @@ ExplicitView(IFoo) { ViewPropertyName = "123-foo" }  // ERROR: TBG513 (invalid i
 
 **Error codes**: TBG511, TBG512, TBG513
 
-#### 3. ValidateMemberScoping()
+#### 3. ValidateMemberScoping
 
 **PG_NAME_003**: No name collisions within view scope
 ```csharp
@@ -200,8 +200,8 @@ ExplicitView(IFoo) {
 **PG_NAME_004**: ViewOnly member names don't shadow class surface
 ```csharp
 class Foo : IBar {
-    method Baz() { EmitScope = ClassSurface, TsEmitName = "baz" }
-    method IBaz() { EmitScope = ViewOnly, TsEmitName = "baz" }  // ERROR: TBG104
+    method Baz { EmitScope = ClassSurface, TsEmitName = "baz" }
+    method IBaz { EmitScope = ViewOnly, TsEmitName = "baz" }  // ERROR: TBG104
 }
 ```
 
@@ -215,18 +215,18 @@ class Foo : IBar {
 
 **Key Functions**:
 
-#### 1. ValidateFinalNames()
+#### 1. ValidateFinalNames
 - All types have final names from Renamer
 - All ClassSurface members have final names from Renamer
 - No duplicate names within namespace/type scopes
 - **Error codes**: TBG405, TBG102, TBG101 (WARNING)
 
-#### 2. ValidateAliases()
+#### 2. ValidateAliases
 - Import aliases don't collide within import scope
 - Imported type names don't collide with local types
 - **Error codes**: TBG100
 
-#### 3. ValidateIdentifiers() - **PG_ID_001**
+#### 3. ValidateIdentifiers - **PG_ID_001**
 - All identifiers are properly sanitized (TS reserved words have underscore suffix)
 - Checks: types, members, parameters, type parameters, view members
 - **Error codes**: TBG719 (PostSanitizerUnsanitizedReservedIdentifier)
@@ -234,10 +234,10 @@ class Foo : IBar {
 **Examples**:
 ```csharp
 class @class { TsEmitName = "class" }  // ERROR: TBG719 (should be "class_")
-method @for() { TsEmitName = "for" }   // ERROR: TBG719 (should be "for_")
+method @for { TsEmitName = "for" }   // ERROR: TBG719 (should be "for_")
 ```
 
-#### 4. ValidateOverloadCollisions() - **PG_OV_001**
+#### 4. ValidateOverloadCollisions - **PG_OV_001**
 - No duplicate erased TS signatures in same surface
 - Checks class surface and each view separately
 - Groups by: (Name, IsStatic, ErasedSignature)
@@ -249,12 +249,12 @@ method Bar<T>(T x) { }
 method Bar<U>(U x) { }  // ERROR: TBG213 (both erase to "Bar(T): void")
 ```
 
-#### 5. ValidateClassSurfaceUniqueness() - **PG_NAME_005**
+#### 5. ValidateClassSurfaceUniqueness - **PG_NAME_005**
 - Class surface has no duplicate emitted names after deduplication
 - Catches duplicates that slipped through ClassSurfaceDeduplicator
 - **Error codes**: TBG105 (DuplicatePropertyNamePostDedup)
 
-#### 6. ValidateClrSurfaceNamePolicy() - **PG_NAME_SURF_001**
+#### 6. ValidateClrSurfaceNamePolicy - **PG_NAME_SURF_001**
 
 **What it validates**:
 - Class members match interface members using CLR-name policy
@@ -277,18 +277,18 @@ This ensures interfaces and classes emit identical member names, preventing TS24
 ```csharp
 // Interface requires "Dispose" but class has "dispose"
 interface IDisposable {
-    method Dispose(): void { ClrName = "Dispose" }
+    method Dispose: void { ClrName = "Dispose" }
 }
 
 class FileStream : IDisposable {
-    method dispose(): void { ClrName = "dispose", EmitScope = ClassSurface }
+    method dispose: void { ClrName = "dispose", EmitScope = ClassSurface }
 }
 // ERROR: TBG8A1 (CLR-name policy applies "Dispose", class only has "dispose")
 ```
 
 **Algorithm**:
 1. For each class/struct implementing interfaces:
-   - Build set of all class surface member names using `NameUtilities.ApplyClrSurfaceNamePolicy()`
+   - Build set of all class surface member names using `NameUtilities.ApplyClrSurfaceNamePolicy`
    - Include both ClassSurface members and ViewOnly members (explicit implementations)
 2. For each implemented interface:
    - Resolve interface type via TypeIndex
@@ -311,12 +311,12 @@ Without this validation, the emit phase could generate:
 ```typescript
 // Interface (internal/index.d.ts)
 interface IDisposable {
-    Dispose(): void;  // PascalCase
+    Dispose: void;  // PascalCase
 }
 
 // Class (internal/index.d.ts)
 class FileStream implements IDisposable {
-    dispose(): void;  // camelCase
+    dispose: void;  // camelCase
 }
 // TS2420: Class 'FileStream' incorrectly implements interface 'IDisposable'.
 // Property 'Dispose' is missing in type 'FileStream' but required in type 'IDisposable'.
@@ -328,7 +328,7 @@ class FileStream implements IDisposable {
 
 ---
 
-#### 7. ValidateNoNumericSuffixesOnSurface() - **PG_NAME_SURF_002**
+#### 7. ValidateNoNumericSuffixesOnSurface - **PG_NAME_SURF_002**
 
 **What it validates**:
 - No numeric suffixes on emitted surface or view member names
@@ -425,24 +425,24 @@ To re-enable, validator needs to:
 
 **Key Functions**:
 
-#### 1. ValidateEmitScopeInvariants() - **PG_INT_002, PG_INT_003**
+#### 1. ValidateEmitScopeInvariants - **PG_INT_002, PG_INT_003**
 
 **PG_INT_002**: No member appears in both ClassSurface and ViewOnly
 ```csharp
 class Foo {
-    method Bar() { EmitScope = ClassSurface }
-    method Bar() { EmitScope = ViewOnly }  // ERROR: TBG702
+    method Bar { EmitScope = ClassSurface }
+    method Bar { EmitScope = ViewOnly }  // ERROR: TBG702
 }
 ```
 
 **PG_INT_003**: ViewOnly members must have SourceInterface
 ```csharp
-method Baz() { EmitScope = ViewOnly, SourceInterface = null }  // ERROR: TBG703
+method Baz { EmitScope = ViewOnly, SourceInterface = null }  // ERROR: TBG703
 ```
 
 **Error codes**: TBG702, TBG703
 
-#### 2. ValidateScopeMismatches() - **PG_SCOPE_003, PG_SCOPE_004**
+#### 2. ValidateScopeMismatches - **PG_SCOPE_003, PG_SCOPE_004**
 
 **PG_SCOPE_003**: Checks scope keys are properly formatted
 **PG_SCOPE_004**: Detects scope/EmitScope mismatches
@@ -457,21 +457,21 @@ method Baz() { EmitScope = ViewOnly, SourceInterface = null }  // ERROR: TBG703
 
 **Key Functions**:
 
-#### 1. ValidatePrinterNameConsistency() - **PG_PRINT_001**
+#### 1. ValidatePrinterNameConsistency - **PG_PRINT_001**
 - TypeRefPrinter produces consistent names
 - **Error codes**: TBG717
 
-#### 2. ValidateTypeMapCompliance() - **PG_TYPEMAP_001**
+#### 2. ValidateTypeMapCompliance - **PG_TYPEMAP_001**
 - Type map entries are valid
 - **MUST RUN EARLY** (before external type validation)
 - **Error codes**: TBG718
 
-#### 3. ValidateExternalTypeResolution() - **PG_LOAD_001**
+#### 3. ValidateExternalTypeResolution - **PG_LOAD_001**
 - External types are resolvable
 - **AFTER TypeMap validation**
 - **Error codes**: TBG704
 
-#### 4. ValidatePrimitiveGenericLifting() - **PG_GENERIC_PRIM_LIFT_001** - **jumanji9 NEW**
+#### 4. ValidatePrimitiveGenericLifting - **PG_GENERIC_PRIM_LIFT_001** - **NEW**
 - All primitive type arguments covered by CLROf lifting rules
 - Ensures TypeRefPrinter primitive detection stays in sync with PrimitiveLift configuration
 - Prevents regressions where new primitive is used but not added to CLROf mapping
@@ -479,7 +479,7 @@ method Baz() { EmitScope = ViewOnly, SourceInterface = null }  // ERROR: TBG703
 
 **What it validates**: Every primitive type used as generic type argument (e.g., `IEquatable<int>`) has CLROf mapping rule
 
-**Why needed (jumanji9)**: Prevents primitives from slipping through CLROf conditional type with identity fallback, which would cause runtime type mismatch
+**Why needed**: Prevents primitives from slipping through CLROf conditional type with identity fallback, which would cause runtime type mismatch
 
 **Example**: TypeRefPrinter wraps `IEquatable<int>` → `IEquatable_1<CLROf<int>>` where `CLROf<int> = Int32`. Validation ensures all primitives have this mapping.
 
@@ -493,16 +493,16 @@ method Baz() { EmitScope = ViewOnly, SourceInterface = null }  // ERROR: TBG703
 
 **Key Functions**:
 
-#### 1. ValidatePublicApiSurface() - **PG_API_001, PG_API_002**
+#### 1. ValidatePublicApiSurface - **PG_API_001, PG_API_002**
 - Public API surface is valid
 - **BEFORE imports validation**
 - **Error codes**: TBG705, TBG706
 
-#### 2. ValidateImportCompleteness() - **PG_IMPORT_001**
+#### 2. ValidateImportCompleteness - **PG_IMPORT_001**
 - All required imports are present
 - **Error codes**: TBG707
 
-#### 3. ValidateExportCompleteness() - **PG_EXPORT_001**
+#### 3. ValidateExportCompleteness - **PG_EXPORT_001**
 - All required exports are present
 - **Error codes**: TBG708
 
@@ -514,13 +514,13 @@ method Baz() { EmitScope = ViewOnly, SourceInterface = null }  // ERROR: TBG703
 
 **Key Function**:
 
-#### EmitDiagnostics() - **PG_CT_001, PG_CT_002**
+#### EmitDiagnostics - **PG_CT_001, PG_CT_002**
 
 Emits diagnostics for constructor constraint losses detected by `InterfaceConstraintAuditor`.
 
 **What it validates**:
 - Reports constructor constraint losses per (Type, Interface) pair
-- TS can't enforce `new()` constraint at compile time
+- TS can't enforce `new` constraint at compile time
 - Metadata sidecar tracks this information
 
 **Error codes**:
@@ -528,14 +528,14 @@ Emits diagnostics for constructor constraint losses detected by `InterfaceConstr
 
 **Example**:
 ```csharp
-interface IFactory<T> where T : new() {
-    T Create();
+interface IFactory<T> where T : new {
+    T Create;
 }
 
 class StringFactory : IFactory<string> {
-    public string Create() => new string();
+    public string Create => new string;
 }
-// PG_CT_001: TypeScript loses 'new()' constraint information
+// PG_CT_001: TypeScript loses 'new' constraint information
 ```
 
 ---
@@ -546,7 +546,7 @@ class StringFactory : IFactory<string> {
 
 **Key Function**:
 
-#### Validate() - **PG_FIN_001 through PG_FIN_009**
+#### Validate - **PG_FIN_001 through PG_FIN_009**
 
 Catches symbols without proper finalization:
 
@@ -708,8 +708,8 @@ PhaseGate performs **comprehensive validation** through 50+ checks:
 - CLR-name contract enforcement
 
 **CLR-Name Contract Validators**:
-- **ValidateClrSurfaceNamePolicy()** - PG_NAME_SURF_001 (TBG8A1) - 81% reduction in TS2420 errors
-- **ValidateNoNumericSuffixesOnSurface()** - PG_NAME_SURF_002 (TBG8A2) - Currently DISABLED
+- **ValidateClrSurfaceNamePolicy** - PG_NAME_SURF_001 (TBG8A1) - 81% reduction in TS2420 errors
+- **ValidateNoNumericSuffixesOnSurface** - PG_NAME_SURF_002 (TBG8A2) - Currently DISABLED
 
 **Key principle**: Any ERROR blocks Emit phase (no exceptions).
 

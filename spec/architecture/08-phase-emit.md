@@ -54,13 +54,13 @@ output/
 ### Purpose
 Generates public-facing `index.d.ts` files for each namespace. These are the entry points that users import from.
 
-### Method: Emit()
+### Method: Emit
 ```csharp
 public static void Emit(BuildContext ctx, EmissionPlan plan, string outputDirectory)
 ```
 **What it does:**
 - Iterates through `plan.EmissionOrder.Namespaces` in deterministic order
-- For each namespace, generates facade content via `GenerateFacade()`
+- For each namespace, generates facade content via `GenerateFacade`
 - Writes to `output/{namespace}/index.d.ts`
 - Logs each emitted file
 
@@ -71,7 +71,7 @@ public static void Emit(BuildContext ctx, EmissionPlan plan, string outputDirect
 - Re-export namespace (for non-dotted namespaces)
 - Individual type exports for convenience
 
-### Method: GenerateFacade()
+### Method: GenerateFacade
 ```csharp
 private static string GenerateFacade(BuildContext ctx, EmissionPlan plan, Model.Symbols.NamespaceSymbol ns)
 ```
@@ -88,7 +88,7 @@ private static string GenerateFacade(BuildContext ctx, EmissionPlan plan, Model.
 - Handles root namespace specially (no namespace wrapper, direct re-export)
 - Skips dotted namespaces for `export import` (TypeScript doesn't support dots in identifiers)
 
-### Method: GetImportAlias()
+### Method: GetImportAlias
 ```csharp
 private static string GetImportAlias(string namespaceName)
 ```
@@ -123,7 +123,7 @@ export type Dictionary_2 = Internal.System.Collections.Generic.Dictionary_2;
 ### Purpose
 Generates `internal/index.d.ts` files with actual TypeScript declarations. These contain the real type definitions that the facade re-exports.
 
-### Method: ShouldEmit()
+### Method: ShouldEmit
 ```csharp
 public static bool ShouldEmit(TypeSymbol type)
 ```
@@ -131,17 +131,17 @@ public static bool ShouldEmit(TypeSymbol type)
 - Returns `true` only for public types (`type.Accessibility == Accessibility.Public`)
 - Internal types are never emitted to `.d.ts` files
 
-### Method: Emit()
+### Method: Emit
 ```csharp
 public static void Emit(BuildContext ctx, EmissionPlan plan, string outputDirectory)
 ```
 **What it does:**
 - Iterates through `plan.EmissionOrder.Namespaces`
-- For each namespace, generates declarations via `GenerateNamespaceDeclaration()`
+- For each namespace, generates declarations via `GenerateNamespaceDeclaration`
 - Writes to `output/{namespace}/internal/index.d.ts` (or `_root/index.d.ts` for root)
 - Creates subdirectory if needed
 
-### Method: GenerateNamespaceDeclaration()
+### Method: GenerateNamespaceDeclaration
 ```csharp
 private static string GenerateNamespaceDeclaration(BuildContext ctx, SymbolGraph graph, ImportPlan importPlan, NamespaceEmitOrder nsOrder)
 ```
@@ -155,14 +155,14 @@ private static string GenerateNamespaceDeclaration(BuildContext ctx, SymbolGraph
 7. **Type declarations** - Iterates through `nsOrder.OrderedTypes` and emits each
 
 **Algorithm:**
-- Calls `NamespaceUsesSupportTypes()` to check if `TSUnsafePointer`/`TSByRef` needed
-- Uses `importPlan.GetImportsFor()` to get cross-namespace imports
+- Calls `NamespaceUsesSupportTypes` to check if `TSUnsafePointer`/`TSByRef` needed
+- Uses `importPlan.GetImportsFor` to get cross-namespace imports
 - For root namespace, emits types at module level (no namespace wrapper)
 - For each type, checks if it has explicit views (companion views pattern):
   - **With views**: Emits `TypeName$instance` class + `__TypeName$views` interface + intersection type alias
   - **Without views**: Emits normal class/interface/enum/delegate
 
-### Method: EmitBrandedPrimitives()
+### Method: EmitBrandedPrimitives
 ```csharp
 private static void EmitBrandedPrimitives(StringBuilder sb)
 ```
@@ -171,7 +171,7 @@ private static void EmitBrandedPrimitives(StringBuilder sb)
   - `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`
   - `float`, `double`, `decimal`, `nint`, `nuint`
 
-### Method: EmitCompanionViewsInterface()
+### Method: EmitCompanionViewsInterface
 ```csharp
 private static string EmitCompanionViewsInterface(TypeSymbol type, ImmutableArray<Shape.ViewPlanner.ExplicitView> views, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -179,7 +179,7 @@ private static string EmitCompanionViewsInterface(TypeSymbol type, ImmutableArra
 - Generates companion interface with view properties: `interface __List_1$views<T> { ... }`
 - Each view becomes a readonly property: `readonly IEnumerable_1$view: IEnumerable_1<T>;`
 
-### Method: EmitIntersectionTypeAlias()
+### Method: EmitIntersectionTypeAlias
 ```csharp
 private static string EmitIntersectionTypeAlias(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -187,7 +187,7 @@ private static string EmitIntersectionTypeAlias(TypeSymbol type, TypeNameResolve
 - Creates type alias that intersects instance and views:
   - `export type List_1<T> = List_1$instance<T> & __List_1$views<T>;`
 
-### Method: FindMatchingInterface() - FIX D
+### Method: FindMatchingInterface - FIX D
 ```csharp
 private static TypeReference? FindMatchingInterface(TypeSymbol type, TypeReference viewInterfaceRef)
 ```
@@ -246,16 +246,16 @@ type.Interfaces[0] = IEnumerable<KeyValuePair<TKey, TValue>>
 implBaseName = "IEnumerable`1"
 Match! Return IEnumerable<KeyValuePair<TKey, TValue>>
 
-// Used in EmitCompanionViewsInterface():
+// Used in EmitCompanionViewsInterface:
 var matchedInterface = FindMatchingInterface(type, view.InterfaceReference);
 // Result: IEnumerable<KeyValuePair<TKey, TValue>> (not IEnumerable<T>)
 ```
 
-**Called by:** `EmitCompanionViewsInterface()` at line 267 for each view property
+**Called by:** `EmitCompanionViewsInterface` at line 267 for each view property
 
 **Impact:** Prevents generic parameter leaks in companion views. Without this, view properties would use orphaned generic parameters instead of the class's actual type arguments.
 
-### Method: GetInterfaceBaseName() - FIX D Helper
+### Method: GetInterfaceBaseName - FIX D Helper
 ```csharp
 private static string GetInterfaceBaseName(TypeReference typeRef)
 ```
@@ -273,15 +273,15 @@ NestedTypeReference("Outer`1+Inner")               → "Inner"
 **Algorithm:**
 - `NamedTypeReference named` → `named.Name` (just the name with arity marker)
 - `NestedTypeReference nested` → `nested.NestedName`
-- Other types → `typeRef.ToString()` or empty string
+- Other types → `typeRef.ToString` or empty string
 
 **Why needed:** Interface matching must ignore type arguments and compare only the base generic definition. `IEnumerable<T>` and `IEnumerable<string>` both have base name `IEnumerable\`1`.
 
-**Used by:** `FindMatchingInterface()` to compare interface names
+**Used by:** `FindMatchingInterface` to compare interface names
 
 **Note:** Returns name WITH backtick arity (e.g., `IEnumerable\`1`), not without (e.g., `IEnumerable`). This is critical for distinguishing generic arities.
 
-### Method: QualifyViewInterface() - TS2304 FIX (jumanji9)
+### Method: QualifyViewInterface - TS2304 FIX
 ```csharp
 private static string QualifyViewInterface(
     Model.Types.TypeReference interfaceRef,
@@ -300,7 +300,7 @@ interface __List_1$views<T> {
   readonly IEnumerable_1$view: IEnumerable_1<T>;  // TS2304: Cannot find name 'IEnumerable_1'
 }
 
-// WITH QualifyViewInterface (jumanji9):
+// WITH QualifyViewInterface:
 interface __List_1$views<T> {
   readonly IEnumerable_1$view: System_Collections_Generic_Internal.System.Collections.Generic.IEnumerable_1<T>;
 }
@@ -310,7 +310,7 @@ interface __List_1$views<T> {
 
 **Algorithm:**
 1. **Print base type name:**
-   - Use `TypeRefPrinter.Print()` to get initial type name
+   - Use `TypeRefPrinter.Print` to get initial type name
 
 2. **Check if it's a NamedTypeReference:**
    - Extract namespace from CLR full name (before last dot)
@@ -341,23 +341,23 @@ Different from currentNamespace → needs qualification
 "System_Collections_Generic_Internal.System.Collections.Generic.IEnumerable_1<T>"
 ```
 
-**Called by:** `EmitCompanionViewsInterface()` at line 398 when emitting each view property
+**Called by:** `EmitCompanionViewsInterface` at line 398 when emitting each view property
 
 **Impact:** Eliminated 1 TS2304 error in System.Collections namespace. Prevents "Cannot find name" errors for transitive interface references in companion views.
 
-**jumanji9 Addition:** This method was added in jumanji9 to handle edge cases where ImportPlanner doesn't track transitive interfaces (interfaces not directly in the class's implements clause but inherited through interface inheritance).
+**Addition:** This method was added in to handle edge cases where ImportPlanner doesn't track transitive interfaces (interfaces not directly in the class's implements clause but inherited through interface inheritance).
 
-### Method: NamespaceUsesSupportTypes() - TS2304 FIX (jumanji9)
+### Method: NamespaceUsesSupportTypes - TS2304 FIX
 ```csharp
 private static bool NamespaceUsesSupportTypes(NamespaceSymbol ns)
 ```
 **What it does:**
 - Scans all public types and their ClassSurface/StaticSurface members
-- **jumanji9 Addition:** Also checks constructor parameters for unsafe types
+- **Addition:** Also checks constructor parameters for unsafe types
 - Checks if any use `PointerTypeReference` or `ByRefTypeReference`
 - Returns `true` if support types import needed
 
-**jumanji9 Constructor Checking (lines 532-541):**
+**Constructor Checking (lines 532-541):**
 ```csharp
 // Check constructors for unsafe types
 foreach (var ctor in type.Members.Constructors)
@@ -371,11 +371,11 @@ foreach (var ctor in type.Members.Constructors)
 }
 ```
 
-**Why needed:** Constructors with pointer/byref parameters need TSUnsafePointer/TSByRef imports, but constructors weren't being checked before jumanji9. This caused missing import errors.
+**Why needed:** Constructors with pointer/byref parameters need TSUnsafePointer/TSByRef imports, but constructors weren't being checked before . This caused missing import errors.
 
 **Impact:** Eliminated 1 TS2304 error for `TSUnsafePointer` in namespaces with unsafe constructor parameters.
 
-### Method: ContainsUnsafeType()
+### Method: ContainsUnsafeType
 ```csharp
 private static bool ContainsUnsafeType(Model.Types.TypeReference typeRef)
 ```
@@ -418,7 +418,7 @@ export namespace System.Collections.Generic {
 
     // Without views:
     export interface IEnumerable_1<T> {
-        GetEnumerator(): IEnumerator_1<T>;
+        GetEnumerator: IEnumerator_1<T>;
     }
 }
 ```
@@ -534,25 +534,25 @@ public sealed record ConstructorMetadata
 }
 ```
 
-### Method: Emit()
+### Method: Emit
 ```csharp
 public static void Emit(BuildContext ctx, EmissionPlan plan, string outputDirectory)
 ```
 **What it does:**
 - Iterates through `plan.EmissionOrder.Namespaces`
-- For each namespace, generates metadata via `GenerateMetadata()`
+- For each namespace, generates metadata via `GenerateMetadata`
 - Writes to `output/{namespace}/internal/metadata.json`
 - Uses indented JSON format with null value omission
 
-### Method: GenerateMetadata()
+### Method: GenerateMetadata
 ```csharp
 private static NamespaceMetadata GenerateMetadata(BuildContext ctx, NamespaceEmitOrder nsOrder)
 ```
 **What it does:**
 - Creates `NamespaceMetadata` with namespace name and contributing assemblies
-- For each type in `nsOrder.OrderedTypes`, calls `GenerateTypeMetadata()`
+- For each type in `nsOrder.OrderedTypes`, calls `GenerateTypeMetadata`
 
-### Method: GenerateTypeMetadata()
+### Method: GenerateTypeMetadata
 ```csharp
 private static TypeMetadata GenerateTypeMetadata(TypeSymbol type, BuildContext ctx)
 ```
@@ -561,15 +561,15 @@ private static TypeMetadata GenerateTypeMetadata(TypeSymbol type, BuildContext c
 - Creates `TypeMetadata` with all type information
 - Generates metadata for all member kinds (methods, properties, fields, events, constructors)
 
-### Method: GenerateMethodMetadata()
+### Method: GenerateMethodMetadata
 ```csharp
 private static MethodMetadata GenerateMethodMetadata(MethodSymbol method, TypeSymbol declaringType, BuildContext ctx)
 ```
 **What it does:**
-- Uses **view scope** for ViewOnly members (via `ScopeFactory.ViewSurface()`)
-- Uses **class scope** for ClassSurface members (via `ScopeFactory.ClassSurface()`)
-- Gets final TS name from `ctx.Renamer.GetFinalMemberName()`
-- Generates normalized signature via `SignatureNormalization.NormalizeMethod()`
+- Uses **view scope** for ViewOnly members (via `ScopeFactory.ViewSurface`)
+- Uses **class scope** for ClassSurface members (via `ScopeFactory.ClassSurface`)
+- Gets final TS name from `ctx.Renamer.GetFinalMemberName`
+- Generates normalized signature via `SignatureNormalization.NormalizeMethod`
 
 **Key Decision:**
 - ViewOnly members get view-scoped names: `"IEnumerable_1$view$GetEnumerator"`
@@ -611,7 +611,7 @@ private static MethodMetadata GenerateMethodMetadata(MethodSymbol method, TypeSy
         {
           "ClrName": "GetEnumerator",
           "TsEmitName": "IEnumerable_1$view$GetEnumerator",
-          "NormalizedSignature": "GetEnumerator():System.Collections.Generic.IEnumerator`1<T>",
+          "NormalizedSignature": "GetEnumerator:System.Collections.Generic.IEnumerator`1<T>",
           "Provenance": "ExplicitImpl",
           "EmitScope": "ViewOnly",
           "IsStatic": false,
@@ -739,24 +739,24 @@ public sealed record ConstructorBinding
 }
 ```
 
-### Method: Emit()
+### Method: Emit
 ```csharp
 public static void Emit(BuildContext ctx, EmissionPlan plan, string outputDirectory)
 ```
 **What it does:**
 - Iterates through `plan.EmissionOrder.Namespaces`
-- For each namespace, generates bindings via `GenerateBindings()`
+- For each namespace, generates bindings via `GenerateBindings`
 - Writes to `output/{namespace}/bindings.json`
 
-### Method: GenerateBindings()
+### Method: GenerateBindings
 ```csharp
 private static NamespaceBindings GenerateBindings(BuildContext ctx, NamespaceEmitOrder nsOrder)
 ```
 **What it does:**
 - Creates `NamespaceBindings` with namespace name
-- For each type in `nsOrder.OrderedTypes`, calls `GenerateTypeBinding()`
+- For each type in `nsOrder.OrderedTypes`, calls `GenerateTypeBinding`
 
-### Method: GenerateTypeBinding()
+### Method: GenerateTypeBinding
 ```csharp
 private static TypeBinding GenerateTypeBinding(TypeSymbol type, BuildContext ctx)
 ```
@@ -795,8 +795,8 @@ private static TypeBinding GenerateTypeBinding(TypeSymbol type, BuildContext ctx
           "ClrName": "GetEnumerator",
           "TsEmitName": "IEnumerable_1$view$GetEnumerator",
           "MetadataToken": 100663360,
-          "CanonicalSignature": "GetEnumerator():System.Collections.Generic.IEnumerator`1<!0>",
-          "NormalizedSignature": "GetEnumerator():System.Collections.Generic.IEnumerator`1<T>",
+          "CanonicalSignature": "GetEnumerator:System.Collections.Generic.IEnumerator`1<!0>",
+          "NormalizedSignature": "GetEnumerator:System.Collections.Generic.IEnumerator`1<T>",
           "EmitScope": "ViewOnly",
           "Arity": 0,
           "ParameterCount": 0
@@ -818,16 +818,16 @@ private static TypeBinding GenerateTypeBinding(TypeSymbol type, BuildContext ctx
 ### Purpose
 Generates `index.js` stub files that throw at runtime. Prevents accidental execution while allowing TypeScript type checking.
 
-### Method: Emit()
+### Method: Emit
 ```csharp
 public static void Emit(BuildContext ctx, EmissionPlan plan, string outputDirectory)
 ```
 **What it does:**
 - Iterates through `plan.EmissionOrder.Namespaces`
-- For each namespace, generates stub via `GenerateStub()`
+- For each namespace, generates stub via `GenerateStub`
 - Writes to `output/{namespace}/index.js`
 
-### Method: GenerateStub()
+### Method: GenerateStub
 ```csharp
 private static string GenerateStub(string namespaceName)
 ```
@@ -856,18 +856,18 @@ throw new Error(
 ### Purpose
 Generates centralized `_support/types.d.ts` with marker types for unsafe CLR constructs. Emitted once for entire generation, not per-namespace.
 
-### Method: Emit()
+### Method: Emit
 ```csharp
 public static void Emit(BuildContext ctx, string outputDirectory)
 ```
 **What it does:**
 - Creates `_support/` directory
-- Generates content via `GenerateSupportTypes()`
+- Generates content via `GenerateSupportTypes`
 - Writes to `output/_support/types.d.ts`
 
-### Method: GenerateSupportTypes()
+### Method: GenerateSupportTypes
 ```csharp
-private static string GenerateSupportTypes()
+private static string GenerateSupportTypes
 ```
 **What it does:**
 - Emits `TSUnsafePointer<T>` type for pointer types (void*, int*, T*)
@@ -911,7 +911,7 @@ export type TSByRef<T> = { value: T } & { readonly __tsbindgenByRef?: unique sym
 ### Purpose
 Maps CLR built-in types to TypeScript types. Short-circuits graph lookups for primitives and special types. **CRITICAL:** Must be checked BEFORE TypeIndex lookup to avoid PG_LOAD_001 false positives.
 
-### Method: TryMapBuiltin()
+### Method: TryMapBuiltin
 ```csharp
 public static bool TryMapBuiltin(string fullName, out string tsType)
 ```
@@ -948,7 +948,7 @@ public static bool TryMapBuiltin(string fullName, out string tsType)
 | `System.Delegate` | `Function` | |
 | `System.MulticastDelegate` | `Function` | |
 
-### Method: IsUnsupportedSpecialForm()
+### Method: IsUnsupportedSpecialForm
 ```csharp
 public static bool IsUnsupportedSpecialForm(string fullName, bool isPointer, bool isByRef, bool isFunctionPointer)
 ```
@@ -956,7 +956,7 @@ public static bool IsUnsupportedSpecialForm(string fullName, bool isPointer, boo
 - Returns `true` if type is pointer, byref, or function pointer
 - These require special handling or substitution
 
-### Method: MapUnsupportedSpecialForm()
+### Method: MapUnsupportedSpecialForm
 ```csharp
 public static string MapUnsupportedSpecialForm(string fullName, bool isPointer, bool isByRef, bool isFunctionPointer, bool allowUnsafeMaps)
 ```
@@ -964,7 +964,7 @@ public static string MapUnsupportedSpecialForm(string fullName, bool isPointer, 
 - If `allowUnsafeMaps` is `false`, throws exception
 - If `allowUnsafeMaps` is `true`, returns `"any"`
 
-### Method: IsBrandedPrimitive()
+### Method: IsBrandedPrimitive
 ```csharp
 public static bool IsBrandedPrimitive(string fullName)
 ```
@@ -991,7 +991,7 @@ public TypeNameResolver(BuildContext ctx, SymbolGraph graph, ImportPlan? importP
 - Stores `currentNamespace` (optional - for cross-namespace qualification)
 - Stores `facadeMode` flag (TS2304 FIX - enables cross-namespace qualification in facades)
 
-**jumanji9 Addition**: `facadeMode` parameter added to enable cross-namespace type qualification in facade constraint clauses. When true, all cross-namespace type references are qualified with namespace alias to prevent TS2304 "Cannot find name" errors.
+**Addition**: `facadeMode` parameter added to enable cross-namespace type qualification in facade constraint clauses. When true, all cross-namespace type references are qualified with namespace alias to prevent TS2304 "Cannot find name" errors.
 
 ### Method: For(TypeSymbol)
 ```csharp
@@ -1018,7 +1018,7 @@ public string For(NamedTypeReference named)
 3. **Look up TypeSymbol in graph** - Uses StableId (`{AssemblyName}:{FullName}`)
 4. **If not in graph** - Type is external (from another assembly), sanitize CLR name
 5. **Get final TypeScript name from Renamer** - Single source of truth
-6. **Facade mode qualification** (jumanji9) - Qualify cross-namespace types
+6. **Facade mode qualification** - Qualify cross-namespace types
 
 **Algorithm:**
 ```csharp
@@ -1040,7 +1040,7 @@ if (!_graph.TypeIndex.TryGetValue(stableId, out var typeSymbol))
     // External type - sanitize CLR name
     var finalExternalName = SanitizeClrName(simpleName);
 
-    // TS2304 FIX (Facade - jumanji9): Qualify external cross-namespace types
+    // TS2304 FIX (Facade - ): Qualify external cross-namespace types
     if (_facadeMode && _currentNamespace != null && externalNamespace != _currentNamespace)
     {
         return $"{GetNamespaceAlias(externalNamespace)}.{finalExternalName}";
@@ -1052,7 +1052,7 @@ if (!_graph.TypeIndex.TryGetValue(stableId, out var typeSymbol))
 // 4. Get final name from Renamer
 var finalName = _ctx.Renamer.GetFinalTypeName(typeSymbol);
 
-// 5. TS2304 FIX (Facade - jumanji9): Qualify cross-namespace types in facade mode
+// 5. TS2304 FIX (Facade - ): Qualify cross-namespace types in facade mode
 if (_facadeMode && _currentNamespace != null)
 {
     var targetNamespace = typeSymbol.Namespace;
@@ -1065,13 +1065,13 @@ if (_facadeMode && _currentNamespace != null)
 return finalName;
 ```
 
-**jumanji9 Facade Mode Logic**:
+**Facade Mode Logic**:
 - When `facadeMode` is true, cross-namespace type references are qualified with namespace alias
 - Example: `IEquatable_1` → `System.IEquatable_1` in `System.Buffers` facade
 - Prevents TS2304 "Cannot find name" errors in facade constraint clauses
 - Eliminated 7 TS2304 errors in facades
 
-### Method: SanitizeClrName()
+### Method: SanitizeClrName
 ```csharp
 private static string SanitizeClrName(string clrName)
 ```
@@ -1080,15 +1080,15 @@ private static string SanitizeClrName(string clrName)
 - Replaces nested type separator: `Foo+Bar` → `Foo_Bar`
 - Removes invalid TypeScript identifier characters
 
-### Method: TryMapPrimitive()
+### Method: TryMapPrimitive
 ```csharp
 public static string? TryMapPrimitive(string clrFullName)
 ```
 **What it does:**
-- Static helper that calls `TypeMap.TryMapBuiltin()`
+- Static helper that calls `TypeMap.TryMapBuiltin`
 - Returns `null` if not a primitive
 
-### Method: IsPrimitive()
+### Method: IsPrimitive
 ```csharp
 public static bool IsPrimitive(string clrFullName)
 ```
@@ -1121,10 +1121,10 @@ Without consistent naming, interfaces and classes can have mismatched member nam
 ```typescript
 // BAD - Without CLR-name contract
 interface IDisposable {
-    Dispose(): void;  // CLR name
+    Dispose: void;  // CLR name
 }
 class FileStream implements IDisposable {
-    dispose(): void;  // lowercase!
+    dispose: void;  // lowercase!
 }
 // TS2420: Class 'FileStream' incorrectly implements interface 'IDisposable'.
 // Property 'Dispose' is missing in type 'FileStream' but required in type 'IDisposable'.
@@ -1132,7 +1132,7 @@ class FileStream implements IDisposable {
 
 **Impact:** Reduced TS2420 errors by 81% (579 → ~100 errors)
 
-### Method: ApplyClrSurfaceNamePolicy()
+### Method: ApplyClrSurfaceNamePolicy
 ```csharp
 public static string ApplyClrSurfaceNamePolicy(string clrName)
 ```
@@ -1157,8 +1157,8 @@ ApplyClrSurfaceNamePolicy("class")      → "class_"    // Reserved word
 
 **Usage in PhaseGate:**
 ```csharp
-// From Plan/Validation/Names.cs:ValidateClrSurfaceNamePolicy()
-var surfaceNames = new HashSet<string>();
+// From Plan/Validation/Names.cs:ValidateClrSurfaceNamePolicy
+var surfaceNames = new HashSet<string>;
 
 // Build class surface set
 foreach (var method in classMethods)
@@ -1179,13 +1179,13 @@ foreach (var ifaceMethod in interfaceMethods)
 }
 ```
 
-### Method: SanitizeIdentifier()
+### Method: SanitizeIdentifier
 ```csharp
 private static string SanitizeIdentifier(string name)
 ```
 **What it does:**
 - Appends `_` to TypeScript/JavaScript reserved words
-- Uses `Renaming.TypeScriptReservedWords.Sanitize()` for actual reserved word checking
+- Uses `Renaming.TypeScriptReservedWords.Sanitize` for actual reserved word checking
 
 **Examples:**
 ```csharp
@@ -1201,7 +1201,7 @@ SanitizeIdentifier("interface")   → "interface_"   // Reserved word
 - Future reserved: `enum`, `await`, `yield`, etc.
 - Strict mode reserved: `private`, `protected`, `public`, etc.
 
-### Method: HasNumericSuffix()
+### Method: HasNumericSuffix
 ```csharp
 public static bool HasNumericSuffix(string name)
 ```
@@ -1237,7 +1237,7 @@ This method cannot distinguish between:
 
 To re-enable the validator, it would need to compare against original CLR names to detect if suffix was ADDED.
 
-### Method: IsNonNumericOverride()
+### Method: IsNonNumericOverride
 ```csharp
 private static bool IsNonNumericOverride(string clrName, string renamedName)
 ```
@@ -1276,12 +1276,12 @@ IsNonNumericOverride("GetType", "GetType_Foo")  → true   // Semantic override 
 ### Integration with PhaseGate
 
 **Validator: PG_NAME_SURF_001** (TBG8A1 - SurfaceNamePolicyMismatch)
-- Uses `ApplyClrSurfaceNamePolicy()` to validate interface/class compatibility
+- Uses `ApplyClrSurfaceNamePolicy` to validate interface/class compatibility
 - Ensures emit phase will produce matching names
 - Prevents TS2420 errors at generation time (not validation time)
 
 **Validator: PG_NAME_SURF_002** (TBG8A2 - NumericSuffixOnSurface)
-- Uses `HasNumericSuffix()` to detect renaming artifacts
+- Uses `HasNumericSuffix` to detect renaming artifacts
 - Currently DISABLED due to legitimate CLR names with numbers
 - See `Plan/Validation/Names.cs` for validator implementations
 
@@ -1305,24 +1305,24 @@ NameUtilities is primarily a **validation-time API** (used by PhaseGate), not an
 ### Purpose
 Prints TypeScript class declarations from TypeSymbol. Handles classes, structs, static classes, enums, delegates, and interfaces.
 
-### Method: Print()
+### Method: Print
 ```csharp
 public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, SymbolGraph graph)
 ```
 **What it does:**
 - **GUARD:** Never prints non-public types (logs rejection if attempted)
 - Dispatches to specialized printer based on `type.Kind`:
-  - `TypeKind.Class` → `PrintClass()`
-  - `TypeKind.Struct` → `PrintStruct()`
-  - `TypeKind.StaticNamespace` → `PrintStaticClass()`
-  - `TypeKind.Enum` → `PrintEnum()`
-  - `TypeKind.Delegate` → `PrintDelegate()`
-  - `TypeKind.Interface` → `PrintInterface()`
+  - `TypeKind.Class` → `PrintClass`
+  - `TypeKind.Struct` → `PrintStruct`
+  - `TypeKind.StaticNamespace` → `PrintStaticClass`
+  - `TypeKind.Enum` → `PrintEnum`
+  - `TypeKind.Delegate` → `PrintDelegate`
+  - `TypeKind.Interface` → `PrintInterface`
 
 **Parameters:**
 - `graph` - SymbolGraph for type lookups (needed for TS2693 same-namespace view fix)
 
-### Method: PrintInstance()
+### Method: PrintInstance
 ```csharp
 public static string PrintInstance(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, SymbolGraph graph)
 ```
@@ -1334,7 +1334,7 @@ public static string PrintInstance(TypeSymbol type, TypeNameResolver resolver, B
 **Parameters:**
 - `graph` - SymbolGraph for type lookups (needed for TS2693 same-namespace view fix)
 
-### Method: PrintClass()
+### Method: PrintClass
 ```csharp
 private static string PrintClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, SymbolGraph graph, bool instanceSuffix = false)
 ```
@@ -1343,12 +1343,12 @@ private static string PrintClass(TypeSymbol type, TypeNameResolver resolver, Bui
 2. Adds `$instance` suffix if requested
 3. Emits class modifiers (`abstract` if abstract)
 4. Emits generic parameters with constraints
-5. **TS2693 FIX:** Applies same-namespace view handling to base class (see `ApplyInstanceSuffixForSameNamespaceViews()`)
+5. **TS2693 FIX:** Applies same-namespace view handling to base class (see `ApplyInstanceSuffixForSameNamespaceViews`)
 6. **TS2863 FIX:** Filters `any`/`unknown` from extends clause (TypeScript rejects "extends any")
 7. Emits base class (`extends BaseClass`, skips Object/ValueType/any/unknown)
 8. **TS2693 FIX:** Applies same-namespace view handling to interface list
 9. Emits interfaces (`implements IFoo, IBar`)
-10. Calls `EmitMembers()` to emit body
+10. Calls `EmitMembers` to emit body
 
 **Algorithm for base class emission:**
 ```csharp
@@ -1370,12 +1370,12 @@ if (type.BaseType != null)
 }
 ```
 
-**Algorithm for interface emission (jumanji9):**
+**Algorithm for interface emission:**
 ```csharp
 // TS2304 FIX: Filter out non-public interfaces (not in graph)
 var publicInterfaces = type.Interfaces
     .Where(i => IsInterfaceInGraph(i, graph))
-    .ToArray();
+    .ToArray;
 
 if (publicInterfaces.Length > 0)
 {
@@ -1390,7 +1390,7 @@ if (publicInterfaces.Length > 0)
 }
 ```
 
-**jumanji9 Change:** Added `IsInterfaceInGraph()` filter before emitting implements clause. This prevents non-public interfaces from appearing in the implements clause, which was causing massive cascading TypeScript errors (TS2420, TS2416).
+**Change:** Added `IsInterfaceInGraph` filter before emitting implements clause. This prevents non-public interfaces from appearing in the implements clause, which was causing massive cascading TypeScript errors (TS2420, TS2416).
 
 **Why these fixes matter:**
 
@@ -1410,23 +1410,23 @@ class Foo extends any { }
 // TS2863: 'any' cannot be used as a base class or interface.
 ```
 
-### Method: PrintStruct()
+### Method: PrintStruct
 ```csharp
 private static string PrintStruct(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, bool instanceSuffix = false)
 ```
 **What it does:**
 - Structs emit as classes (metadata notes value semantics)
-- Same as `PrintClass()` but no `abstract` modifier, no base class
+- Same as `PrintClass` but no `abstract` modifier, no base class
 
-### Method: PrintStaticClass()
+### Method: PrintStaticClass
 ```csharp
 private static string PrintStaticClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
 ```
 **What it does:**
 - Emits as `abstract class TypeName { ... }`
-- Calls `EmitStaticMembers()` to emit static-only members
+- Calls `EmitStaticMembers` to emit static-only members
 
-### Method: PrintEnum()
+### Method: PrintEnum
 ```csharp
 private static string PrintEnum(TypeSymbol type, BuildContext ctx)
 ```
@@ -1437,7 +1437,7 @@ private static string PrintEnum(TypeSymbol type, BuildContext ctx)
 4. Gets final member name from Renamer (using `ClassStatic` scope)
 5. Emits `Name = Value,` for each member
 
-### Method: PrintDelegate()
+### Method: PrintDelegate
 ```csharp
 private static string PrintDelegate(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -1447,16 +1447,16 @@ private static string PrintDelegate(TypeSymbol type, TypeNameResolver resolver, 
 3. Finds `Invoke` method
 4. Emits function signature: `(a: int, b: string) => void`
 
-### Method: PrintInterface()
+### Method: PrintInterface
 ```csharp
 private static string PrintInterface(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
 ```
 **What it does:**
 1. Gets final TypeScript name from Renamer
 2. Emits `interface TypeName<...> extends ... { ... }`
-3. Calls `EmitInterfaceMembers()` to emit body
+3. Calls `EmitInterfaceMembers` to emit body
 
-### Method: ApplyInstanceSuffixForSameNamespaceViews()
+### Method: ApplyInstanceSuffixForSameNamespaceViews
 ```csharp
 private static string ApplyInstanceSuffixForSameNamespaceViews(
     string resolvedName,
@@ -1581,7 +1581,7 @@ The fix inserts `$instance` before the `<` character.
 - Eliminated same-namespace TS2693 errors
 - Cross-namespace references unaffected (continue to work)
 
-### Method: IsInterfaceInGraph() - TS2304/TS2420 FIX (jumanji9)
+### Method: IsInterfaceInGraph - TS2304/TS2420 FIX
 ```csharp
 private static bool IsInterfaceInGraph(TypeReference ifaceRef, SymbolGraph graph)
 ```
@@ -1601,7 +1601,7 @@ class MyClass implements IInternalFoo, IPublicBar { }
 // TS2304: Cannot find name 'IInternalFoo' (it was never emitted!)
 // TS2420: Class incorrectly implements interface 'IInternalFoo'
 
-// WITH IsInterfaceInGraph (jumanji9):
+// WITH IsInterfaceInGraph:
 class MyClass implements IPublicBar { }
 // ✓ Only public interfaces appear in implements clause
 ```
@@ -1634,7 +1634,7 @@ graph.TypeIndex.TryGetValue(stableId, ...) → true (public interface)
 true (emit this interface)
 ```
 
-**Impact (jumanji9):**
+**Impact:**
 - **Eliminated ALL TS2420 errors** (579 errors → 0)
 - **Reduced TS2416 by 81.6%** (794 errors → 146)
 - Total error reduction: -1,264 errors (-86.5%)
@@ -1648,12 +1648,12 @@ true (emit this interface)
 By filtering non-public interfaces, we prevent the root cause and eliminate the entire error cascade.
 
 **Called by:**
-- `PrintClass()` at line 116 when filtering interfaces
-- `PrintStruct()` at line 166 when filtering interfaces
+- `PrintClass` at line 116 when filtering interfaces
+- `PrintStruct` at line 166 when filtering interfaces
 
-**jumanji9 Addition:** This method was added in jumanji9 as the single most impactful fix for TypeScript validation errors. It represents a fundamental insight: TypeScript can only check against types that were actually emitted.
+**Addition:** This method was added in as the single most impactful fix for TypeScript validation errors. It represents a fundamental insight: TypeScript can only check against types that were actually emitted.
 
-### Method: EmitMembers()
+### Method: EmitMembers
 ```csharp
 private static void EmitMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -1663,24 +1663,24 @@ private static void EmitMembers(StringBuilder sb, TypeSymbol type, TypeNameResol
   - Fields (non-static, ClassSurface only)
   - Properties (non-static, ClassSurface only)
   - Methods (non-static, ClassSurface only)
-- Calls `EmitStaticMembers()` for static members
+- Calls `EmitStaticMembers` for static members
 - Uses `ScopeFactory.ClassInstance(type)` for member name resolution
 
-### Method: EmitStaticMembers()
+### Method: EmitStaticMembers
 ```csharp
 private static void EmitStaticMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
 ```
 **What it does:**
 - Emits static members with special handling for generic classes:
   - **Fields** (static, non-const, ClassSurface or StaticSurface):
-    - **NEW**: Calls `SubstituteClassGenericsInTypeRef()` to widen types referencing class generics to `unknown`
+    - **NEW**: Calls `SubstituteClassGenericsInTypeRef` to widen types referencing class generics to `unknown`
     - Prevents TS2302 error (static members cannot reference class type parameters)
   - **Const fields** (as `static readonly`, ClassSurface or StaticSurface):
     - **NEW**: Also substitutes class generics with `unknown`
   - **Properties** (static, ClassSurface or StaticSurface):
     - **NEW**: Substitutes class generics with `unknown`
   - **Methods** (static, ClassSurface or StaticSurface):
-    - **NEW**: Calls `LiftClassGenericsToMethod()` to move class generic parameters to method level
+    - **NEW**: Calls `LiftClassGenericsToMethod` to move class generic parameters to method level
     - Prevents TS2302 error (TypeScript doesn't support static methods using class type parameters)
 - Uses `ScopeFactory.ClassStatic(type)` for member name resolution
 
@@ -1692,7 +1692,7 @@ TypeScript does NOT allow static members to reference class-level type parameter
 // ❌ INVALID TypeScript (TS2302 error)
 class List<T> {
     static defaultValue: T;           // ERROR: Static member cannot reference class type parameter
-    static createDefault(): T { ... } // ERROR: Static member cannot reference class type parameter
+    static createDefault: T { ... } // ERROR: Static member cannot reference class type parameter
 }
 ```
 
@@ -1700,7 +1700,7 @@ class List<T> {
 - **Static fields/properties**: Widen type to `unknown` (TypeScript limitation - cannot be made generic)
 - **Static methods**: Lift class generics to method generics (makes method generic instead)
 
-### Method: EmitInterfaceMembers()
+### Method: EmitInterfaceMembers
 ```csharp
 private static void EmitInterfaceMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -1708,9 +1708,9 @@ private static void EmitInterfaceMembers(StringBuilder sb, TypeSymbol type, Type
 - Emits interface members:
   - Properties (non-static, ClassSurface only) - static not supported in TS interfaces
   - Methods (non-static, ClassSurface only) - static not supported in TS interfaces
-- Uses `ScopeFactory.ClassSurface()` for member name resolution
+- Uses `ScopeFactory.ClassSurface` for member name resolution
 
-### Method: PrintGenericParameter()
+### Method: PrintGenericParameter
 ```csharp
 private static string PrintGenericParameter(GenericParameterSymbol gp, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -1719,7 +1719,7 @@ private static string PrintGenericParameter(GenericParameterSymbol gp, TypeNameR
 - Single constraint: `T extends IFoo`
 - Multiple constraints: `T extends IFoo & IBar` (intersection)
 
-### Method: LiftClassGenericsToMethod()
+### Method: LiftClassGenericsToMethod
 
 ```csharp
 private static MethodSymbol LiftClassGenericsToMethod(MethodSymbol method, TypeSymbol declaringType, BuildContext ctx)
@@ -1756,7 +1756,7 @@ class Array_1<T> {
 
 2. **Collect class generic parameters:**
    ```csharp
-   var classGenerics = declaringType.GenericParameters.ToList();
+   var classGenerics = declaringType.GenericParameters.ToList;
    ```
 
 3. **Check for name collisions with existing method generics:**
@@ -1776,7 +1776,7 @@ class Array_1<T> {
    ```csharp
    var combinedGenerics = liftedGenerics
        .Concat(method.GenericParameters)
-       .ToImmutableArray();
+       .ToImmutableArray;
    ```
    - **Order**: Lifted class generics FIRST, then method generics
    - Ensures class generic positions match class declaration order
@@ -1785,7 +1785,7 @@ class Array_1<T> {
    - If any generics were renamed (substitution map not empty):
      - Substitute in return type: `SubstituteTypeReference(method.ReturnType, substitutionMap)`
      - Substitute in parameters: For each param, substitute param type
-   - Uses `Load.InterfaceMemberSubstitution.SubstituteTypeReference()`
+   - Uses `Load.InterfaceMemberSubstitution.SubstituteTypeReference`
 
 7. **Return transformed method:**
    ```csharp
@@ -1818,10 +1818,10 @@ class Array_1<T> {
 
 **Example 3: Multiple class generics**
 ```csharp
-// Input: class Dictionary<TKey, TValue> { static Dictionary<TKey, TValue> Create() }
+// Input: class Dictionary<TKey, TValue> { static Dictionary<TKey, TValue> Create }
 // Class generics: [TKey, TValue]
 // Method generics: []
-// Output: static create<TKey, TValue>(): Dictionary_2<TKey, TValue>
+// Output: static create<TKey, TValue>: Dictionary_2<TKey, TValue>
 ```
 
 **Logging:**
@@ -1829,7 +1829,7 @@ class Array_1<T> {
 ctx.Log("GenericLift", $"Lifted {liftedGenerics.Count} class generics into method {type.ClrName}.{method.ClrName}");
 ```
 
-### Method: SubstituteClassGenericsInTypeRef()
+### Method: SubstituteClassGenericsInTypeRef
 
 ```csharp
 private static TypeReference SubstituteClassGenericsInTypeRef(
@@ -1926,7 +1926,7 @@ class List_1<T> {
 - Safest approach: widen entire type to `unknown`
 - Alternative: Could use `any`, but `unknown` is safer (forces type checking at use site)
 
-### Method: ReferencesClassGeneric()
+### Method: ReferencesClassGeneric
 
 ```csharp
 private static bool ReferencesClassGeneric(TypeReference typeRef, HashSet<string> classGenericNames)
@@ -1995,16 +1995,16 @@ _ => false
 ```csharp
 // C# interface with generic T
 interface IEnumerable<T> {
-    T First();
+    T First;
 }
 
 // Class implements with concrete type string
 class MyCollection : IEnumerable<string> {
     // WITHOUT FIX D: Member still references "T" (orphaned - not declared in MyCollection)
-    T First();  // ❌ ERROR: T is not defined
+    T First;  // ❌ ERROR: T is not defined
 
     // WITH FIX D: T is substituted with string
-    string First();  // ✅ CORRECT
+    string First;  // ✅ CORRECT
 }
 ```
 
@@ -2019,15 +2019,15 @@ class MyCollection : IEnumerable<string> {
 **Purpose**: Determines if method needs generic parameter substitution and dispatches to appropriate handler.
 
 **Algorithm:**
-1. **Check Source Interface**: If `method.SourceInterface != null` → call `SubstituteInterfaceMethod()`
-2. **Check Orphaned Generics**: If method references generics not in type → call `SubstituteBaseClassMethod()`
+1. **Check Source Interface**: If `method.SourceInterface != null` → call `SubstituteInterfaceMethod`
+2. **Check Orphaned Generics**: If method references generics not in type → call `SubstituteBaseClassMethod`
 3. **Return original**: No substitution needed
 
 **Example:**
 ```csharp
 // Method from IEnumerable<string> interface
 method.SourceInterface = IEnumerable`1
-→ SubstituteInterfaceMethod() called
+→ SubstituteInterfaceMethod called
 → T substituted with string
 ```
 
@@ -2036,8 +2036,8 @@ method.SourceInterface = IEnumerable`1
 **Purpose**: Property equivalent of method substitution.
 
 **Algorithm:**
-1. **Check Source Interface**: If `prop.SourceInterface != null` → call `SubstituteInterfaceProperty()`
-2. **Check Orphaned Generics**: If property type references generics not in type → call `SubstituteBaseClassProperty()`
+1. **Check Source Interface**: If `prop.SourceInterface != null` → call `SubstituteInterfaceProperty`
+2. **Check Orphaned Generics**: If property type references generics not in type → call `SubstituteBaseClassProperty`
 3. **Return original**: No substitution needed
 
 ### Interface Substitution (2 methods)
@@ -2058,10 +2058,10 @@ method.SourceInterface = IEnumerable`1
 
 **Example:**
 ```csharp
-// Input: T First() from IEnumerable<string>
+// Input: T First from IEnumerable<string>
 // matchedInterface: IEnumerable<string>
 // substitutionMap: {"T" → string}
-// Output: string First()
+// Output: string First
 ```
 
 #### `SubstituteInterfaceProperty(TypeSymbol type, PropertySymbol prop, BuildContext ctx, SymbolGraph graph)`
@@ -2103,7 +2103,7 @@ method.SourceInterface = IEnumerable`1
 **Algorithm:**
 1. Build set of type's generic parameter names
 2. Build set of method's generic parameter names (method-level generics)
-3. Call `ContainsOrphanedGenericParameter()` on return type and all parameters
+3. Call `ContainsOrphanedGenericParameter` on return type and all parameters
 4. Return true if any orphaned generics found
 
 **Example:**
@@ -2207,11 +2207,11 @@ method.SourceInterface = IEnumerable`1
 
 **EmitMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, SymbolGraph graph)**
 - **Added parameter**: `SymbolGraph graph`
-- **Calls**: `SubstituteMemberIfNeeded()` for all methods and properties before emitting
+- **Calls**: `SubstituteMemberIfNeeded` for all methods and properties before emitting
 
 ### Integration
 
-**Called from**: `EmitMembers()` before emitting each method/property
+**Called from**: `EmitMembers` before emitting each method/property
 
 ```csharp
 // In EmitMembers:
@@ -2233,7 +2233,7 @@ foreach (var prop in members.Properties) {
 ### Purpose
 Prints TypeScript method signatures from MethodSymbol. Handles generic methods, parameters, return types, and modifiers.
 
-### Method: Print()
+### Method: Print
 ```csharp
 public static string Print(MethodSymbol method, TypeSymbol declaringType, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -2248,7 +2248,7 @@ public static string Print(MethodSymbol method, TypeSymbol declaringType, TypeNa
 **Key Decision:**
 - Interface members don't get `static`/`abstract` modifiers (TS doesn't support static interface members)
 
-### Method: PrintGenericParameter()
+### Method: PrintGenericParameter
 ```csharp
 private static string PrintGenericParameter(GenericParameterSymbol gp, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -2257,7 +2257,7 @@ private static string PrintGenericParameter(GenericParameterSymbol gp, TypeNameR
 - Single constraint: `T extends IFoo`
 - Multiple constraints: `T extends IFoo & IBar`
 
-### Method: PrintParameter()
+### Method: PrintParameter
 ```csharp
 private static string PrintParameter(ParameterSymbol param, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -2267,7 +2267,7 @@ private static string PrintParameter(ParameterSymbol param, TypeNameResolver res
 - Handles ref/out parameters: `{ value: T }` wrapper (metadata tracks semantics)
 - Handles params parameters: caller adds `...` prefix
 
-### Method: PrintWithParamsExpansion()
+### Method: PrintWithParamsExpansion
 ```csharp
 public static string PrintWithParamsExpansion(MethodSymbol method, TypeSymbol declaringType, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -2276,7 +2276,7 @@ public static string PrintWithParamsExpansion(MethodSymbol method, TypeSymbol de
 - Example: `Add(items: T[])` → `Add(...items: T[])`
 - Only applies to last parameter if `IsParams` is true
 
-### Method: PrintOverloads()
+### Method: PrintOverloads
 ```csharp
 public static IEnumerable<string> PrintOverloads(IEnumerable<MethodSymbol> overloads, TypeSymbol declaringType, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -2284,7 +2284,7 @@ public static IEnumerable<string> PrintOverloads(IEnumerable<MethodSymbol> overl
 - Prints multiple method overloads (same name, different signatures)
 - Yields one string per overload
 
-### Method: PrintAsPropertyAccessor()
+### Method: PrintAsPropertyAccessor
 ```csharp
 public static string PrintAsPropertyAccessor(MethodSymbol method, bool isGetter, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -2300,7 +2300,7 @@ public static string PrintAsPropertyAccessor(MethodSymbol method, bool isGetter,
 ### Purpose
 Prints TypeScript type references from TypeReference model. Handles all type constructs: named, generic parameters, arrays, pointers, byrefs, nested. **CRITICAL:** Uses TypeNameResolver to ensure printed names match imports (single source of truth).
 
-### Method: Print() - TS2304 FIX (jumanji9)
+### Method: Print - TS2304 FIX
 ```csharp
 public static string Print(
     TypeReference typeRef,
@@ -2310,17 +2310,17 @@ public static string Print(
 ```
 **What it does:**
 - Dispatches to specialized printer based on type reference kind:
-  - `PlaceholderTypeReference` → `PrintPlaceholder()` (emits warning, returns `any`)
-  - `NamedTypeReference` → `PrintNamed()`
-  - `GenericParameterReference` → `PrintGenericParameter()`
-  - `ArrayTypeReference` → `PrintArray()`
-  - `PointerTypeReference` → `PrintPointer()`
-  - `ByRefTypeReference` → `PrintByRef()`
-  - `NestedTypeReference` → `PrintNested()`
+  - `PlaceholderTypeReference` → `PrintPlaceholder` (emits warning, returns `any`)
+  - `NamedTypeReference` → `PrintNamed`
+  - `GenericParameterReference` → `PrintGenericParameter`
+  - `ArrayTypeReference` → `PrintArray`
+  - `PointerTypeReference` → `PrintPointer`
+  - `ByRefTypeReference` → `PrintByRef`
+  - `NestedTypeReference` → `PrintNested`
 
-**jumanji9 Addition:** Added `allowedTypeParameterNames` parameter for free type variable detection. When provided, any generic parameter NOT in this set is demoted to `unknown` to prevent TS2304 "Cannot find name" errors from leaked generics.
+**Addition:** Added `allowedTypeParameterNames` parameter for free type variable detection. When provided, any generic parameter NOT in this set is demoted to `unknown` to prevent TS2304 "Cannot find name" errors from leaked generics.
 
-### Method: PrintPlaceholder()
+### Method: PrintPlaceholder
 ```csharp
 private static string PrintPlaceholder(PlaceholderTypeReference placeholder, BuildContext ctx)
 ```
@@ -2328,12 +2328,12 @@ private static string PrintPlaceholder(PlaceholderTypeReference placeholder, Bui
 - Emits diagnostic warning (placeholders should never reach output)
 - Returns `"any"` as fallback
 
-### Method: PrintNamed()
+### Method: PrintNamed
 ```csharp
 private static string PrintNamed(NamedTypeReference named, TypeNameResolver resolver, BuildContext ctx)
 ```
 **What it does:**
-1. Tries to map CLR primitive via `TypeNameResolver.TryMapPrimitive()` (short-circuit)
+1. Tries to map CLR primitive via `TypeNameResolver.TryMapPrimitive` (short-circuit)
 2. Gets final TypeScript name from `resolver.ResolveTypeName(named)`
 3. Validates non-empty name (emits warning if empty)
 4. Handles generic type arguments recursively
@@ -2368,7 +2368,7 @@ if (named.TypeArguments.Count > 0)
 return baseName;
 ```
 
-### Method: PrintGenericParameter() - TS2304 FIX (jumanji9)
+### Method: PrintGenericParameter - TS2304 FIX
 ```csharp
 private static string PrintGenericParameter(
     GenericParameterReference gp,
@@ -2376,11 +2376,11 @@ private static string PrintGenericParameter(
     HashSet<string>? allowedTypeParameterNames)
 ```
 **What it does:**
-- **jumanji9:** Checks if generic parameter is allowed in current scope
+- **:** Checks if generic parameter is allowed in current scope
 - If `allowedTypeParameterNames` is provided and parameter is NOT in the set, demotes to `unknown` (free type variable)
 - Otherwise returns generic parameter name as-is: `T`, `U`, `TKey`, `TValue`
 
-**Problem it solves (jumanji9):**
+**Problem it solves:**
 ```csharp
 // C# code:
 class MyClass<T> {
@@ -2391,12 +2391,12 @@ class MyClass<T> {
 // WITHOUT free variable detection:
 class MyClass_1<T> {
     // T leaks into signature even though it's not used!
-    GetEnumerator(): IEnumerator_1<T>  // TS2304: 'T' is a free type variable (not defined on class)
+    GetEnumerator: IEnumerator_1<T>  // TS2304: 'T' is a free type variable (not defined on class)
 }
 
-// WITH free variable detection (jumanji9):
+// WITH free variable detection:
 class MyClass_1<T> {
-    GetEnumerator(): IEnumerator_1<unknown>  // Safe - no leaked generics
+    GetEnumerator: IEnumerator_1<unknown>  // Safe - no leaked generics
 }
 ```
 
@@ -2413,17 +2413,17 @@ class MyClass_1<T> {
 
 **How allowedTypeParameterNames is built:**
 - Class-level generic parameters: `T`, `U` from `class Foo<T, U>`
-- Method-level generic parameters: `TKey` from `void Sort<TKey>()`
+- Method-level generic parameters: `TKey` from `void Sort<TKey>`
 - Combined set passed down through type reference printing
 
-**Impact (jumanji9):**
+**Impact:**
 - Prevented generic T leaks in interface implementations
 - Contributed to eliminating structural TS2304 errors
 - Ensures type parameters are only used when they're actually in scope
 
-**Called by:** All type printing methods that recursively call `Print()` with the allowed set propagated
+**Called by:** All type printing methods that recursively call `Print` with the allowed set propagated
 
-### Method: PrintArray()
+### Method: PrintArray
 ```csharp
 private static string PrintArray(ArrayTypeReference arr, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -2431,7 +2431,7 @@ private static string PrintArray(ArrayTypeReference arr, TypeNameResolver resolv
 - Single-dimensional: `T[]`
 - Multi-dimensional: `Array<Array<T>>` (nested)
 
-### Method: PrintPointer()
+### Method: PrintPointer
 ```csharp
 private static string PrintPointer(PointerTypeReference ptr, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -2439,7 +2439,7 @@ private static string PrintPointer(PointerTypeReference ptr, TypeNameResolver re
 - Returns `TSUnsafePointer<T>` where T is the pointee type
 - Preserves type information while being type-safe (erases to `unknown`)
 
-### Method: PrintByRef()
+### Method: PrintByRef
 ```csharp
 private static string PrintByRef(ByRefTypeReference byref, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -2447,7 +2447,7 @@ private static string PrintByRef(ByRefTypeReference byref, TypeNameResolver reso
 - Returns `TSByRef<T>` where T is the referenced type
 - Provides structural access via `.value` property
 
-### Method: PrintNested()
+### Method: PrintNested
 ```csharp
 private static string PrintNested(NestedTypeReference nested, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -2457,7 +2457,7 @@ private static string PrintNested(NestedTypeReference nested, TypeNameResolver r
 
 ### Helper Methods
 
-#### PrintList()
+#### PrintList
 ```csharp
 public static string PrintList(IEnumerable<TypeReference> typeRefs, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -2465,49 +2465,49 @@ public static string PrintList(IEnumerable<TypeReference> typeRefs, TypeNameReso
 - Prints comma-separated list of type references
 - Used for generic parameter lists, method parameters
 
-#### PrintNullable()
+#### PrintNullable
 ```csharp
 public static string PrintNullable(TypeReference typeRef, bool isNullable, TypeNameResolver resolver, BuildContext ctx)
 ```
 **What it does:**
 - Prints type with optional nullability: `T | null`
 
-#### PrintReadonlyArray()
+#### PrintReadonlyArray
 ```csharp
 public static string PrintReadonlyArray(TypeReference elementType, TypeNameResolver resolver, BuildContext ctx)
 ```
 **What it does:**
 - Prints `ReadonlyArray<T>` for IEnumerable<T> mappings
 
-#### PrintPromise()
+#### PrintPromise
 ```csharp
 public static string PrintPromise(TypeReference resultType, TypeNameResolver resolver, BuildContext ctx)
 ```
 **What it does:**
 - Prints `Promise<T>` for Task<T> mappings
 
-#### PrintTuple()
+#### PrintTuple
 ```csharp
 public static string PrintTuple(IReadOnlyList<TypeReference> elementTypes, TypeNameResolver resolver, BuildContext ctx)
 ```
 **What it does:**
 - Prints tuple type: `[T1, T2, T3]`
 
-#### PrintUnion()
+#### PrintUnion
 ```csharp
 public static string PrintUnion(IReadOnlyList<TypeReference> types, TypeNameResolver resolver, BuildContext ctx)
 ```
 **What it does:**
 - Prints union type: `T1 | T2 | T3`
 
-#### PrintIntersection()
+#### PrintIntersection
 ```csharp
 public static string PrintIntersection(IReadOnlyList<TypeReference> types, TypeNameResolver resolver, BuildContext ctx)
 ```
 **What it does:**
 - Prints intersection type: `T1 & T2 & T3`
 
-#### PrintTypeof()
+#### PrintTypeof
 ```csharp
 public static string PrintTypeof(TypeReference typeRef, TypeNameResolver resolver, BuildContext ctx)
 ```
@@ -2516,7 +2516,7 @@ public static string PrintTypeof(TypeReference typeRef, TypeNameResolver resolve
 
 ---
 
-## File: PrimitiveLift.cs (jumanji9 - NEW)
+## File: PrimitiveLift.cs (- NEW)
 
 ### Purpose
 Defines the primitive lifting rules for the `CLROf<T>` utility type. This is the single source of truth for which TypeScript primitives get lifted to their CLR types in generic contexts.
@@ -2571,7 +2571,7 @@ internal static readonly (string TsName, string ClrFullName, string ClrSimpleNam
 
 ### Methods
 
-#### IsLiftableClr()
+#### IsLiftableClr
 ```csharp
 internal static bool IsLiftableClr(string clrFullName)
 ```
@@ -2580,7 +2580,7 @@ internal static bool IsLiftableClr(string clrFullName)
 - Used by PhaseGate validator to detect primitive type arguments
 - Example: `IsLiftableClr("System.Int32")` → `true`
 
-#### IsLiftableTs()
+#### IsLiftableTs
 ```csharp
 internal static bool IsLiftableTs(string tsName)
 ```
@@ -2589,7 +2589,7 @@ internal static bool IsLiftableTs(string tsName)
 - Used by TypeRefPrinter to determine which concrete types to wrap with CLROf
 - Example: `IsLiftableTs("int")` → `true`
 
-#### GetClrSimpleName()
+#### GetClrSimpleName
 ```csharp
 internal static string? GetClrSimpleName(string tsName)
 ```
@@ -2623,7 +2623,7 @@ internal static string? GetClrSimpleName(string tsName)
    }
    ```
 
-### Impact (jumanji9)
+### Impact
 
 - Enabled primitives in generic positions without constraint violations
 - Eliminated generic constraint errors for primitive types
@@ -2631,7 +2631,7 @@ internal static string? GetClrSimpleName(string tsName)
 
 ---
 
-## File: AliasEmit.cs (jumanji9 - NEW)
+## File: AliasEmit.cs (- NEW)
 
 ### Purpose
 Unified type alias emission logic. Ensures consistent generic parameter handling across all alias emission sites to prevent TS2315 "Type is not generic" errors.
@@ -2643,7 +2643,7 @@ Unified type alias emission logic. Ensures consistent generic parameter handling
 
 **Why needed:** Previously, alias emission was scattered across multiple files with inconsistent generic handling, causing LHS/RHS arity mismatches.
 
-### Method: EmitGenericAlias()
+### Method: EmitGenericAlias
 
 ```csharp
 internal static void EmitGenericAlias(
@@ -2707,7 +2707,7 @@ AliasEmit.EmitGenericAlias(
     withConstraints: true);
 ```
 
-### Method: GenerateTypeParametersWithConstraints()
+### Method: GenerateTypeParametersWithConstraints
 
 ```csharp
 internal static string GenerateTypeParametersWithConstraints(
@@ -2719,7 +2719,7 @@ internal static string GenerateTypeParametersWithConstraints(
 **What it does:**
 - Generates generic type parameters WITH constraints for LHS of alias
 - Example: `"<T extends IFoo, U extends IBar>"`
-- Filters out C# special constraints (`struct`, `class`, `new()`)
+- Filters out C# special constraints (`struct`, `class`, `new`)
 
 **Algorithm:**
 1. For each generic parameter:
@@ -2728,7 +2728,7 @@ internal static string GenerateTypeParametersWithConstraints(
 2. Filter special constraints (`System.ValueType`, `System.Object`)
 3. Use TypeRefPrinter to print constraint types
 
-### Method: GenerateTypeArguments()
+### Method: GenerateTypeArguments
 
 ```csharp
 internal static string GenerateTypeArguments(TypeSymbol sourceType)
@@ -2742,7 +2742,7 @@ internal static string GenerateTypeArguments(TypeSymbol sourceType)
 - LHS needs constraints: `type Foo<T extends IBar>`
 - RHS just needs names: `= Internal.Foo<T>`
 
-### Impact (jumanji9)
+### Impact
 
 - **Eliminated TS2315 errors** from arity mismatches
 - **Unified alias emission** across facade and internal exports
@@ -2757,7 +2757,7 @@ export type Foo<T> = Internal.Foo;  // TS2315: Type 'Foo' is not generic
 export type Bar = Namespace.Bar<T>;  // TS2304: Cannot find name 'T'
 ```
 
-**After AliasEmit (jumanji9):**
+**After AliasEmit:**
 ```typescript
 // Facade (consistent):
 export type Foo<T> = Internal.Foo<T>;  // ✓
@@ -2816,7 +2816,7 @@ export namespace System.Collections.Generic {
         constructor(capacity: int);
         readonly Count: int;
         Add(item: T): void;
-        GetEnumerator(): IEnumerator_1<T>;
+        GetEnumerator: IEnumerator_1<T>;
     }
 
     export interface __List_1$views<T> {
@@ -2826,7 +2826,7 @@ export namespace System.Collections.Generic {
     export type List_1<T> = List_1$instance<T> & __List_1$views<T>;
 
     export interface IEnumerable_1<T> {
-        GetEnumerator(): IEnumerator_1<T>;
+        GetEnumerator: IEnumerator_1<T>;
     }
 }
 ```

@@ -54,7 +54,7 @@ PhaseGate is the **FINAL validation checkpoint** before the Emit phase. It valid
 
 ## 2. PhaseGate Structure
 
-### PhaseGate.Validate() Orchestration
+### PhaseGate.Validate Orchestration
 
 **File:** `src/tsbindgen/SinglePhase/Plan/PhaseGate.cs`
 
@@ -74,37 +74,37 @@ PhaseGate runs **20+ validation modules** in strict order:
 ┌─────────────────────────────────────────────────────────────┐
 │ 1. CORE VALIDATIONS (8 functions)                          │
 ├─────────────────────────────────────────────────────────────┤
-│   1.1 ValidateTypeNames()                                   │
-│   1.2 ValidateMemberNames()                                 │
-│   1.3 ValidateGenericParameters()                           │
-│   1.4 ValidateInterfaceConformance()                        │
-│   1.5 ValidateInheritance()                                 │
-│   1.6 ValidateEmitScopes()                                  │
-│   1.7 ValidateImports()                                     │
-│   1.8 ValidatePolicyCompliance()                            │
+│   1.1 ValidateTypeNames                                   │
+│   1.2 ValidateMemberNames                                 │
+│   1.3 ValidateGenericParameters                           │
+│   1.4 ValidateInterfaceConformance                        │
+│   1.5 ValidateInheritance                                 │
+│   1.6 ValidateEmitScopes                                  │
+│   1.7 ValidateImports                                     │
+│   1.8 ValidatePolicyCompliance                            │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
 │ 2. HARDENING VALIDATIONS (M1-M10)                          │
 ├─────────────────────────────────────────────────────────────┤
-│   M1: Views.Validate()                    (ViewOnly orphans)│
-│   M2: Names.ValidateFinalNames()          (Renamer coverage)│
-│   M3: Names.ValidateAliases()             (Import aliases)  │
-│   M4: Names.ValidateIdentifiers()         (Reserved words)  │
-│   M5: Names.ValidateOverloadCollisions()  (Erased sigs)     │
-│   M6: Views.ValidateIntegrity()           (3 hard rules)    │
-│   M7: Constraints.EmitDiagnostics()       (Constraint loss) │
-│   M8: Views.ValidateMemberScoping()       (Name collisions) │
-│   M9: Scopes.ValidateEmitScopeInvariants() (Dual-role)     │
-│   M10: Scopes.ValidateScopeMismatches()   (Scope keys)      │
-│   M11: Names.ValidateClassSurfaceUniqueness() (Dedup check) │
-│   M12: Finalization.Validate()            (PG_FIN_001-009)  │
-│   M13: Types.ValidatePrinterNameConsistency() (PG_PRINT_001)│
-│   M14: Types.ValidateTypeMapCompliance()  (PG_TYPEMAP_001)  │
-│   M15: Types.ValidateExternalTypeResolution() (PG_LOAD_001) │
-│   M16: ImportExport.ValidatePublicApiSurface() (PG_API_001/2)│
-│   M17: ImportExport.ValidateImportCompleteness() (PG_IMPORT_001)│
-│   M18: ImportExport.ValidateExportCompleteness() (PG_EXPORT_001)│
+│   M1: Views.Validate                    (ViewOnly orphans)│
+│   M2: Names.ValidateFinalNames          (Renamer coverage)│
+│   M3: Names.ValidateAliases             (Import aliases)  │
+│   M4: Names.ValidateIdentifiers         (Reserved words)  │
+│   M5: Names.ValidateOverloadCollisions  (Erased sigs)     │
+│   M6: Views.ValidateIntegrity           (3 hard rules)    │
+│   M7: Constraints.EmitDiagnostics       (Constraint loss) │
+│   M8: Views.ValidateMemberScoping       (Name collisions) │
+│   M9: Scopes.ValidateEmitScopeInvariants (Dual-role)     │
+│   M10: Scopes.ValidateScopeMismatches   (Scope keys)      │
+│   M11: Names.ValidateClassSurfaceUniqueness (Dedup check) │
+│   M12: Finalization.Validate            (PG_FIN_001-009)  │
+│   M13: Types.ValidatePrinterNameConsistency (PG_PRINT_001)│
+│   M14: Types.ValidateTypeMapCompliance  (PG_TYPEMAP_001)  │
+│   M15: Types.ValidateExternalTypeResolution (PG_LOAD_001) │
+│   M16: ImportExport.ValidatePublicApiSurface (PG_API_001/2)│
+│   M17: ImportExport.ValidateImportCompleteness (PG_IMPORT_001)│
+│   M18: ImportExport.ValidateExportCompleteness (PG_EXPORT_001)│
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
@@ -141,7 +141,7 @@ internal sealed class ValidationContext
 }
 ```
 
-**WriteSummaryJson()** - Writes `.tests/phasegate-summary.json`:
+**WriteSummaryJson** - Writes `.tests/phasegate-summary.json`:
 ```json
 {
   "timestamp": "2025-11-10 12:00:00",
@@ -160,7 +160,7 @@ internal sealed class ValidationContext
 }
 ```
 
-**WriteDiagnosticsFile()** - Writes `.tests/phasegate-diagnostics.txt`:
+**WriteDiagnosticsFile** - Writes `.tests/phasegate-diagnostics.txt`:
 ```
 ================================================================================
 PhaseGate Detailed Diagnostics
@@ -193,7 +193,7 @@ INFO: [TBG310] System.Baz has 2 property covariance issues (TS doesn't support)
 ...
 ```
 
-**GetDiagnosticDescription()** - Maps ALL 40+ diagnostic codes to descriptions:
+**GetDiagnosticDescription** - Maps ALL 40+ diagnostic codes to descriptions:
 ```csharp
 internal static string GetDiagnosticDescription(string code)
 {
@@ -222,7 +222,7 @@ internal static string GetDiagnosticDescription(string code)
 
 **Key Functions:**
 
-#### `Context.Create()`
+#### `Context.Create`
 Creates new ValidationContext with zeroed counters.
 
 #### `ValidationContext.RecordDiagnostic(string code, string severity, string message)`
@@ -320,7 +320,7 @@ class @class { TsEmitName = "class" }  // WARNING: TBG120 (should be "class_")
 ```csharp
 // Member missing TsEmitName
 class Foo {
-    method Bar() { TsEmitName = "" }  // ERROR: TBG405
+    method Bar { TsEmitName = "" }  // ERROR: TBG405
 }
 
 // Overload collision
@@ -386,9 +386,9 @@ class Derived<T> : Base<T> where T : IDisposable, class { }  // INFO: TBG410 (1�
 **Examples of failures:**
 ```csharp
 // Missing interface method
-interface IFoo { method Bar(); }
+interface IFoo { method Bar; }
 class Foo : IFoo {
-    // Missing Bar() implementation
+    // Missing Bar implementation
 }  // WARNING: TBG203
 
 // Property covariance (TypeScript doesn't support)
@@ -403,7 +403,7 @@ class Foo : IFoo {
 2. For each interface without explicit view:
    - Find all required methods/properties
    - Check class surface has matching members
-   - Check signatures are TS-assignable: `IsRepresentableConformanceBreak()`
+   - Check signatures are TS-assignable: `IsRepresentableConformanceBreak`
 3. Aggregate issues per type (not per member)
 4. Emit one-line summary + detailed conformance issues
 
@@ -473,7 +473,7 @@ namespace C { imports A; }  // WARNING: TBG201 (A → B → C → A)
 
 **Algorithm:**
 1. Build adjacency list from import statements
-2. DFS-based cycle detection: `DetectCyclesDFS()`
+2. DFS-based cycle detection: `DetectCyclesDFS`
 3. Report cycles as warnings (not errors - TypeScript allows)
 
 ---
@@ -516,13 +516,13 @@ namespace C { imports A; }  // WARNING: TBG201 (A → B → C → A)
 ```csharp
 // ViewOnly member without view
 class Foo : IBar {
-    method Baz() { EmitScope = ViewOnly, SourceInterface = IBar }
+    method Baz { EmitScope = ViewOnly, SourceInterface = IBar }
     // But no ExplicitView for IBar
 }  // ERROR: TBG510
 
 // ViewOnly member in wrong view
 class Foo : IBar, IBaz {
-    method Qux() { EmitScope = ViewOnly, SourceInterface = IBar }
+    method Qux { EmitScope = ViewOnly, SourceInterface = IBar }
     ExplicitView(IBaz) { members: [Qux] }  // Wrong interface!
 }  // ERROR: TBG510
 ```
@@ -578,7 +578,7 @@ ExplicitView(IFoo) { ViewPropertyName = "123-foo" }  // ERROR: TBG513 (starts wi
 2. For each view:
    - Check `ViewMembers.Length > 0` (PG_VIEW_001)
    - Check interface not already seen (PG_VIEW_002)
-   - Check view property name: `IsValidTypeScriptIdentifier()` and not reserved word (PG_VIEW_003)
+   - Check view property name: `IsValidTypeScriptIdentifier` and not reserved word (PG_VIEW_003)
 
 ---
 
@@ -597,8 +597,8 @@ ExplicitView(IFoo) { ViewPropertyName = "123-foo" }  // ERROR: TBG513 (starts wi
 ##### **PG_NAME_003: Collision within view**
 ```csharp
 interface IFoo {
-    method Bar();
-    method bar();  // Different CLR names, same TS name after camelCase
+    method Bar;
+    method bar;  // Different CLR names, same TS name after camelCase
 }
 class Foo : IFoo {
     ExplicitView(IFoo) {
@@ -613,8 +613,8 @@ class Foo : IFoo {
 ##### **PG_NAME_004: View member shadows class surface**
 ```csharp
 class Foo : IBar {
-    method Baz() { EmitScope = ClassSurface, TsEmitName = "baz" }
-    method IBaz() { EmitScope = ViewOnly, SourceInterface = IBar, TsEmitName = "baz" }
+    method Baz { EmitScope = ClassSurface, TsEmitName = "baz" }
+    method IBaz { EmitScope = ViewOnly, SourceInterface = IBar, TsEmitName = "baz" }
     ExplicitView(IBar) { ViewMembers: [IBaz] }
 }  // ERROR: TBG104 (view member "baz" shadows class surface "baz")
 ```
@@ -729,7 +729,7 @@ class @class {
 
 // Method name not sanitized
 class Foo {
-    method @for() { TsEmitName = "for" }  // ERROR: TBG719 (should be "for_")
+    method @for { TsEmitName = "for" }  // ERROR: TBG719 (should be "for_")
 }
 
 // Parameter name not sanitized
@@ -740,7 +740,7 @@ class Foo {
 
 **Algorithm:**
 1. For each identifier (type, member, parameter, type parameter):
-   - Get emitted name: `GetFinalTypeName()` or `GetFinalMemberName()`
+   - Get emitted name: `GetFinalTypeName` or `GetFinalMemberName`
    - Check if reserved word: `IsReservedWord(emittedName)`
    - Check if sanitized: `emittedName.EndsWith("_")`
    - Emit error if reserved word AND not sanitized
@@ -748,9 +748,9 @@ class Foo {
 **Identifiers checked:**
 - Namespace names
 - Type names (from Renamer)
-- Type parameters (with `SanitizeParameterName()`)
+- Type parameters (with `SanitizeParameterName`)
 - Method names (ClassSurface and ViewOnly)
-- Method parameters (with `SanitizeParameterName()`)
+- Method parameters (with `SanitizeParameterName`)
 - Method type parameters
 - Property names (ClassSurface and ViewOnly)
 - Indexer parameters
@@ -841,11 +841,11 @@ class Foo {
 ```csharp
 // Interface requires "Dispose" but class has "dispose"
 interface IDisposable {
-    method Dispose(): void { ClrName = "Dispose" }
+    method Dispose: void { ClrName = "Dispose" }
 }
 
 class FileStream : IDisposable {
-    method dispose(): void { ClrName = "dispose", EmitScope = ClassSurface }
+    method dispose: void { ClrName = "dispose", EmitScope = ClassSurface }
 }
 // ERROR: TBG8A1 (CLR-name policy applies "Dispose", class only has "dispose")
 ```
@@ -860,7 +860,7 @@ This ensures interfaces and classes emit identical member names, preventing TS24
 
 **Algorithm:**
 1. For each class/struct implementing interfaces:
-   - Build set of all class surface member names using `NameUtilities.ApplyClrSurfaceNamePolicy()`
+   - Build set of all class surface member names using `NameUtilities.ApplyClrSurfaceNamePolicy`
    - Include both ClassSurface members and ViewOnly members (explicit implementations)
 2. For each implemented interface:
    - Resolve interface type via TypeIndex
@@ -882,12 +882,12 @@ Without this validation, the emit phase could generate:
 ```typescript
 // Interface (internal/index.d.ts)
 interface IDisposable {
-    Dispose(): void;  // PascalCase
+    Dispose: void;  // PascalCase
 }
 
 // Class (internal/index.d.ts)
 class FileStream implements IDisposable {
-    dispose(): void;  // camelCase
+    dispose: void;  // camelCase
 }
 // TS2420: Class 'FileStream' incorrectly implements interface 'IDisposable'.
 // Property 'Dispose' is missing in type 'FileStream' but required in type 'IDisposable'.
@@ -1010,15 +1010,15 @@ To re-enable, validator needs to:
 ```csharp
 class Foo {
     // Same StableId appearing twice with different EmitScopes
-    method Bar() { EmitScope = ClassSurface, StableId = "Foo.Bar" }
-    method Bar() { EmitScope = ViewOnly, StableId = "Foo.Bar" }  // ERROR: TBG702
+    method Bar { EmitScope = ClassSurface, StableId = "Foo.Bar" }
+    method Bar { EmitScope = ViewOnly, StableId = "Foo.Bar" }  // ERROR: TBG702
 }
 ```
 
 ##### **PG_INT_003: ClassSurface member has SourceInterface**
 ```csharp
 class Foo : IBar {
-    method Baz() {
+    method Baz {
         EmitScope = ClassSurface,
         SourceInterface = IBar  // ERROR: TBG703 (SourceInterface only for ViewOnly)
     }
@@ -1049,13 +1049,13 @@ class Foo : IBar {
 ##### **PG_SCOPE_003: Malformed scope key**
 ```csharp
 // ClassSurface member with bad scope key
-method Foo() {
+method Foo {
     EmitScope = ClassSurface,
     ScopeKey = ""  // ERROR: TBG720 (should be "type:...")
 }
 
 // ViewOnly member with bad scope key
-method Bar() {
+method Bar {
     EmitScope = ViewOnly,
     ScopeKey = ""  // ERROR: TBG720 (should be "view:...")
 }
@@ -1064,13 +1064,13 @@ method Bar() {
 ##### **PG_SCOPE_004: Scope/EmitScope mismatch**
 ```csharp
 // ClassSurface member missing class scope decision
-method Foo() {
+method Foo {
     EmitScope = ClassSurface,
     // Renamer has no decision in ClassSurface(type, isStatic)
 }  // ERROR: TBG721
 
 // ViewOnly member missing view scope decision
-method Bar() {
+method Bar {
     EmitScope = ViewOnly,
     SourceInterface = IFoo,
     // Renamer has no decision in ViewSurface(type, "IFoo", isStatic)
@@ -1126,14 +1126,14 @@ method Bar() {
 ##### **PG_FIN_001: Missing EmitScope**
 ```csharp
 class Foo {
-    method Bar() { EmitScope = Unspecified }  // ERROR: TBG710
+    method Bar { EmitScope = Unspecified }  // ERROR: TBG710
 }
 ```
 
 ##### **PG_FIN_002: ViewOnly without view**
 ```csharp
 class Foo : IBar {
-    method Baz() {
+    method Baz {
         EmitScope = ViewOnly,
         SourceInterface = null  // ERROR: TBG711 (no SourceInterface)
     }
@@ -1142,7 +1142,7 @@ class Foo : IBar {
 // OR
 
 class Foo : IBar {
-    method Baz() {
+    method Baz {
         EmitScope = ViewOnly,
         SourceInterface = IBar
     }
@@ -1153,7 +1153,7 @@ class Foo : IBar {
 ##### **PG_FIN_003: Missing final name**
 ```csharp
 class Foo {
-    method Bar() {
+    method Bar {
         EmitScope = ClassSurface,
         // Renamer.GetFinalMemberName(Bar, ClassSurface) returns ""
     }
@@ -1179,7 +1179,7 @@ class Foo : IBar {
 ##### **PG_FIN_006: Duplicate view membership**
 ```csharp
 class Foo : IBar, IBaz {
-    method Qux() { EmitScope = ViewOnly, SourceInterface = IBar }
+    method Qux { EmitScope = ViewOnly, SourceInterface = IBar }
     ExplicitView(IBar) { ViewMembers: [Qux] }
     ExplicitView(IBaz) { ViewMembers: [Qux] }  // ERROR: TBG715 (Qux in 2 views)
 }
@@ -1241,9 +1241,9 @@ class Foo {
 
 ##### **PG_CT_001: Non-benign constraint loss (strict mode)**
 ```csharp
-interface IFoo<T> where T : new() { }
+interface IFoo<T> where T : new { }
 class Foo<T> : IFoo<T> {
-    // TypeScript can't represent "new()" constraint
+    // TypeScript can't represent "new" constraint
 }  // ERROR: TBG406 (strict mode: AllowConstructorConstraintLoss = false)
 ```
 
@@ -1252,9 +1252,9 @@ class Foo<T> : IFoo<T> {
 // Same as above, but with policy override
 Policy.Constraints.AllowConstructorConstraintLoss = true
 
-interface IFoo<T> where T : new() { }
+interface IFoo<T> where T : new { }
 class Foo<T> : IFoo<T> {
-    // TypeScript can't represent "new()" constraint
+    // TypeScript can't represent "new" constraint
 }  // WARNING: TBG407 (override mode allowed)
 ```
 
@@ -1265,7 +1265,7 @@ class Foo<T> : IFoo<T> {
    - If override mode: emit WARNING (TBG407)
 
 **Constraint loss kinds:**
-- `ConstructorConstraintLoss` - TypeScript can't represent `new()` constraint
+- `ConstructorConstraintLoss` - TypeScript can't represent `new` constraint
 - Other kinds exist but are not yet validated
 
 ---
@@ -1378,7 +1378,7 @@ class Foo {
 
 ---
 
-#### 4. `ValidatePrimitiveGenericLifting(BuildContext ctx, SymbolGraph graph, ValidationContext validationCtx)` - jumanji9 NEW
+#### 4. `ValidatePrimitiveGenericLifting(BuildContext ctx, SymbolGraph graph, ValidationContext validationCtx)` - NEW
 
 **What it validates:**
 - **PG_GENERIC_PRIM_LIFT_001:** All primitive type arguments are covered by CLROf lifting rules
@@ -1408,9 +1408,9 @@ class Foo {
 **Algorithm:**
 1. Walk all type references in the graph
 2. For each NamedTypeReference with type arguments:
-   - Check if type argument is a concrete primitive (matches `PrimitiveLift.IsLiftableClr()`)
+   - Check if type argument is a concrete primitive (matches `PrimitiveLift.IsLiftableClr`)
    - If YES: Good! Covered by CLROf
-   - If NO but looks like a primitive (`IsPotentialPrimitive()`): ERROR
+   - If NO but looks like a primitive (`IsPotentialPrimitive`): ERROR
 3. Recursively check nested generics (e.g., `List<Dictionary<K,V>>`)
 
 **Primitive detection:**
@@ -1426,7 +1426,7 @@ bool IsPotentialPrimitive(string fullName) =>
         or "System.Half" or "System.Int128" or "System.UInt128";
 ```
 
-**Why this validation exists (jumanji9):**
+**Why this validation exists:**
 
 **Problem it prevents:**
 ```typescript
@@ -1454,7 +1454,7 @@ export type CLROf<T> =
 - TypeRefPrinter and PrimitiveLift stay in sync
 - No primitives slip through with identity fallback
 
-**Impact (jumanji9):**
+**Impact:**
 - Catches configuration errors early (at validation time, not runtime)
 - Prevents subtle bugs where primitive constraints don't match
 - Guards against future BCL additions (e.g., Int256, Float128)
@@ -1601,7 +1601,7 @@ namespace A {
 - **What it does:** Checks if class method is assignable to interface method in TypeScript
 - **Returns:** `true` if NOT assignable (representable break), `false` if assignable (benign)
 - **Algorithm:**
-  1. Erase both methods to TS signatures: `TsErase.EraseMember()`
+  1. Erase both methods to TS signatures: `TsErase.EraseMember`
   2. Check assignability: `TsAssignability.IsMethodAssignable(classSig, ifaceSig)`
 
 #### `GetPropertyTypeString(PropertySymbol property)`
@@ -1717,44 +1717,44 @@ namespace A {
 │ STEP 1: CORE VALIDATIONS                                                 │
 ├──────────────────────────────────────────────────────────────────────────┤
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ Core.ValidateTypeNames()                                        │    │
+│  │ Core.ValidateTypeNames                                        │    │
 │  │   • All types have TsEmitName                                   │    │
 │  │   • No duplicate type names in namespace                        │    │
 │  │   • Reserved words sanitized                                    │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ Core.ValidateMemberNames()                                      │    │
+│  │ Core.ValidateMemberNames                                      │    │
 │  │   • All members have TsEmitName                                 │    │
 │  │   • No overload collisions                                      │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ Core.ValidateGenericParameters()                                │    │
+│  │ Core.ValidateGenericParameters                                │    │
 │  │   • All generic params have names                               │    │
 │  │   • Constraints representable                                   │    │
 │  │   • No illegal constraint narrowing                             │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ Core.ValidateInterfaceConformance()                             │    │
+│  │ Core.ValidateInterfaceConformance                             │    │
 │  │   • Classes structurally conform to interfaces                  │    │
 │  │   • Method signatures TS-assignable                             │    │
 │  │   • Property covariance detected (INFO)                         │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ Core.ValidateInheritance()                                      │    │
+│  │ Core.ValidateInheritance                                      │    │
 │  │   • Base classes are classes                                    │    │
 │  │   • No circular inheritance                                     │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ Core.ValidateEmitScopes()                                       │    │
+│  │ Core.ValidateEmitScopes                                       │    │
 │  │   • Count ClassSurface/ViewOnly members                         │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ Core.ValidateImports()                                          │    │
+│  │ Core.ValidateImports                                          │    │
 │  │   • No circular dependencies                                    │    │
 │  │   • Import/export counts                                        │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ Core.ValidatePolicyCompliance()                                 │    │
+│  │ Core.ValidatePolicyCompliance                                 │    │
 │  │   • Policy constraints met                                      │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -1764,81 +1764,81 @@ namespace A {
 │ STEP 2: HARDENING VALIDATIONS (M1-M18)                                   │
 ├──────────────────────────────────────────────────────────────────────────┤
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M1: Views.Validate()                                            │    │
+│  │ M1: Views.Validate                                            │    │
 │  │   • ViewOnly members have views                                 │    │
 │  │   • SourceInterface matches view                                │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M2: Names.ValidateFinalNames()                                  │    │
+│  │ M2: Names.ValidateFinalNames                                  │    │
 │  │   • All types have final names from Renamer                     │    │
 │  │   • All members have final names from Renamer                   │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M3: Names.ValidateAliases()                                     │    │
+│  │ M3: Names.ValidateAliases                                     │    │
 │  │   • Import aliases don't collide                                │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M4: Names.ValidateIdentifiers() [PG_ID_001]                     │    │
+│  │ M4: Names.ValidateIdentifiers [PG_ID_001]                     │    │
 │  │   • ALL identifiers sanitized (reserved words)                  │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M5: Names.ValidateOverloadCollisions() [PG_OV_001]              │    │
+│  │ M5: Names.ValidateOverloadCollisions [PG_OV_001]              │    │
 │  │   • No duplicate erased signatures                              │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M6: Views.ValidateIntegrity() [PG_VIEW_001-003]                 │    │
+│  │ M6: Views.ValidateIntegrity [PG_VIEW_001-003]                 │    │
 │  │   • 3 HARD RULES: non-empty, unique, valid name                │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M7: Constraints.EmitDiagnostics() [PG_CT_001-002]               │    │
+│  │ M7: Constraints.EmitDiagnostics [PG_CT_001-002]               │    │
 │  │   • Constructor constraint losses                               │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M8: Views.ValidateMemberScoping() [PG_NAME_003-004]             │    │
+│  │ M8: Views.ValidateMemberScoping [PG_NAME_003-004]             │    │
 │  │   • No collisions within view                                   │    │
 │  │   • ViewOnly names don't shadow class surface                   │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M9: Scopes.ValidateEmitScopeInvariants() [PG_INT_002-003]       │    │
+│  │ M9: Scopes.ValidateEmitScopeInvariants [PG_INT_002-003]       │    │
 │  │   • No dual-scope members                                       │    │
 │  │   • ClassSurface members have no SourceInterface                │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M10: Scopes.ValidateScopeMismatches() [PG_SCOPE_003-004]        │    │
+│  │ M10: Scopes.ValidateScopeMismatches [PG_SCOPE_003-004]        │    │
 │  │   • Scope keys well-formed                                      │    │
 │  │   • Scope kind matches EmitScope                                │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M11: Names.ValidateClassSurfaceUniqueness() [PG_NAME_005]       │    │
+│  │ M11: Names.ValidateClassSurfaceUniqueness [PG_NAME_005]       │    │
 │  │   • No duplicates after deduplication                           │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M12: Finalization.Validate() [PG_FIN_001-009]                   │    │
+│  │ M12: Finalization.Validate [PG_FIN_001-009]                   │    │
 │  │   • ALL symbols have proper placement and naming                │    │
 │  │   • FINAL check before emission                                 │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M13: Types.ValidatePrinterNameConsistency() [PG_PRINT_001]      │    │
+│  │ M13: Types.ValidatePrinterNameConsistency [PG_PRINT_001]      │    │
 │  │   • Printer names match Renamer names                           │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M14: Types.ValidateTypeMapCompliance() [PG_TYPEMAP_001]         │    │
+│  │ M14: Types.ValidateTypeMapCompliance [PG_TYPEMAP_001]         │    │
 │  │   • No unsupported special forms                                │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M15: Types.ValidateExternalTypeResolution() [PG_LOAD_001]       │    │
+│  │ M15: Types.ValidateExternalTypeResolution [PG_LOAD_001]       │    │
 │  │   • All external types resolvable                               │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M16: ImportExport.ValidatePublicApiSurface() [PG_API_001-002]   │    │
+│  │ M16: ImportExport.ValidatePublicApiSurface [PG_API_001-002]   │    │
 │  │   • Public API doesn't expose internal types                    │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M17: ImportExport.ValidateImportCompleteness() [PG_IMPORT_001]  │    │
+│  │ M17: ImportExport.ValidateImportCompleteness [PG_IMPORT_001]  │    │
 │  │   • All foreign types imported                                  │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ M18: ImportExport.ValidateExportCompleteness() [PG_EXPORT_001]  │    │
+│  │ M18: ImportExport.ValidateExportCompleteness [PG_EXPORT_001]  │    │
 │  │   • All imported types exported by source                       │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -1854,12 +1854,12 @@ namespace A {
 │  │   TBG310:   241 - Property covariance (TS limitation)           │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ WriteDiagnosticsFile()                                          │    │
+│  │ WriteDiagnosticsFile                                          │    │
 │  │   • .tests/phasegate-diagnostics.txt                            │    │
 │  │   • Summary + interface conformance + all diagnostics           │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │ WriteSummaryJson()                                              │    │
+│  │ WriteSummaryJson                                              │    │
 │  │   • .tests/phasegate-summary.json                               │    │
 │  │   • Totals + diagnostic counts by code                          │    │
 │  └─────────────────────────────────────────────────────────────────┘    │

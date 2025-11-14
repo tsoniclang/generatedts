@@ -18,7 +18,7 @@ This document traces complete call chains through the SinglePhase pipeline from 
 
 ## 2. Entry Point Call Chain
 
-Starting from CLI invocation through SinglePhaseBuilder.Build():
+Starting from CLI invocation through SinglePhaseBuilder.Build:
 
 ```
 User executes CLI command
@@ -63,7 +63,7 @@ SinglePhaseBuilder.Build(assemblyPaths, outDir, policy, logger, verbose, logCate
 Complete call chain for assembly loading and reflection:
 
 ```
-SinglePhaseBuilder.Build()
+SinglePhaseBuilder.Build
   ↓
 LoadPhase(ctx, assemblyPaths)
   Location: src/tsbindgen/SinglePhase/SinglePhaseBuilder.cs:118
@@ -116,7 +116,7 @@ ReflectionReader.ReadAssemblies(loadContext, allAssemblyPaths)
   │         System.Reflection.MetadataLoadContext
   │
   └─→ For each loaded assembly:
-      └─→ For each type in assembly.GetTypes():
+      └─→ For each type in assembly.GetTypes:
           └─→ ReadType(type)
               Location: ReflectionReader.cs:102
               ↓
@@ -214,23 +214,23 @@ InterfaceMemberSubstitution.SubstituteClosedInterfaces(ctx, graph)
 ```
 
 **Key Functions Called:**
-- `System.Reflection.Assembly.GetTypes()` - Get all types
-- `System.Reflection.Type.GetMethods()` - Get methods
-- `System.Reflection.Type.GetProperties()` - Get properties
-- `System.Reflection.Type.GetFields()` - Get fields
-- `System.Reflection.Type.GetEvents()` - Get events
-- `System.Reflection.Type.GetConstructors()` - Get constructors
-- `System.Reflection.Type.GetInterfaces()` - Get implemented interfaces
-- `System.Reflection.MethodInfo.GetParameters()` - Get method parameters
+- `System.Reflection.Assembly.GetTypes` - Get all types
+- `System.Reflection.Type.GetMethods` - Get methods
+- `System.Reflection.Type.GetProperties` - Get properties
+- `System.Reflection.Type.GetFields` - Get fields
+- `System.Reflection.Type.GetEvents` - Get events
+- `System.Reflection.Type.GetConstructors` - Get constructors
+- `System.Reflection.Type.GetInterfaces` - Get implemented interfaces
+- `System.Reflection.MethodInfo.GetParameters` - Get method parameters
 
 ## 4. Phase 2: Normalize Call Graph
 
 Index building for fast lookups:
 
 ```
-SinglePhaseBuilder.Build()
+SinglePhaseBuilder.Build
   ↓
-graph = graph.WithIndices()
+graph = graph.WithIndices
   Location: src/tsbindgen/SinglePhase/Model/SymbolGraph.cs
   ↓
   Returns new SymbolGraph with TypeIndex, NamespaceIndex populated
@@ -252,7 +252,7 @@ graph = graph.WithIndices()
 14 transformation passes that modify the symbol graph:
 
 ```
-SinglePhaseBuilder.Build()
+SinglePhaseBuilder.Build
   ↓
 ShapePhase(ctx, graph)
   Location: SinglePhaseBuilder.cs:165
@@ -531,7 +531,7 @@ graph = MemberDeduplicator.Deduplicate(ctx, graph)
 Central naming phase - reserves all TypeScript names:
 
 ```
-SinglePhaseBuilder.Build()
+SinglePhaseBuilder.Build
   ↓
 graph = NameReservation.ReserveAllNames(ctx, graph)
   Location: src/tsbindgen/SinglePhase/Normalize/NameReservation.cs:32
@@ -693,7 +693,7 @@ graph = NameReservation.ReserveAllNames(ctx, graph)
 Import planning, emission ordering, overload unification, and validation:
 
 ```
-SinglePhaseBuilder.Build()
+SinglePhaseBuilder.Build
   ↓
 plan = PlanPhase(ctx, graph)
   Location: SinglePhaseBuilder.cs:250
@@ -801,7 +801,7 @@ constraintFindings = InterfaceConstraintAuditor.Audit(ctx, graph)
   For each (Type, Interface) pair:
     └─→ Check constructor constraints
         ↓
-        If interface requires `new()` but type has no public constructor:
+        If interface requires `new` but type has no public constructor:
           Record PG_CONSTRAINT_001 finding
         ↓
         If interface requires specific base type but type doesn't inherit:
@@ -1229,7 +1229,7 @@ ImportExport.ValidateExportCompleteness(ctx, graph, imports, validationContext)
 File generation phase - writes TypeScript, metadata, bindings, and stubs:
 
 ```
-SinglePhaseBuilder.Build()
+SinglePhaseBuilder.Build
   ↓
 EmitPhase(ctx, plan, outputDirectory)
   Location: SinglePhaseBuilder.cs:285
@@ -1304,7 +1304,7 @@ InternalIndexEmitter.Emit(ctx, plan, outputDirectory)
     │       │       │
     │       │       ├─→ For each property where EmitScope == ClassSurface:
     │       │       │   └─→ Write property declaration
-    │       │       │       get PropertyName(): PropertyType;
+    │       │       │       get PropertyName: PropertyType;
     │       │       │       set PropertyName(value: PropertyType);
     │       │       │
     │       │       ├─→ For each method where EmitScope == ClassSurface:
@@ -1388,14 +1388,14 @@ InternalIndexEmitter.Emit(ctx, plan, outputDirectory)
     │       └─→ TypeKind.StaticNamespace:
     │           └─→ Write static namespace class
     │               export class StaticNamespace {
-    │                 static Method1(): void;
+    │                 static Method1: void;
     │                 static Property1: Type1;
     │               }
     │
     ├─→ Close namespace: }
     │
     └─→ Write to disk: namespace/internal/index.d.ts
-        File.WriteAllTextAsync(path, builder.ToString())
+        File.WriteAllTextAsync(path, builder.ToString)
   ↓
 ┌────────────────────────────────────────────────────────┐
 │ Step 3: Emit Facade Files (per namespace)             │
@@ -1481,7 +1481,7 @@ BindingEmitter.Emit(ctx, plan, outputDirectory)
         "members": {
           "System.Collections.Generic.List`1": {
             "Add(T):void": "Add",
-            "get_Count():int": "Count",
+            "get_Count:int": "Count",
             "get_Item(int):T": "__indexer_0"
           }
         }
@@ -1547,15 +1547,15 @@ Central naming service - called from everywhere:
 │ ReserveTypeName - Called By:               │
 └────────────────────────────────────────────┘
   ↓
-  1. NameReservation.ReserveAllNames()
+  1. NameReservation.ReserveAllNames
      Phase: 3.5 (Name Reservation)
      Purpose: Reserve all type names
   ↓
-  2. HiddenMemberPlanner.Plan()
+  2. HiddenMemberPlanner.Plan
      Phase: 3 (Shape - Pass 9)
      Purpose: Reserve renamed names for hidden members
   ↓
-  3. ClassSurfaceDeduplicator.Deduplicate()
+  3. ClassSurfaceDeduplicator.Deduplicate
      Phase: 3 (Shape - Pass 10.5)
      Purpose: Reserve winner names after deduplication
 
@@ -1563,19 +1563,19 @@ Central naming service - called from everywhere:
 │ ReserveMemberName - Called By:             │
 └────────────────────────────────────────────┘
   ↓
-  1. Reservation.ReserveMemberNamesOnly()
+  1. Reservation.ReserveMemberNamesOnly
      Phase: 3.5 (Name Reservation - Class Surface)
      Purpose: Reserve class surface member names
   ↓
-  2. Reservation.ReserveViewMemberNamesOnly()
+  2. Reservation.ReserveViewMemberNamesOnly
      Phase: 3.5 (Name Reservation - Views)
      Purpose: Reserve view-scoped member names
   ↓
-  3. IndexerPlanner.Plan()
+  3. IndexerPlanner.Plan
      Phase: 3 (Shape - Pass 8)
      Purpose: Reserve placeholder names for omitted indexers
   ↓
-  4. HiddenMemberPlanner.Plan()
+  4. HiddenMemberPlanner.Plan
      Phase: 3 (Shape - Pass 9)
      Purpose: Reserve renamed names for hidden members
 
@@ -1583,11 +1583,11 @@ Central naming service - called from everywhere:
 │ GetFinalTypeName - Called By:              │
 └────────────────────────────────────────────┘
   ↓
-  1. Application.ApplyNamesToGraph()
+  1. Application.ApplyNamesToGraph
      Phase: 3.5 (Name Reservation)
      Purpose: Apply reserved names to graph
   ↓
-  2. TypeNameResolver.ResolveTypeName()
+  2. TypeNameResolver.ResolveTypeName
      Phase: 5 (Emit)
      Purpose: Resolve type names for printing
   ↓
@@ -1599,15 +1599,15 @@ Central naming service - called from everywhere:
 │ GetFinalMemberName - Called By:            │
 └────────────────────────────────────────────┘
   ↓
-  1. Application.ApplyNamesToGraph()
+  1. Application.ApplyNamesToGraph
      Phase: 3.5 (Name Reservation)
      Purpose: Apply reserved names to members
   ↓
-  2. ClassPrinter.PrintMethod/PrintProperty()
+  2. ClassPrinter.PrintMethod/PrintProperty
      Phase: 5 (Emit)
      Purpose: Get final name for member emission
   ↓
-  3. Views.ValidateMemberScoping()
+  3. Views.ValidateMemberScoping
      Phase: 4.7 (Validation)
      Purpose: Check view member name collisions
 
@@ -1615,15 +1615,15 @@ Central naming service - called from everywhere:
 │ TryGetDecision - Called By:                │
 └────────────────────────────────────────────┘
   ↓
-  1. NameReservation.ReserveAllNames()
+  1. NameReservation.ReserveAllNames
      Phase: 3.5 (Name Reservation)
      Purpose: Check if member already has decision
   ↓
-  2. Scopes.ValidateScopeMismatches()
+  2. Scopes.ValidateScopeMismatches
      Phase: 4.7 (Validation)
      Purpose: Verify rename decisions exist in correct scopes
   ↓
-  3. Audit.AuditReservationCompleteness()
+  3. Audit.AuditReservationCompleteness
      Phase: 3.5 (Name Reservation)
      Purpose: Verify all emitted members have decisions
 ```
@@ -1651,10 +1651,10 @@ Error tracking service:
 
 ```
 ┌────────────────────────────────────────────┐
-│ Error() - Called By:                       │
+│ Error - Called By:                       │
 └────────────────────────────────────────────┘
   ↓
-  1. AssemblyLoader.LoadClosure()
+  1. AssemblyLoader.LoadClosure
      Phase: 1 (Load)
      Code: PG_LOAD_002, PG_LOAD_003
   ↓
@@ -1667,10 +1667,10 @@ Error tracking service:
      Code: BUILD_EXCEPTION
 
 ┌────────────────────────────────────────────┐
-│ Warning() - Called By:                     │
+│ Warning - Called By:                     │
 └────────────────────────────────────────────┘
   ↓
-  1. AssemblyLoader.LoadClosure()
+  1. AssemblyLoader.LoadClosure
      Phase: 1 (Load)
      Code: PG_LOAD_003 (version drift, non-strict mode)
   ↓
@@ -1679,7 +1679,7 @@ Error tracking service:
      Codes: Various PG_* codes at Warning severity
 
 ┌────────────────────────────────────────────┐
-│ Info() - Called By:                        │
+│ Info - Called By:                        │
 └────────────────────────────────────────────┘
   ↓
   1. PhaseGate validation modules
@@ -1687,22 +1687,22 @@ Error tracking service:
      Purpose: Informational diagnostics
 
 ┌────────────────────────────────────────────┐
-│ GetAll() - Called By:                      │
+│ GetAll - Called By:                      │
 └────────────────────────────────────────────┘
   ↓
-  1. SinglePhaseBuilder.Build()
+  1. SinglePhaseBuilder.Build
      Phase: End of pipeline
      Purpose: Gather all diagnostics for BuildResult
   ↓
-  2. PhaseGate.Validate()
+  2. PhaseGate.Validate
      Phase: 4.7 (Validation)
      Purpose: Check if validation failed
 
 ┌────────────────────────────────────────────┐
-│ HasErrors() - Called By:                   │
+│ HasErrors - Called By:                   │
 └────────────────────────────────────────────┘
   ↓
-  1. SinglePhaseBuilder.Build()
+  1. SinglePhaseBuilder.Build
      Phase: End of pipeline
      Purpose: Determine if build succeeded
 ```
@@ -1716,7 +1716,7 @@ Configuration service:
 │ Policy.Emission.MemberNameTransform       │
 └────────────────────────────────────────────┘
   ↓
-  1. Shared.ComputeMemberRequestedBase()
+  1. Shared.ComputeMemberRequestedBase
      Phase: 3.5 (Name Reservation)
      Purpose: Apply camelCase transform if enabled
 
@@ -1724,7 +1724,7 @@ Configuration service:
 │ Policy.Omissions.OmitIndexers             │
 └────────────────────────────────────────────┘
   ↓
-  1. IndexerPlanner.Plan()
+  1. IndexerPlanner.Plan
      Phase: 3 (Shape - Pass 8)
      Purpose: Check if indexers should be omitted
 
@@ -1732,7 +1732,7 @@ Configuration service:
 │ Policy.Safety.RequireUnsafeMarkers        │
 └────────────────────────────────────────────┘
   ↓
-  1. TypeRefPrinter.Print()
+  1. TypeRefPrinter.Print
      Phase: 5 (Emit)
      Purpose: Use UnsafePointer/UnsafeByRef for unsafe types
 
@@ -1740,7 +1740,7 @@ Configuration service:
 │ Policy.Validation.StrictVersionChecks     │
 └────────────────────────────────────────────┘
   ↓
-  1. AssemblyLoader.ValidateAssemblyIdentity()
+  1. AssemblyLoader.ValidateAssemblyIdentity
      Phase: 1 (Load)
      Purpose: Error vs Warning for version drift
 ```
@@ -1794,9 +1794,9 @@ User runs:
 
 Main(["generate", "--use-new-pipeline", "-a", "System.Collections.dll", "-o", "out"])
   ↓
-RootCommand.InvokeAsync()
+RootCommand.InvokeAsync
   ↓
-GenerateCommand.SetHandler() lambda executes
+GenerateCommand.SetHandler lambda executes
   ↓
 GenerateCommand.ExecuteAsync(assemblies: ["System.Collections.dll"], outDir: "out", ...)
   ↓
@@ -1805,7 +1805,7 @@ GenerateCommand.ExecuteNewPipelineAsync(...)
 SinglePhaseBuilder.Build(
     assemblyPaths: ["System.Collections.dll"],
     outputDirectory: "out",
-    policy: PolicyDefaults.Create(),
+    policy: PolicyDefaults.Create,
     logger: Console.WriteLine,
     verbose: false,
     logCategories: null)
@@ -1894,7 +1894,7 @@ LoadPhase(ctx, ["System.Collections.dll"])
               Properties: [Count, Capacity, ...],
               Fields: [],
               Events: [],
-              Constructors: [ctor(), ctor(int), ...]
+              Constructors: [ctor, ctor(int), ...]
             }
           ↓
           Creates: TypeSymbol {
@@ -1926,7 +1926,7 @@ LoadPhase(ctx, ["System.Collections.dll"])
     ]
   }
   ↓
-graph = graph.WithIndices()
+graph = graph.WithIndices
   Builds: TypeIndex["System.Collections.Generic.List`1"] = List_1 TypeSymbol
   Builds: NamespaceIndex["System.Collections.Generic"] = NamespaceSymbol
   ↓
@@ -2125,7 +2125,7 @@ PlanPhase(ctx, graph)
   ↓
   InterfaceConstraintAuditor.Audit(ctx, graph)
     For (List<T>, IList<T>) pair:
-      Check constructor constraints → Has public ctor()
+      Check constructor constraints → Has public ctor
       Check base constraints → Satisfies all
     Returns: InterfaceConstraintFindings { Findings: [] }
   ↓
@@ -2195,15 +2195,15 @@ EmitPhase(ctx, plan, "out")
           ↓
           Writes: implements IList_1<T>, ICollection_1<T>, IEnumerable_1<T> {
           ↓
-          For constructor: ctor()
+          For constructor: ctor
             MethodPrinter.PrintConstructor(builder, ctor, ctx)
-            Writes: constructor(): void;
+            Writes: constructor: void;
           ↓
           For constructor: ctor(int capacity)
             Writes: constructor(capacity: int): void;
           ↓
           For property: Count
-            Writes: get Count(): int;
+            Writes: get Count: int;
           ↓
           For method: Add(T item)
             MethodPrinter.PrintMethod(builder, Add, ctx)
@@ -2230,7 +2230,7 @@ EmitPhase(ctx, plan, "out")
       ↓
       Writes: }
       ↓
-      File.WriteAllTextAsync("out/System.Collections.Generic/internal/index.d.ts", builder.ToString())
+      File.WriteAllTextAsync("out/System.Collections.Generic/internal/index.d.ts", builder.ToString)
   ↓
   FacadeEmitter.Emit(ctx, plan, "out")
     For namespace: System.Collections.Generic
@@ -2274,7 +2274,7 @@ EmitPhase(ctx, plan, "out")
           "members": {
             "System.Collections.Generic.List`1": {
               "Add(T):void": "Add",
-              "get_Count():int": "Count",
+              "get_Count:int": "Count",
               "get_Item(int):T": "__indexer_0"
             }
           }
@@ -2293,7 +2293,7 @@ BuildResult result = new BuildResult {
   Success: true,
   Statistics: { TypeCount: 1, MethodCount: 30, ... },
   Diagnostics: [],
-  RenameDecisions: ctx.Renamer.GetAllDecisions()
+  RenameDecisions: ctx.Renamer.GetAllDecisions
 }
   ↓
 GenerateCommand.ExecuteNewPipelineAsync reports success

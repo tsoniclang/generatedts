@@ -53,7 +53,7 @@ SinglePhaseBuilder.Build(assemblyPaths, outDir, policy, logger, verbose, logCate
 Complete chain for assembly loading and reflection:
 
 ```
-SinglePhaseBuilder.Build()
+SinglePhaseBuilder.Build
   ↓
 LoadPhase(ctx, assemblyPaths)
   Location: SinglePhaseBuilder.cs:118
@@ -86,7 +86,7 @@ AssemblyLoader.LoadClosure(seedPaths, refPaths, strictVersions)
 ReflectionReader.ReadAssemblies(loadContext, allAssemblyPaths)
   Location: src/tsbindgen/SinglePhase/Load/ReflectionReader.cs:28
   ↓
-  For each type in assembly.GetTypes():
+  For each type in assembly.GetTypes:
     └─→ ReadType(type)
         Location: ReflectionReader.cs:102
         ↓
@@ -140,9 +140,9 @@ InterfaceMemberSubstitution.SubstituteClosedInterfaces(ctx, graph)
 ```
 
 **Key System.Reflection Functions:**
-- `Assembly.GetTypes()`, `Type.GetMethods()`, `Type.GetProperties()`
-- `Type.GetFields()`, `Type.GetEvents()`, `Type.GetConstructors()`
-- `Type.GetInterfaces()`, `MethodInfo.GetParameters()`
+- `Assembly.GetTypes`, `Type.GetMethods`, `Type.GetProperties`
+- `Type.GetFields`, `Type.GetEvents`, `Type.GetConstructors`
+- `Type.GetInterfaces`, `MethodInfo.GetParameters`
 
 ---
 
@@ -151,9 +151,9 @@ InterfaceMemberSubstitution.SubstituteClosedInterfaces(ctx, graph)
 Index building for O(1) lookups:
 
 ```
-SinglePhaseBuilder.Build()
+SinglePhaseBuilder.Build
   ↓
-graph = graph.WithIndices()
+graph = graph.WithIndices
   Location: src/tsbindgen/SinglePhase/Model/SymbolGraph.cs
   ↓
   Builds TypeIndex: CLR full name → TypeSymbol
@@ -169,7 +169,7 @@ graph = graph.WithIndices()
 14 transformation passes:
 
 ```
-SinglePhaseBuilder.Build()
+SinglePhaseBuilder.Build
   ↓
 ShapePhase(ctx, graph)
   Location: SinglePhaseBuilder.cs:165
@@ -359,7 +359,7 @@ graph = MemberDeduplicator.Deduplicate(ctx, graph)
 Central naming phase:
 
 ```
-SinglePhaseBuilder.Build()
+SinglePhaseBuilder.Build
   ↓
 graph = NameReservation.ReserveAllNames(ctx, graph)
   Location: src/tsbindgen/SinglePhase/Normalize/NameReservation.cs:32
@@ -482,7 +482,7 @@ graph = NameReservation.ReserveAllNames(ctx, graph)
 Import planning, ordering, unification, validation:
 
 ```
-SinglePhaseBuilder.Build()
+SinglePhaseBuilder.Build
   ↓
 plan = PlanPhase(ctx, graph)
   Location: SinglePhaseBuilder.cs:250
@@ -820,7 +820,7 @@ ImportExport.ValidateExportCompleteness(ctx, graph, imports, validationContext)
 File generation:
 
 ```
-SinglePhaseBuilder.Build()
+SinglePhaseBuilder.Build
   ↓
 EmitPhase(ctx, plan, outputDirectory)
   Location: SinglePhaseBuilder.cs:285
@@ -981,38 +981,38 @@ Central naming service:
 ┌────────────────────────────────────────────┐
 │ ReserveTypeName - Called By:               │
 └────────────────────────────────────────────┘
-  1. NameReservation.ReserveAllNames() (Phase 3.5)
-  2. HiddenMemberPlanner.Plan() (Phase 3 - Pass 9)
-  3. ClassSurfaceDeduplicator.Deduplicate() (Phase 3 - Pass 10.5)
+  1. NameReservation.ReserveAllNames (Phase 3.5)
+  2. HiddenMemberPlanner.Plan (Phase 3 - Pass 9)
+  3. ClassSurfaceDeduplicator.Deduplicate (Phase 3 - Pass 10.5)
 
 ┌────────────────────────────────────────────┐
 │ ReserveMemberName - Called By:             │
 └────────────────────────────────────────────┘
-  1. Reservation.ReserveMemberNamesOnly() (Phase 3.5 - Class Surface)
-  2. Reservation.ReserveViewMemberNamesOnly() (Phase 3.5 - Views)
-  3. IndexerPlanner.Plan() (Phase 3 - Pass 8)
-  4. HiddenMemberPlanner.Plan() (Phase 3 - Pass 9)
+  1. Reservation.ReserveMemberNamesOnly (Phase 3.5 - Class Surface)
+  2. Reservation.ReserveViewMemberNamesOnly (Phase 3.5 - Views)
+  3. IndexerPlanner.Plan (Phase 3 - Pass 8)
+  4. HiddenMemberPlanner.Plan (Phase 3 - Pass 9)
 
 ┌────────────────────────────────────────────┐
 │ GetFinalTypeName - Called By:              │
 └────────────────────────────────────────────┘
-  1. Application.ApplyNamesToGraph() (Phase 3.5)
-  2. TypeNameResolver.ResolveTypeName() (Phase 5 - Emit)
+  1. Application.ApplyNamesToGraph (Phase 3.5)
+  2. TypeNameResolver.ResolveTypeName (Phase 5 - Emit)
   3. PhaseGate validation modules (Phase 4.7)
 
 ┌────────────────────────────────────────────┐
 │ GetFinalMemberName - Called By:            │
 └────────────────────────────────────────────┘
-  1. Application.ApplyNamesToGraph() (Phase 3.5)
-  2. ClassPrinter.PrintMethod/PrintProperty() (Phase 5)
-  3. Views.ValidateMemberScoping() (Phase 4.7)
+  1. Application.ApplyNamesToGraph (Phase 3.5)
+  2. ClassPrinter.PrintMethod/PrintProperty (Phase 5)
+  3. Views.ValidateMemberScoping (Phase 4.7)
 
 ┌────────────────────────────────────────────┐
 │ TryGetDecision - Called By:                │
 └────────────────────────────────────────────┘
-  1. NameReservation.ReserveAllNames() (Phase 3.5)
-  2. Scopes.ValidateScopeMismatches() (Phase 4.7)
-  3. Audit.AuditReservationCompleteness() (Phase 3.5)
+  1. NameReservation.ReserveAllNames (Phase 3.5)
+  2. Scopes.ValidateScopeMismatches (Phase 4.7)
+  3. Audit.AuditReservationCompleteness (Phase 3.5)
 ```
 
 **Data Structures:**
@@ -1038,17 +1038,17 @@ Error tracking:
 
 ```
 ┌────────────────────────────────────────────┐
-│ Error() - Called By:                       │
+│ Error - Called By:                       │
 └────────────────────────────────────────────┘
-  1. AssemblyLoader.LoadClosure() (Phase 1)
+  1. AssemblyLoader.LoadClosure (Phase 1)
   2. PhaseGate validation modules (Phase 4.7)
   3. BuildContext exception handling (Any phase)
 
 ┌────────────────────────────────────────────┐
-│ HasErrors() - Called By:                   │
+│ HasErrors - Called By:                   │
 └────────────────────────────────────────────┘
-  1. SinglePhaseBuilder.Build() (End of pipeline)
-  2. PhaseGate.Validate() (Phase 4.7)
+  1. SinglePhaseBuilder.Build (End of pipeline)
+  2. PhaseGate.Validate (Phase 4.7)
 ```
 
 ### Policy
@@ -1057,16 +1057,16 @@ Configuration:
 
 ```
 Policy.Emission.MemberNameTransform
-  → Shared.ComputeMemberRequestedBase() (Phase 3.5)
+  → Shared.ComputeMemberRequestedBase (Phase 3.5)
 
 Policy.Omissions.OmitIndexers
-  → IndexerPlanner.Plan() (Phase 3 - Pass 8)
+  → IndexerPlanner.Plan (Phase 3 - Pass 8)
 
 Policy.Safety.RequireUnsafeMarkers
-  → TypeRefPrinter.Print() (Phase 5)
+  → TypeRefPrinter.Print (Phase 5)
 
 Policy.Validation.StrictVersionChecks
-  → AssemblyLoader.ValidateAssemblyIdentity() (Phase 1)
+  → AssemblyLoader.ValidateAssemblyIdentity (Phase 1)
 ```
 
 ### Logging
@@ -1093,40 +1093,40 @@ Condensed trace from CLI to file write:
 ```
 User: dotnet run -- generate --use-new-pipeline -a System.Collections.dll -o out
 
-Main() → GenerateCommand.ExecuteNewPipelineAsync() → SinglePhaseBuilder.Build()
+Main → GenerateCommand.ExecuteNewPipelineAsync → SinglePhaseBuilder.Build
 
 Phase 1: Load
   AssemblyLoader.LoadClosure(["System.Collections.dll"], ...)
-    → ResolveClosure() finds 3 assemblies (System.Collections, System.Runtime, System.Private.CoreLib)
+    → ResolveClosure finds 3 assemblies (System.Collections, System.Runtime, System.Private.CoreLib)
     → new MetadataLoadContext(resolver, "System.Private.CoreLib")
   ReflectionReader.ReadAssemblies(loadContext, paths)
     For System.Collections.Generic.List`1:
       ReadType(List`1)
-        → DetermineTypeKind() → TypeKind.Class
-        → ComputeAccessibility() → Accessibility.Public
+        → DetermineTypeKind → TypeKind.Class
+        → ComputeAccessibility → Accessibility.Public
         → TypeReferenceFactory.CreateGenericParameterSymbol(T)
         → TypeReferenceFactory.Create(System.Object) for base
-        → ReadMembers():
+        → ReadMembers:
             ReadMethod(Add) → MethodSymbol { ClrName: "Add", Signature: "Add(T):void", EmitScope: ClassSurface }
             ReadProperty(Count) → PropertySymbol { ClrName: "Count", ... }
         → Creates: TypeSymbol { ClrFullName: "System.Collections.Generic.List`1", Arity: 1, ... }
-  InterfaceMemberSubstitution.SubstituteClosedInterfaces()
+  InterfaceMemberSubstitution.SubstituteClosedInterfaces
     → BuildSubstitutionMap(IList`1, IList<T>) creates map { T → T }
 
 Phase 2: Normalize
-  graph.WithIndices()
+  graph.WithIndices
     → TypeIndex["System.Collections.Generic.List`1"] = List`1 TypeSymbol
 
 Phase 3: Shape (14 passes)
-  GlobalInterfaceIndex.Build() → Indexes IList<T>, ICollection<T>, IEnumerable<T>
-  StructuralConformance.Analyze() → List<T> has all interface methods, no ViewOnly synthesis
-  InterfaceInliner.Inline() → No inlining needed
+  GlobalInterfaceIndex.Build → Indexes IList<T>, ICollection<T>, IEnumerable<T>
+  StructuralConformance.Analyze → List<T> has all interface methods, no ViewOnly synthesis
+  InterfaceInliner.Inline → No inlining needed
   [Other passes unchanged]
-  IndexerPlanner.Plan() → List<T>.Item[int] set to EmitScope.Omit
-  ClassSurfaceDeduplicator.Deduplicate() → No duplicates
+  IndexerPlanner.Plan → List<T>.Item[int] set to EmitScope.Omit
+  ClassSurfaceDeduplicator.Deduplicate → No duplicates
 
 Phase 3.5: Name Reservation
-  NameReservation.ReserveAllNames()
+  NameReservation.ReserveAllNames
     For List`1:
       Shared.ComputeTypeRequestedBase("List`1") → "List"
       ctx.Renamer.ReserveTypeName(List`1, "List", "System.Collections.Generic/internal", ...)
@@ -1139,63 +1139,63 @@ Phase 3.5: Name Reservation
         ctx.Renamer.ReserveMemberName(Add.StableId, "Add", instance scope, ...)
           → Final: "Add"
 
-    Audit.AuditReservationCompleteness() → All members have decisions ✓
+    Audit.AuditReservationCompleteness → All members have decisions ✓
 
-    Application.ApplyNamesToGraph()
+    Application.ApplyNamesToGraph
       → Set List`1.TsEmitName = "List_1"
       → Set Add.TsEmitName = "Add"
       → Set Count.TsEmitName = "Count"
 
 Phase 4: Plan
-  ImportGraph.Build() → Collect foreign types (System.Object, System.Array)
-  ImportPlanner.PlanImports() → Plan imports from System namespace
-  EmitOrderPlanner.PlanOrder() → Topological sort
-  OverloadUnifier.UnifyOverloads() → List<T>.Add is single overload, no unification
-  InterfaceConstraintAuditor.Audit() → (List<T>, IList<T>) satisfies all constraints
+  ImportGraph.Build → Collect foreign types (System.Object, System.Array)
+  ImportPlanner.PlanImports → Plan imports from System namespace
+  EmitOrderPlanner.PlanOrder → Topological sort
+  OverloadUnifier.UnifyOverloads → List<T>.Add is single overload, no unification
+  InterfaceConstraintAuditor.Audit → (List<T>, IList<T>) satisfies all constraints
 
-  PhaseGate.Validate():
-    ValidationCore.ValidateTypeNames() → List<T>.TsEmitName = "List_1" ✓
-    ValidationCore.ValidateMemberNames() → Add.TsEmitName = "Add" ✓
+  PhaseGate.Validate:
+    ValidationCore.ValidateTypeNames → List<T>.TsEmitName = "List_1" ✓
+    ValidationCore.ValidateMemberNames → Add.TsEmitName = "Add" ✓
     [All 20+ validations pass]
     → ErrorCount: 0, validation passed
 
 Phase 5: Emit
-  SupportTypesEmit.Emit() → Write _support/types.d.ts
+  SupportTypesEmit.Emit → Write _support/types.d.ts
 
-  InternalIndexEmitter.Emit()
+  InternalIndexEmitter.Emit
     For System.Collections.Generic:
-      EmitFileHeader() → Add reference to _support/types.d.ts
-      EmitImports() → import type { Object } from "../System/internal"
-      EmitNamespaceDeclaration() → export namespace System.Collections.Generic {
+      EmitFileHeader → Add reference to _support/types.d.ts
+      EmitImports → import type { Object } from "../System/internal"
+      EmitNamespaceDeclaration → export namespace System.Collections.Generic {
 
       For List<T>:
-        ClassPrinter.PrintClassDeclaration()
+        ClassPrinter.PrintClassDeclaration
           Write: export class List_1<T>
           Write: extends Object
           Write: implements IList_1<T>, ICollection_1<T>, IEnumerable_1<T> {
 
           For Add:
-            MethodPrinter.PrintMethod()
+            MethodPrinter.PrintMethod
               TypeRefPrinter.Print(T) → TypeNameResolver.ResolveTypeName(T) → "T"
               Write: Add(item: T): void;
 
           For Count:
-            Write: get Count(): int;
+            Write: get Count: int;
 
           Write: }
 
       Write to: out/System.Collections.Generic/internal/index.d.ts
 
-  FacadeEmitter.Emit()
+  FacadeEmitter.Emit
     → Write out/System.Collections.Generic/index.d.ts with: export * from "./internal"
 
-  MetadataEmitter.Emit()
+  MetadataEmitter.Emit
     → Write out/System.Collections.Generic/metadata.json with CLR metadata
 
-  BindingEmitter.Emit()
+  BindingEmitter.Emit
     → Write out/System.Collections.Generic/bindings.json with name mappings
 
-  ModuleStubEmitter.Emit()
+  ModuleStubEmitter.Emit
     → Write out/System.Collections.Generic/index.js stub
 
 BuildResult { Success: true, TypeCount: 1, ... }

@@ -37,10 +37,10 @@ output/
 ### Purpose
 Generates public-facing `index.d.ts` for each namespace (entry points).
 
-### Method: Emit()
-Iterates `plan.EmissionOrder.Namespaces` in deterministic order, generates facade via `GenerateFacade()`, writes to `output/{namespace}/index.d.ts`.
+### Method: Emit
+Iterates `plan.EmissionOrder.Namespaces` in deterministic order, generates facade via `GenerateFacade`, writes to `output/{namespace}/index.d.ts`.
 
-### Method: GenerateFacade()
+### Method: GenerateFacade
 Generates facade content:
 1. File header
 2. Internal import: `import * as Internal from './internal/index';`
@@ -55,7 +55,7 @@ Generates facade content:
 ### Purpose
 Generates `internal/index.d.ts` for each namespace (actual type declarations).
 
-### Method: Emit()
+### Method: Emit
 Main entry point. Emits internal declarations for all namespaces.
 
 **Output structure**:
@@ -70,15 +70,15 @@ Main entry point. Emits internal declarations for all namespaces.
 - Emits view interfaces after main namespace
 - Uses ClassPrinter/InterfacePrinter for type emission
 
-### Method: QualifyViewInterface() - **jumanji9 NEW**
+### Method: QualifyViewInterface - **NEW**
 **TS2304 FIX**: Qualify view interface types with namespace alias if cross-namespace. View interfaces that are transitively implemented don't get added to ValueImportQualifiedNames, so need manual qualification.
 
 **Example**: `IEnumerable_1$view: System_Collections_Generic_Internal.System.Collections.Generic.IEnumerable_1<T>`
 
-### Method: NamespaceUsesSupportTypes() - **jumanji9 UPDATED**
+### Method: NamespaceUsesSupportTypes - **UPDATED**
 **TS2304 FIX**: Check if namespace contains pointer/byref types requiring TSUnsafePointer/TSByRef imports.
 
-**jumanji9 addition**: Now also checks constructor parameters for unsafe types (previously only checked methods/properties/fields)
+**addition**: Now also checks constructor parameters for unsafe types (previously only checked methods/properties/fields)
 
 ---
 
@@ -105,24 +105,24 @@ Ensures consistent member names across:
 ```typescript
 // BAD - Without CLR-name contract
 interface IDisposable {
-    Dispose(): void;  // CLR name
+    Dispose: void;  // CLR name
 }
 class FileStream implements IDisposable {
-    dispose(): void;  // lowercase! TS2420 error
+    dispose: void;  // lowercase! TS2420 error
 }
 
 // GOOD - With CLR-name contract
 interface IDisposable {
-    Dispose(): void;
+    Dispose: void;
 }
 class FileStream implements IDisposable {
-    Dispose(): void;  // Matching name ✓
+    Dispose: void;  // Matching name ✓
 }
 ```
 
 **Impact**: Reduced TS2420 errors by 81% (579 → ~100 errors)
 
-### Method: ApplyClrSurfaceNamePolicy()
+### Method: ApplyClrSurfaceNamePolicy
 ```csharp
 public static string ApplyClrSurfaceNamePolicy(string clrName)
 ```
@@ -143,8 +143,8 @@ ApplyClrSurfaceNamePolicy("class")      → "class_"    // Reserved word
 
 **Usage in PhaseGate**:
 ```csharp
-// From Plan/Validation/Names.cs:ValidateClrSurfaceNamePolicy()
-var surfaceNames = new HashSet<string>();
+// From Plan/Validation/Names.cs:ValidateClrSurfaceNamePolicy
+var surfaceNames = new HashSet<string>;
 
 // Build class surface set
 foreach (var method in classMethods) {
@@ -161,19 +161,19 @@ foreach (var ifaceMethod in interfaceMethods) {
 }
 ```
 
-### Method: SanitizeIdentifier()
+### Method: SanitizeIdentifier
 ```csharp
 private static string SanitizeIdentifier(string name)
 ```
 
-Appends `_` to TypeScript/JavaScript reserved words. Uses `Renaming.TypeScriptReservedWords.Sanitize()`.
+Appends `_` to TypeScript/JavaScript reserved words. Uses `Renaming.TypeScriptReservedWords.Sanitize`.
 
 **Examples**:
 - `"GetType"` → `"GetType"` (not reserved)
 - `"default"` → `"default_"` (reserved)
 - `"class"` → `"class_"` (reserved)
 
-### Method: HasNumericSuffix()
+### Method: HasNumericSuffix
 ```csharp
 public static bool HasNumericSuffix(string name)
 ```
@@ -189,7 +189,7 @@ Detects if name ends with numeric digits (e.g., equals2, getHashCode3). Used by 
 
 **Why PG_NAME_SURF_002 is disabled**: Cannot distinguish legitimate CLR names with numbers (ToInt32, UTF8Encoding, MD5) from renaming artifacts (equals2, toString3). To re-enable, needs to compare against original CLR names.
 
-### Method: IsNonNumericOverride()
+### Method: IsNonNumericOverride
 ```csharp
 private static bool IsNonNumericOverride(string clrName, string renamedName)
 ```
@@ -199,12 +199,12 @@ Detects if renamer applied semantic override (not numeric suffix). Returns true 
 ### Integration with PhaseGate
 
 **Validator: PG_NAME_SURF_001** (TBG8A1 - SurfaceNamePolicyMismatch)
-- Uses `ApplyClrSurfaceNamePolicy()` to validate interface/class compatibility
+- Uses `ApplyClrSurfaceNamePolicy` to validate interface/class compatibility
 - Ensures emit phase will produce matching names
 - Prevents TS2420 errors at generation time
 
 **Validator: PG_NAME_SURF_002** (TBG8A2 - NumericSuffixOnSurface)
-- Uses `HasNumericSuffix()` to detect renaming artifacts
+- Uses `HasNumericSuffix` to detect renaming artifacts
 - Currently DISABLED due to legitimate CLR names with numbers
 
 ### Integration with Emit Phase
@@ -218,7 +218,7 @@ Detects if renamer applied semantic override (not numeric suffix). Returns true 
 ### Purpose
 Prints TypeScript class declarations from TypeSymbol. Handles classes, structs, static classes, enums, delegates, interfaces.
 
-### Method: Print()
+### Method: Print
 ```csharp
 public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, SymbolGraph graph)
 ```
@@ -227,7 +227,7 @@ public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildCont
 
 **Parameters**: `graph` - SymbolGraph for type lookups (needed for TS2693 same-namespace view fix)
 
-### Method: PrintClass()
+### Method: PrintClass
 ```csharp
 private static string PrintClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, SymbolGraph graph, bool instanceSuffix = false)
 ```
@@ -242,7 +242,7 @@ private static string PrintClass(TypeSymbol type, TypeNameResolver resolver, Bui
 7. Emit base class (`extends BaseClass`, skip Object/ValueType/any/unknown)
 8. **TS2693 FIX**: Apply same-namespace view handling to interface list
 9. Emit interfaces (`implements IFoo, IBar`)
-10. Call `EmitMembers()` to emit body
+10. Call `EmitMembers` to emit body
 
 **Base class emission (with TS2693/TS2863 fixes)**:
 ```csharp
@@ -262,12 +262,12 @@ if (type.BaseType != null) {
 }
 ```
 
-**Interface emission (with TS2693 + jumanji9 fixes)**:
+**Interface emission (with TS2693 + fixes)**:
 ```csharp
-// TS2304 FIX (jumanji9): Filter out non-public interfaces
+// TS2304 FIX: Filter out non-public interfaces
 var publicInterfaces = type.Interfaces
     .Where(i => IsInterfaceInGraph(i, graph))
-    .ToArray();
+    .ToArray;
 
 if (publicInterfaces.Length > 0) {
     sb.Append(" implements ");
@@ -298,7 +298,7 @@ class Foo extends any { }
 // TS2863: 'any' cannot be used as a base class or interface.
 ```
 
-### Method: ApplyInstanceSuffixForSameNamespaceViews()
+### Method: ApplyInstanceSuffixForSameNamespaceViews
 ```csharp
 private static string ApplyInstanceSuffixForSameNamespaceViews(
     string resolvedName,
@@ -372,7 +372,7 @@ For generics with views: Insert `$instance` before `<` to produce `Nullable$inst
 
 **Impact**: Commit 5880297 - "Fix same-namespace TS2693 by using $instance suffix in heritage clauses". Eliminated same-namespace TS2693 errors.
 
-### Method: IsInterfaceInGraph() - **jumanji9 NEW**
+### Method: IsInterfaceInGraph - **NEW**
 ```csharp
 private static bool IsInterfaceInGraph(TypeReference ifaceRef, SymbolGraph graph)
 ```
@@ -384,7 +384,7 @@ private static bool IsInterfaceInGraph(TypeReference ifaceRef, SymbolGraph graph
 2. Build StableId: `"{assemblyName}:{fullName}"`
 3. Look up in TypeIndex - if found: public (emit), if not: non-public/external (skip)
 
-**Impact (jumanji9)**:
+**Impact**:
 - **Eliminated ALL TS2420 errors** (579 → 0, 100%)
 - **Reduced TS2416 by 81.6%** (794 → 146)
 - **Total error reduction**: -1,264 errors (-86.5%)
@@ -393,15 +393,15 @@ private static bool IsInterfaceInGraph(TypeReference ifaceRef, SymbolGraph graph
 
 ### Other Methods (Summary)
 
-- **PrintStruct()**: Emits structs as classes (metadata notes value semantics)
-- **PrintStaticClass()**: Emits as `abstract class` with static members only
-- **PrintEnum()**: Emits `enum { Name = Value }`
-- **PrintDelegate()**: Emits `type Delegate = (params) => ReturnType`
-- **PrintInterface()**: Emits `interface { ... }`
-- **EmitMembers()**: Emits instance members + calls EmitStaticMembers()
-- **EmitStaticMembers()**: Emits static members with generic lifting (TS2302 prevention)
-- **EmitInterfaceMembers()**: Emits interface members
-- **PrintGenericParameter()**: Emits generic parameter with constraints
+- **PrintStruct**: Emits structs as classes (metadata notes value semantics)
+- **PrintStaticClass**: Emits as `abstract class` with static members only
+- **PrintEnum**: Emits `enum { Name = Value }`
+- **PrintDelegate**: Emits `type Delegate = (params) => ReturnType`
+- **PrintInterface**: Emits `interface { ... }`
+- **EmitMembers**: Emits instance members + calls EmitStaticMembers
+- **EmitStaticMembers**: Emits static members with generic lifting (TS2302 prevention)
+- **EmitInterfaceMembers**: Emits interface members
+- **PrintGenericParameter**: Emits generic parameter with constraints
 
 ---
 
@@ -411,9 +411,9 @@ private static bool IsInterfaceInGraph(TypeReference ifaceRef, SymbolGraph graph
 Prints method signatures. Handles parameters, return types, generic parameters, overloads.
 
 ### Key Methods
-- **PrintMethod()**: Main entry point for method emission
-- **PrintParameters()**: Emits parameter list with types
-- **PrintReturnType()**: Emits return type via TypeRefPrinter
+- **PrintMethod**: Main entry point for method emission
+- **PrintParameters**: Emits parameter list with types
+- **PrintReturnType**: Emits return type via TypeRefPrinter
 
 ---
 
@@ -422,7 +422,7 @@ Prints method signatures. Handles parameters, return types, generic parameters, 
 ### Purpose
 Prints TypeScript type references from TypeReference objects.
 
-### Method: Print() - **jumanji9 UPDATED**
+### Method: Print - **UPDATED**
 ```csharp
 public static string Print(
     TypeReference typeRef,
@@ -439,9 +439,9 @@ Dispatches based on TypeReference subtype:
 - ByRefTypeReference → `TSByRef<T>`
 - GenericParameterReference → `T` (or `unknown` if not in allowedTypeParameterNames)
 
-**jumanji9 addition**: `allowedTypeParameterNames` parameter for free type variable detection. When provided, any GenericParameterReference NOT in set is demoted to `unknown` to prevent TS2304 "Cannot find name" errors from leaked generics.
+**addition**: `allowedTypeParameterNames` parameter for free type variable detection. When provided, any GenericParameterReference NOT in set is demoted to `unknown` to prevent TS2304 "Cannot find name" errors from leaked generics.
 
-### Method: PrintGenericParameter() - **jumanji9 UPDATED**
+### Method: PrintGenericParameter - **UPDATED**
 **TS2304 FIX**: Checks if generic parameter is in allowed scope. If `allowedTypeParameterNames` provided and parameter NOT in set, demotes to `unknown` (free type variable leak).
 
 **Problem solved**: C# reflection sometimes shows generic parameter T in interface member signatures even when T isn't actually used (explicit interface implementations). Without detection, this leaks into TypeScript as free type variable causing TS2304.
@@ -455,7 +455,7 @@ Dispatches based on TypeReference subtype:
 ### Purpose
 Generates `metadata.json` with CLR semantics for Tsonic compiler.
 
-### Method: Emit()
+### Method: Emit
 Emits metadata for each namespace:
 - Type metadata (struct/class, static/abstract/sealed)
 - Member metadata (virtual/override/static/abstract, ref/out parameters)
@@ -468,7 +468,7 @@ Emits metadata for each namespace:
 ### Purpose
 Generates `bindings.json` mapping TypeScript names to CLR names.
 
-### Method: Emit()
+### Method: Emit
 Emits bindings for each namespace:
 - Type bindings: TS name → CLR full name
 - Member bindings: TS member name → CLR member name + signature
@@ -480,32 +480,32 @@ Emits bindings for each namespace:
 ### Purpose
 Single source of truth for resolving TypeScript identifiers from TypeReferences. Uses Renamer for all names.
 
-### Constructor - **jumanji9 UPDATED**
+### Constructor - **UPDATED**
 ```csharp
 public TypeNameResolver(BuildContext ctx, SymbolGraph graph, ImportPlan? importPlan = null,
     string? currentNamespace = null, bool facadeMode = false)
 ```
 
-**jumanji9 addition**: `facadeMode` parameter. When true, cross-namespace type references are qualified with namespace alias to prevent TS2304 "Cannot find name" errors in facade constraint clauses.
+**addition**: `facadeMode` parameter. When true, cross-namespace type references are qualified with namespace alias to prevent TS2304 "Cannot find name" errors in facade constraint clauses.
 
 ### Method: For(TypeSymbol)
 Returns final TypeScript identifier from Renamer.
 
-### Method: For(NamedTypeReference) - **jumanji9 UPDATED**
+### Method: For(NamedTypeReference) - **UPDATED**
 **Algorithm**:
 1. Try TypeMap FIRST (built-ins like System.Int32 → int)
 2. **TS2693 FIX**: Check value import qualification (if in ValueImportQualifiedNames)
 3. Look up TypeSymbol in graph via StableId
 4. If not in graph: External type, sanitize CLR name
-   - **jumanji9 TS2304 FIX**: If facade mode + cross-namespace → qualify with namespace alias
+   - **TS2304 FIX**: If facade mode + cross-namespace → qualify with namespace alias
 5. Get final name from Renamer
-   - **jumanji9 TS2304 FIX**: If facade mode + cross-namespace → qualify with namespace alias
+   - **TS2304 FIX**: If facade mode + cross-namespace → qualify with namespace alias
 
 **Facade mode example**: `IEquatable_1` → `System.IEquatable_1` in facade constraint clauses
 
 ---
 
-## File: PrimitiveLift.cs - **jumanji9 NEW**
+## File: PrimitiveLift.cs - **NEW**
 
 ### Purpose
 Defines primitive lifting rules for `CLROf<T>` utility type. Single source of truth for which TypeScript primitives get lifted to CLR types in generic contexts.
@@ -530,14 +530,14 @@ internal static readonly (string TsName, string ClrFullName, string ClrSimpleNam
 
 ---
 
-## File: AliasEmit.cs - **jumanji9 NEW**
+## File: AliasEmit.cs - **NEW**
 
 ### Purpose
 Unified type alias emission logic. Ensures consistent generic parameter handling across all alias emission sites (facades, internal exports, view composition).
 
 **Why needed**: Previously scattered alias emission caused LHS/RHS arity mismatches (TS2315 errors).
 
-### Method: EmitGenericAlias()
+### Method: EmitGenericAlias
 ```csharp
 internal static void EmitGenericAlias(
     StringBuilder sb,
@@ -557,10 +557,10 @@ internal static void EmitGenericAlias(
 - Generic with constraints: `export type List_1<T extends IEquatable_1<CLROf<T>>> = Internal.List_1<T>;`
 
 ### Other Methods
-- **GenerateTypeParametersWithConstraints()**: Generates `<T extends IFoo>` with constraints for LHS
-- **GenerateTypeArguments()**: Generates `<T, U>` (names only) for RHS
+- **GenerateTypeParametersWithConstraints**: Generates `<T extends IFoo>` with constraints for LHS
+- **GenerateTypeArguments**: Generates `<T, U>` (names only) for RHS
 
-**Impact (jumanji9)**: Eliminated TS2315 errors from arity mismatches, unified alias emission, prevented future bugs.
+**Impact**: Eliminated TS2315 errors from arity mismatches, unified alias emission, prevented future bugs.
 
 ---
 
@@ -591,12 +591,12 @@ internal static void EmitGenericAlias(
 
 **Key Features**:
 - **NameUtilities.cs**: CLR-name contract implementation (81% reduction in TS2420 errors)
-- **TS2693 fix**: ApplyInstanceSuffixForSameNamespaceViews() for same-namespace view references
+- **TS2693 fix**: ApplyInstanceSuffixForSameNamespaceViews for same-namespace view references
 - **TS2863 fix**: Filter 'any'/'unknown' from extends clause
 
-**jumanji9 Major Additions**:
-- **IsInterfaceInGraph()**: Filter non-public interfaces (-1,264 errors, -86.5%)
-- **QualifyViewInterface()**: Cross-namespace view interface qualification (TS2304 fix)
+**Major Additions**:
+- **IsInterfaceInGraph**: Filter non-public interfaces (-1,264 errors, -86.5%)
+- **QualifyViewInterface**: Cross-namespace view interface qualification (TS2304 fix)
 - **Free type variable detection**: TypeRefPrinter allowedTypeParameterNames (TS2304 fix)
 - **Facade mode**: TypeNameResolver cross-namespace qualification (TS2304 fix)
 - **Constructor parameter checking**: Support types detection in InternalIndexEmitter (TS2304 fix)

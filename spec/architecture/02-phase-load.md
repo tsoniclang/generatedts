@@ -77,8 +77,8 @@ Creates a `MetadataLoadContext` for the given assemblies. Uses `PathAssemblyReso
 - Test code
 
 **How it works:**
-1. Calls `GetReferenceAssembliesPath()` to find reference pack directory
-2. Calls `GetResolverPaths()` to collect all DLLs from reference and target directories
+1. Calls `GetReferenceAssembliesPath` to find reference pack directory
+2. Calls `GetResolverPaths` to collect all DLLs from reference and target directories
 3. Creates `PathAssemblyResolver` with collected paths
 4. Creates `MetadataLoadContext` with System.Private.CoreLib as core assembly
 
@@ -104,7 +104,7 @@ Loads all assemblies into the given context. Deduplicates by assembly identity t
 - `IReadOnlyList<Assembly>` - List of successfully loaded assemblies
 
 **Called by:**
-- `ReflectionReader.ReadAssemblies()` - Main entry point for reflection
+- `ReflectionReader.ReadAssemblies` - Main entry point for reflection
 
 **How it works:**
 1. For each assembly path:
@@ -187,7 +187,7 @@ Builds map of available assemblies from reference directories. Maps `AssemblyKey
 - `Dictionary<AssemblyKey, List<string>>` - Map from assembly key to candidate paths
 
 **Called by:**
-- `LoadClosure()` - Phase 1 of closure resolution
+- `LoadClosure` - Phase 1 of closure resolution
 
 **How it works:**
 1. For each reference directory:
@@ -202,7 +202,7 @@ Builds map of available assemblies from reference directories. Maps `AssemblyKey
 **Algorithm:**
 - Uses `Dictionary<AssemblyKey, List<string>>` to group paths by key
 - Multiple versions of same assembly accumulate in list
-- Later, `ResolveClosure()` picks highest version from list
+- Later, `ResolveClosure` picks highest version from list
 
 ---
 
@@ -228,7 +228,7 @@ Resolves transitive closure via BFS over assembly references. Returns map of `As
 - `Dictionary<AssemblyKey, string>` - Map from assembly key to resolved file path
 
 **Called by:**
-- `LoadClosure()` - Phase 2 of closure resolution
+- `LoadClosure` - Phase 2 of closure resolution
 
 **How it works (BFS algorithm):**
 
@@ -239,7 +239,7 @@ Resolves transitive closure via BFS over assembly references. Returns map of `As
 
 **BFS Loop:**
 1. Dequeue current assembly path
-2. Get AssemblyKey from path via `AssemblyName.GetAssemblyName()`
+2. Get AssemblyKey from path via `AssemblyName.GetAssemblyName`
 3. Skip if already visited (by key)
 4. Mark as visited
 5. **Version policy:** If already resolved, keep highest version:
@@ -289,7 +289,7 @@ Validates assembly identity consistency in resolved closure. Implements PhaseGat
 - `void` - Emits diagnostics to BuildContext
 
 **Called by:**
-- `LoadClosure()` - Phase 3 of closure resolution
+- `LoadClosure` - Phase 3 of closure resolution
 
 **How it works:**
 
@@ -339,7 +339,7 @@ Finds System.Private.CoreLib in resolved assembly set. This is the core library 
 - `InvalidOperationException` - If System.Private.CoreLib not found
 
 **Called by:**
-- `LoadClosure()` - Phase 4 of closure resolution
+- `LoadClosure` - Phase 4 of closure resolution
 
 **How it works:**
 1. Filters resolvedPaths for entries where `Key.Name == "System.Private.CoreLib"` (case-insensitive)
@@ -369,7 +369,7 @@ Gets reference assemblies directory from the first assembly path. Uses the same 
 - `InvalidOperationException` - If cannot determine reference directory
 
 **Called by:**
-- `CreateLoadContext()` - To find reference pack location
+- `CreateLoadContext` - To find reference pack location
 
 **How it works:**
 1. **Primary strategy:** Use directory containing first assembly
@@ -407,13 +407,13 @@ Gets all paths that the resolver should search. Deduplicates by assembly name to
 - `IEnumerable<string>` - Deduplicated list of DLL paths for resolver
 
 **Called by:**
-- `CreateLoadContext()` - To configure PathAssemblyResolver
+- `CreateLoadContext` - To configure PathAssemblyResolver
 
 **How it works:**
 1. Create dictionary: `pathsByName` (assembly name → file path)
 2. **Phase 1:** Scan reference assemblies directory
-   - Gets all *.dll files via `Directory.GetFiles()`
-   - Extracts name via `Path.GetFileNameWithoutExtension()`
+   - Gets all *.dll files via `Directory.GetFiles`
+   - Extracts name via `Path.GetFileNameWithoutExtension`
    - Adds to dictionary if not already present (first wins)
 3. **Phase 2:** Scan directories containing target assemblies
    - For each assembly path, gets directory
@@ -483,7 +483,7 @@ Main entry point. Reads assemblies and builds the complete `SymbolGraph`. Groups
      - Add assembly location to sourceAssemblies
      - Log "Reading types from {assembly.Name}..."
      - For each type in assembly:
-       - Skip compiler-generated types (via `IsCompilerGenerated()`)
+       - Skip compiler-generated types (via `IsCompilerGenerated`)
        - Compute accessibility via `ComputeAccessibility(type)`
        - Skip non-public types
        - Call `ReadType(type)` to build TypeSymbol
@@ -523,8 +523,8 @@ Converts a `System.Type` to `TypeSymbol`. Reads all type metadata: kind, accessi
 - `TypeSymbol` - Complete symbol with all metadata
 
 **Called by:**
-- `ReadAssemblies()` - For each public type in assemblies
-- `ReadType()` - Recursively for nested types
+- `ReadAssemblies` - For each public type in assemblies
+- `ReadType` - Recursively for nested types
 
 **How it works:**
 1. **Create StableId:**
@@ -537,17 +537,17 @@ Converts a `System.Type` to `TypeSymbol`. Reads all type metadata: kind, accessi
    - Call `ComputeAccessibility(type)` → `Accessibility` enum
 4. **Read generic parameters:**
    - If `type.IsGenericType`: Get generic arguments
-   - Call `_typeFactory.CreateGenericParameterSymbol()` for each
+   - Call `_typeFactory.CreateGenericParameterSymbol` for each
    - Store as `ImmutableArray<GenericParameterSymbol>`
 5. **Read base type and interfaces:**
    - `baseType = type.BaseType != null ? _typeFactory.Create(type.BaseType) : null`
-   - `interfaces = type.GetInterfaces().Select(_typeFactory.Create)`
+   - `interfaces = type.GetInterfaces.Select(_typeFactory.Create)`
 6. **Read members:**
    - Call `ReadMembers(type)` → `TypeMembers`
 7. **Read nested types:**
    - Get nested types via `type.GetNestedTypes(BindingFlags.Public)`
-   - Filter out compiler-generated (via `IsCompilerGenerated()`)
-   - Recursively call `ReadType()` for each
+   - Filter out compiler-generated (via `IsCompilerGenerated`)
+   - Recursively call `ReadType` for each
 8. **Build TypeSymbol:**
    - All CLR metadata: IsValueType, IsAbstract, IsSealed, IsStatic
    - `IsStatic = type.IsAbstract && type.IsSealed && !type.IsValueType` (static classes)
@@ -572,8 +572,8 @@ Computes accessibility for a type, correctly handling nested types. For nested t
 - `Accessibility` - Public or Internal
 
 **Called by:**
-- `ReadAssemblies()` - To filter public types
-- `ReadType()` - To store accessibility
+- `ReadAssemblies` - To filter public types
+- `ReadType` - To store accessibility
 
 **How it works:**
 
@@ -610,7 +610,7 @@ Determines the `TypeKind` enum value for a System.Type.
 - `TypeKind` - Enum value (Enum, Interface, Delegate, StaticNamespace, Struct, Class)
 
 **Called by:**
-- `ReadType()` - To set TypeSymbol.Kind
+- `ReadType` - To set TypeSymbol.Kind
 
 **How it works (checked in order):**
 1. `type.IsEnum` → `TypeKind.Enum`
@@ -639,7 +639,7 @@ Reads all public members from a type: methods, properties, fields, events, const
 - `TypeMembers` - Record with all member collections
 
 **Called by:**
-- `ReadType()` - To populate TypeSymbol.Members
+- `ReadType` - To populate TypeSymbol.Members
 
 **How it works:**
 1. **Initialize collections:**
@@ -698,7 +698,7 @@ Converts a `MethodInfo` to `MethodSymbol`. Handles explicit interface implementa
 - `MethodSymbol` - Complete method symbol
 
 **Called by:**
-- `ReadMembers()` - For each public method
+- `ReadMembers` - For each public method
 
 **How it works:**
 1. **Detect explicit interface implementation:**
@@ -714,11 +714,11 @@ Converts a `MethodInfo` to `MethodSymbol`. Handles explicit interface implementa
    - CanonicalSignature from `CreateMethodSignature(method)`
    - MetadataToken from method
 3. **Read parameters:**
-   - Get via `method.GetParameters()`
-   - Call `ReadParameter()` for each
+   - Get via `method.GetParameters`
+   - Call `ReadParameter` for each
 4. **Read generic parameters:**
    - If `method.IsGenericMethod`: Get generic arguments
-   - Call `_typeFactory.CreateGenericParameterSymbol()` for each
+   - Call `_typeFactory.CreateGenericParameterSymbol` for each
 5. **Build MethodSymbol:**
    - ReturnType via `_typeFactory.Create(method.ReturnType)`
    - IsStatic, IsAbstract, IsVirtual, IsSealed from method
@@ -747,19 +747,19 @@ Converts a `PropertyInfo` to `PropertySymbol`. Handles explicit interface implem
 - `PropertySymbol` - Complete property symbol
 
 **Called by:**
-- `ReadMembers()` - For each public property
+- `ReadMembers` - For each public property
 
 **How it works:**
 1. **Detect explicit interface implementation:**
-   - Same logic as `ReadMethod()` (check for '.' in name)
+   - Same logic as `ReadMethod` (check for '.' in name)
 2. **Create MemberStableId:**
    - CanonicalSignature from `CreatePropertySignature(property)`
 3. **Read index parameters:**
-   - Get via `property.GetIndexParameters()`
-   - Call `ReadParameter()` for each
+   - Get via `property.GetIndexParameters`
+   - Call `ReadParameter` for each
 4. **Read accessors:**
-   - `getter = property.GetGetMethod()`
-   - `setter = property.GetSetMethod()`
+   - `getter = property.GetGetMethod`
+   - `setter = property.GetSetMethod`
 5. **Build PropertySymbol:**
    - PropertyType via `_typeFactory.Create(property.PropertyType)`
    - IndexParameters (for indexers)
@@ -790,7 +790,7 @@ Converts a `FieldInfo` to `FieldSymbol`.
 - `FieldSymbol` - Complete field symbol
 
 **Called by:**
-- `ReadMembers()` - For each public field
+- `ReadMembers` - For each public field
 
 **How it works:**
 1. **Create MemberStableId:**
@@ -798,7 +798,7 @@ Converts a `FieldInfo` to `FieldSymbol`.
 2. **Build FieldSymbol:**
    - FieldType via `_typeFactory.Create(field.FieldType)`
    - IsStatic, IsReadOnly (`field.IsInitOnly`), IsConst (`field.IsLiteral`)
-   - ConstValue via `field.GetRawConstantValue()` if IsConst
+   - ConstValue via `field.GetRawConstantValue` if IsConst
    - Visibility via `GetFieldVisibility(field)`
    - Provenance = `MemberProvenance.Original`
    - EmitScope = `EmitScope.ClassSurface`
@@ -823,15 +823,15 @@ Converts an `EventInfo` to `EventSymbol`. Handles explicit interface implementat
 - `EventSymbol` - Complete event symbol
 
 **Called by:**
-- `ReadMembers()` - For each public event
+- `ReadMembers` - For each public event
 
 **How it works:**
 1. **Detect explicit interface implementation:**
-   - Same logic as `ReadMethod()` (check for '.' in name)
+   - Same logic as `ReadMethod` (check for '.' in name)
 2. **Create MemberStableId:**
    - CanonicalSignature = event handler type's FullName
 3. **Read add method:**
-   - `addMethod = evt.GetAddMethod()`
+   - `addMethod = evt.GetAddMethod`
 4. **Build EventSymbol:**
    - EventHandlerType via `_typeFactory.Create(evt.EventHandlerType!)`
    - IsStatic, IsVirtual from addMethod
@@ -860,15 +860,15 @@ Converts a `ConstructorInfo` to `ConstructorSymbol`.
 - `ConstructorSymbol` - Complete constructor symbol
 
 **Called by:**
-- `ReadMembers()` - For each public constructor
+- `ReadMembers` - For each public constructor
 
 **How it works:**
 1. **Create MemberStableId:**
    - MemberName = ".ctor"
    - CanonicalSignature from `CreateConstructorSignature(ctor)`
 2. **Read parameters:**
-   - Get via `ctor.GetParameters()`
-   - Call `ReadParameter()` for each
+   - Get via `ctor.GetParameters`
+   - Call `ReadParameter` for each
 3. **Build ConstructorSymbol:**
    - Parameters array
    - IsStatic (for static constructors)
@@ -893,7 +893,7 @@ Converts a `ParameterInfo` to `ParameterSymbol`. Sanitizes parameter name for Ty
 - `ParameterSymbol` - Complete parameter symbol
 
 **Called by:**
-- `ReadMethod()`, `ReadProperty()`, `ReadConstructor()` - For each parameter
+- `ReadMethod`, `ReadProperty`, `ReadConstructor` - For each parameter
 
 **How it works:**
 1. **Get parameter name:**
@@ -928,10 +928,10 @@ Creates canonical signature string for method identity.
 - `string` - Canonical signature (interned)
 
 **Called by:**
-- `ReadMethod()` - For MemberStableId.CanonicalSignature
+- `ReadMethod` - For MemberStableId.CanonicalSignature
 
 **How it works:**
-1. Extract parameter types: `method.GetParameters().Select(p => p.ParameterType.FullName)`
+1. Extract parameter types: `method.GetParameters.Select(p => p.ParameterType.FullName)`
 2. Extract return type: `method.ReturnType.FullName`
 3. Call `_ctx.CanonicalizeMethod(method.Name, paramTypes, returnType)`
 4. Return interned string
@@ -955,10 +955,10 @@ Creates canonical signature string for property identity.
 - `string` - Canonical signature (interned)
 
 **Called by:**
-- `ReadProperty()` - For MemberStableId.CanonicalSignature
+- `ReadProperty` - For MemberStableId.CanonicalSignature
 
 **How it works:**
-1. Extract index parameter types: `property.GetIndexParameters().Select(p => p.ParameterType.FullName)`
+1. Extract index parameter types: `property.GetIndexParameters.Select(p => p.ParameterType.FullName)`
 2. Extract property type: `property.PropertyType.FullName`
 3. Call `_ctx.CanonicalizeProperty(property.Name, indexTypes, propType)`
 4. Return interned string
@@ -982,10 +982,10 @@ Creates canonical signature string for constructor identity.
 - `string` - Canonical signature (interned)
 
 **Called by:**
-- `ReadConstructor()` - For MemberStableId.CanonicalSignature
+- `ReadConstructor` - For MemberStableId.CanonicalSignature
 
 **How it works:**
-1. Extract parameter types: `ctor.GetParameters().Select(p => p.ParameterType.FullName)`
+1. Extract parameter types: `ctor.GetParameters.Select(p => p.ParameterType.FullName)`
 2. Call `_ctx.CanonicalizeMethod(".ctor", paramTypes, "void")`
 3. Return interned string
 
@@ -1008,7 +1008,7 @@ Converts MethodInfo accessibility to Visibility enum.
 - `Visibility` - Enum value (Public, Protected, ProtectedInternal, PrivateProtected, Internal, Private)
 
 **Called by:**
-- `ReadMethod()` - To set MethodSymbol.Visibility
+- `ReadMethod` - To set MethodSymbol.Visibility
 
 **How it works (checked in order):**
 1. `method.IsPublic` → `Visibility.Public`
@@ -1037,7 +1037,7 @@ Converts PropertyInfo accessibility to Visibility enum (uses getter or setter vi
 - `Visibility` - Enum value
 
 **Called by:**
-- `ReadProperty()` - To set PropertySymbol.Visibility
+- `ReadProperty` - To set PropertySymbol.Visibility
 
 **How it works:**
 1. Get getter via `property.GetGetMethod(true)` (include non-public)
@@ -1065,10 +1065,10 @@ Converts FieldInfo accessibility to Visibility enum.
 - `Visibility` - Enum value
 
 **Called by:**
-- `ReadField()` - To set FieldSymbol.Visibility
+- `ReadField` - To set FieldSymbol.Visibility
 
 **How it works:**
-Same logic as `GetVisibility()` but for FieldInfo flags.
+Same logic as `GetVisibility` but for FieldInfo flags.
 
 ---
 
@@ -1089,7 +1089,7 @@ Converts EventInfo accessibility to Visibility enum (uses add method visibility)
 - `Visibility` - Enum value
 
 **Called by:**
-- `ReadEvent()` - To set EventSymbol.Visibility
+- `ReadEvent` - To set EventSymbol.Visibility
 
 **How it works:**
 1. Get add method via `evt.GetAddMethod(true)` (include non-public)
@@ -1115,7 +1115,7 @@ Checks if a method is an override (vs new virtual or original virtual). Uses Met
 - `bool` - True if method is an override
 
 **Called by:**
-- `ReadMethod()`, `ReadProperty()`, `ReadEvent()` - To set IsOverride flag
+- `ReadMethod`, `ReadProperty`, `ReadEvent` - To set IsOverride flag
 
 **How it works:**
 ```csharp
@@ -1146,10 +1146,10 @@ Converts ConstructorInfo accessibility to Visibility enum.
 - `Visibility` - Enum value
 
 **Called by:**
-- `ReadConstructor()` - To set ConstructorSymbol.Visibility
+- `ReadConstructor` - To set ConstructorSymbol.Visibility
 
 **How it works:**
-Same logic as `GetVisibility()` but for ConstructorInfo flags.
+Same logic as `GetVisibility` but for ConstructorInfo flags.
 
 ---
 
@@ -1170,8 +1170,8 @@ Checks if a type name indicates compiler-generated code. Compiler-generated type
 - `bool` - True if compiler-generated
 
 **Called by:**
-- `ReadAssemblies()` - To skip compiler-generated types
-- `ReadType()` - To filter nested types
+- `ReadAssemblies` - To skip compiler-generated types
+- `ReadType` - To filter nested types
 
 **How it works:**
 ```csharp
@@ -1233,7 +1233,7 @@ Processes all types in the graph, building substitution maps for closed generic 
 4. **Log completion:**
    - "Created {totalSubstitutions} interface member mappings"
 
-**Note:** The substitution maps are built but not stored in the graph. Shape phase components will rebuild them as needed using `BuildSubstitutionMap()` and `SubstituteTypeReference()`.
+**Note:** The substitution maps are built but not stored in the graph. Shape phase components will rebuild them as needed using `BuildSubstitutionMap` and `SubstituteTypeReference`.
 
 ---
 
@@ -1254,7 +1254,7 @@ Builds index of all interface types in graph, mapping ClrFullName to TypeSymbol.
 - `Dictionary<string, TypeSymbol>` - Map from interface full name to symbol
 
 **Called by:**
-- `SubstituteClosedInterfaces()` - Phase 1
+- `SubstituteClosedInterfaces` - Phase 1
 
 **How it works:**
 1. Create empty dictionary
@@ -1291,7 +1291,7 @@ Processes one type, building substitution maps for all closed generic interfaces
 - `int` - Count of substitution maps created
 
 **Called by:**
-- `SubstituteClosedInterfaces()` - For each type
+- `SubstituteClosedInterfaces` - For each type
 
 **How it works:**
 1. If type has no interfaces, return 0
@@ -1300,7 +1300,7 @@ Processes one type, building substitution maps for all closed generic interfaces
      - Cast to `NamedTypeReference`
      - Check `TypeArguments.Count > 0`
    - If closed generic:
-     - Extract generic definition name via `GetGenericDefinitionName()`
+     - Extract generic definition name via `GetGenericDefinitionName`
      - Look up interface definition in index
      - If found:
        - Call `BuildSubstitutionMap(ifaceSymbol, namedRef)`
@@ -1336,7 +1336,7 @@ Builds substitution map from generic parameter names to type arguments for a clo
 - `Dictionary<string, TypeReference>` - Map from parameter name to argument type
 
 **Called by:**
-- `ProcessType()` - For each closed generic interface
+- `ProcessType` - For each closed generic interface
 
 **How it works:**
 1. Create empty map
@@ -1430,7 +1430,7 @@ Converts closed generic type name to generic definition name. Handles both angle
 - `string` - Generic definition name with arity
 
 **Called by:**
-- `ProcessType()` - To look up interface definition
+- `ProcessType` - To look up interface definition
 
 **How it works:**
 1. **Check for backtick:**
@@ -1532,26 +1532,26 @@ Performs actual type conversion. Dispatches to appropriate handler based on type
 - `TypeReference` - Appropriate subclass
 
 **Called by:**
-- `Create()` - After cache miss
+- `Create` - After cache miss
 
 **How it works (checked in order):**
 
 **Case 1: ByRef types**
 - `type.IsByRef` → Return `ByRefTypeReference`
-- Element type via `type.GetElementType()`
-- Recursively call `Create()` for element type
+- Element type via `type.GetElementType`
+- Recursively call `Create` for element type
 
 **Case 2: Pointer types**
 - `type.IsPointer` → Return `PointerTypeReference`
 - Count pointer depth (e.g., `int***` has depth 3)
 - Walk element types until non-pointer reached
-- Recursively call `Create()` for final element type
+- Recursively call `Create` for final element type
 
 **Case 3: Array types**
 - `type.IsArray` → Return `ArrayTypeReference`
-- Element type via `type.GetElementType()`
-- Rank via `type.GetArrayRank()` (1 for `T[]`, 2 for `T[,]`, etc.)
-- Recursively call `Create()` for element type
+- Element type via `type.GetElementType`
+- Rank via `type.GetArrayRank` (1 for `T[]`, 2 for `T[,]`, etc.)
+- Recursively call `Create` for element type
 
 **Case 4: Generic parameters**
 - `type.IsGenericParameter` → Call `CreateGenericParameter(type)`
@@ -1579,23 +1579,23 @@ Creates `NamedTypeReference` for class, struct, interface, enum, or delegate.
 - `NamedTypeReference` - Complete named type reference
 
 **Called by:**
-- `CreateInternal()` - For named types
+- `CreateInternal` - For named types
 
 **How it works:**
 
 **Step 1: Extract basic metadata**
-- `assemblyName = type.Assembly.GetName().Name ?? "Unknown"`
+- `assemblyName = type.Assembly.GetName.Name ?? "Unknown"`
 - **CRITICAL - Open generic form for constructed generics:**
   ```csharp
   var fullName = type.IsGenericType && type.IsConstructedGenericType
-      ? type.GetGenericTypeDefinition().FullName ?? type.Name
+      ? type.GetGenericTypeDefinition.FullName ?? type.Name
       : type.FullName ?? type.Name;
   ```
   - For constructed generics (e.g., `IEquatable<StandardFormat>`), use open generic form
   - Open form: `"System.IEquatable\`1"` (clean, backtick arity only)
   - Constructed form: `"System.IEquatable\`1[[System.Buffers.StandardFormat, ...]]"` (has assembly-qualified type args)
   - **Why needed:** Constructed form breaks StableId lookup and causes import garbage bugs
-  - **Related:** ImportGraph.GetOpenGenericClrKey() uses same logic to prevent assembly-qualified type arg pollution
+  - **Related:** ImportGraph.GetOpenGenericClrKey uses same logic to prevent assembly-qualified type arg pollution
 - `namespaceName = type.Namespace ?? ""`
 - `name = type.Name`
 
@@ -1611,10 +1611,10 @@ Creates `NamedTypeReference` for class, struct, interface, enum, or delegate.
 **Step 3: Handle generic types**
 - Initialize `arity = 0` and `typeArgs = []`
 - If `type.IsGenericType`:
-  - Get arity via `type.GetGenericArguments().Length`
+  - Get arity via `type.GetGenericArguments.Length`
   - If `type.IsConstructedGenericType`:
     - For each generic argument:
-      - Recursively call `Create()` to convert
+      - Recursively call `Create` to convert
       - Add to typeArgs list
 
 **Step 4: HARDENING - Stamp interface StableId at load time**
@@ -1625,7 +1625,7 @@ Creates `NamedTypeReference` for class, struct, interface, enum, or delegate.
 - Purpose: Eliminates repeated computation and graph lookups in later phases
 
 **Step 5: Build NamedTypeReference**
-- All strings interned via `_ctx.Intern()`
+- All strings interned via `_ctx.Intern`
 - Return NamedTypeReference with all fields populated
 
 ---
@@ -1647,7 +1647,7 @@ Creates `GenericParameterReference` for a generic type parameter (e.g., `T` in `
 - `GenericParameterReference` - Generic parameter reference
 
 **Called by:**
-- `CreateInternal()` - For generic parameters
+- `CreateInternal` - For generic parameters
 
 **How it works:**
 
@@ -1693,8 +1693,8 @@ Creates `GenericParameterSymbol` from a System.Type. Stores variance and special
 - `ArgumentException` - If type is not a generic parameter
 
 **Called by:**
-- ReflectionReader.ReadType() - For type generic parameters
-- ReflectionReader.ReadMethod() - For method generic parameters
+- ReflectionReader.ReadType - For type generic parameters
+- ReflectionReader.ReadMethod - For method generic parameters
 
 **How it works:**
 
@@ -1702,10 +1702,10 @@ Creates `GenericParameterSymbol` from a System.Type. Stores variance and special
 - If `!type.IsGenericParameter`: Throw ArgumentException
 
 **Step 2: Extract declaring context**
-- Same as `CreateGenericParameter()`
+- Same as `CreateGenericParameter`
 
 **Step 3: Create GenericParameterId**
-- Same as `CreateGenericParameter()`
+- Same as `CreateGenericParameter`
 
 **Step 4: Extract variance**
 - Get `GenericParameterAttributes` via `type.GenericParameterAttributes`
@@ -1716,11 +1716,11 @@ Creates `GenericParameterSymbol` from a System.Type. Stores variance and special
 **Step 5: Extract special constraints**
 - `ReferenceTypeConstraint` → `GenericParameterConstraints.ReferenceType` (class constraint)
 - `NotNullableValueTypeConstraint` → `GenericParameterConstraints.ValueType` (struct constraint)
-- `DefaultConstructorConstraint` → `GenericParameterConstraints.DefaultConstructor` (new() constraint)
+- `DefaultConstructorConstraint` → `GenericParameterConstraints.DefaultConstructor` (new constraint)
 - Combine with bitwise OR (flags enum)
 
 **Step 6: Store raw constraint types**
-- Call `type.GetGenericParameterConstraints()` to get raw System.Type[] array
+- Call `type.GetGenericParameterConstraints` to get raw System.Type[] array
 - Store in `RawConstraintTypes` field
 - ConstraintCloser will convert these to TypeReferences during Shape phase
 - Prevents infinite recursion on recursive constraints
@@ -1732,7 +1732,7 @@ Creates `GenericParameterSymbol` from a System.Type. Stores variance and special
 - `Constraints` - Empty (filled by ConstraintCloser)
 - `RawConstraintTypes` - Raw System.Type[] for ConstraintCloser
 - `Variance` - Covariant/Contravariant/None
-- `SpecialConstraints` - Flags for class/struct/new() constraints
+- `SpecialConstraints` - Flags for class/struct/new constraints
 
 ---
 
@@ -1740,7 +1740,7 @@ Creates `GenericParameterSymbol` from a System.Type. Stores variance and special
 
 **Signature:**
 ```csharp
-public void ClearCache()
+public void ClearCache
 ```
 
 **What it does:**
@@ -1756,7 +1756,7 @@ Clears the memoization cache (for testing).
 - Test code
 
 **How it works:**
-- Calls `_cache.Clear()`
+- Calls `_cache.Clear`
 
 ---
 
@@ -1831,16 +1831,16 @@ ReadAssemblies(loadContext, assemblyPaths)
   │     └─► ReadType(type)
   │           ├─► DetermineTypeKind(type)
   │           ├─► ComputeAccessibility(type)
-  │           ├─► TypeReferenceFactory.CreateGenericParameterSymbol() for each generic param
+  │           ├─► TypeReferenceFactory.CreateGenericParameterSymbol for each generic param
   │           ├─► TypeReferenceFactory.Create(type.BaseType)
-  │           ├─► TypeReferenceFactory.Create() for each interface
+  │           ├─► TypeReferenceFactory.Create for each interface
   │           ├─► ReadMembers(type)
-  │           │     ├─► ReadMethod() for each method
-  │           │     ├─► ReadProperty() for each property
-  │           │     ├─► ReadField() for each field
-  │           │     ├─► ReadEvent() for each event
-  │           │     └─► ReadConstructor() for each constructor
-  │           └─► ReadType() recursively for nested types
+  │           │     ├─► ReadMethod for each method
+  │           │     ├─► ReadProperty for each property
+  │           │     ├─► ReadField for each field
+  │           │     ├─► ReadEvent for each event
+  │           │     └─► ReadConstructor for each constructor
+  │           └─► ReadType recursively for nested types
   │
   └─► Build SymbolGraph
         ├─► Create NamespaceSymbol for each namespace
@@ -1859,7 +1859,7 @@ Create(type)
   │
   └─► CreateInternal(type)
         ├─► If IsByRef:
-        │     └─► Create(type.GetElementType())
+        │     └─► Create(type.GetElementType)
         │     └─► Return ByRefTypeReference
         │
         ├─► If IsPointer:
@@ -1868,7 +1868,7 @@ Create(type)
         │     └─► Return PointerTypeReference
         │
         ├─► If IsArray:
-        │     └─► Create(type.GetElementType())
+        │     └─► Create(type.GetElementType)
         │     └─► Return ArrayTypeReference
         │
         ├─► If IsGenericParameter:
@@ -1882,7 +1882,7 @@ Create(type)
                     ├─► Extract metadata (assembly, namespace, name)
                     ├─► HARDENING: Guarantee non-empty Name
                     ├─► Handle generic types:
-                    │     └─► Create() recursively for each type argument
+                    │     └─► Create recursively for each type argument
                     ├─► HARDENING: Stamp InterfaceStableId for interfaces
                     └─► Return NamedTypeReference
 ```
@@ -1914,7 +1914,7 @@ SubstituteClosedInterfaces(ctx, graph)
   └─► Log total substitution count
 ```
 
-**Note:** The substitution maps are built but not stored. Shape phase components will call `BuildSubstitutionMap()` and `SubstituteTypeReference()` as needed.
+**Note:** The substitution maps are built but not stored. Shape phase components will call `BuildSubstitutionMap` and `SubstituteTypeReference` as needed.
 
 ---
 
@@ -2068,7 +2068,7 @@ The **Load phase** is responsible for:
 
 **Key design decisions:**
 - **MetadataLoadContext isolation:** Assemblies loaded in isolation, enabling reflection on BCL without version conflicts
-- **Name-based type comparisons:** Required for MetadataLoadContext compatibility (typeof() doesn't work)
+- **Name-based type comparisons:** Required for MetadataLoadContext compatibility (typeof doesn't work)
 - **Cycle detection:** Prevents stack overflow on recursive generic constraints
 - **DeclaredOnly members:** Avoids reading inherited members (inheritance flattening happens in Shape phase)
 - **Compiler-generated types filtered:** Skips angle-bracket types that aren't valid in declarations
@@ -2122,18 +2122,18 @@ Resolves a single CLR type full name (backtick form) to its declaring assembly n
 - `null` if type not found in any loaded assembly or on error
 
 **Called by:**
-- `ResolveBatch()` - For batch resolution
-- Plan phase after ImportGraph.Build() collects unresolved keys
+- `ResolveBatch` - For batch resolution
+- Plan phase after ImportGraph.Build collects unresolved keys
 
 **How it works:**
 1. Check cache - return cached result if available (null or assembly name)
-2. Iterate through all assemblies in MetadataLoadContext via `GetAssemblies()`
+2. Iterate through all assemblies in MetadataLoadContext via `GetAssemblies`
 3. For each assembly, try `assembly.GetType(clrFullName, throwOnError: false)`
 4. If type found, cache and return assembly name
 5. If not found in any assembly, cache null and return null
 6. On exception, log error, cache null, return null
 
-**Why:** MetadataLoadContext doesn't have a global FindType() method, so must search assemblies linearly. Caching prevents repeated expensive searches.
+**Why:** MetadataLoadContext doesn't have a global FindType method, so must search assemblies linearly. Caching prevents repeated expensive searches.
 
 **Examples:**
 - `"System.IO.Stream"` → `"System.Private.CoreLib"`
@@ -2159,11 +2159,11 @@ Batch resolves multiple CLR keys to their declaring assemblies. Only returns suc
 - Dictionary mapping CLR key → assembly name (only successful resolutions)
 
 **Called by:**
-- SinglePhaseBuilder.PlanPhase() after ImportGraph collects unresolved keys
+- SinglePhaseBuilder.PlanPhase after ImportGraph collects unresolved keys
 
 **How it works:**
 1. Create empty results dictionary
-2. For each CLR key, call `ResolveAssembly()`
+2. For each CLR key, call `ResolveAssembly`
 3. If result is non-null, add to results dictionary
 4. Log batch resolution stats (X resolved out of Y total)
 5. Return results
@@ -2197,7 +2197,7 @@ Groups resolved types by their declaring assembly name. Useful for diagnostic ou
 - Dictionary mapping assembly name → list of CLR keys declared in that assembly
 
 **Called by:**
-- SinglePhaseBuilder.PlanPhase() for diagnostic logging
+- SinglePhaseBuilder.PlanPhase for diagnostic logging
 
 **How it works:**
 1. Group resolved types by assembly name using LINQ GroupBy
@@ -2230,10 +2230,10 @@ Resolved 15 types across 3 assemblies:
 
 ### Integration Point
 
-**Used in:** SinglePhaseBuilder.PlanPhase()
+**Used in:** SinglePhaseBuilder.PlanPhase
 
 ```csharp
-// After ImportGraph.Build()
+// After ImportGraph.Build
 if (importGraph.UnresolvedClrKeys.Count > 0)
 {
     ctx.Log("CrossAssembly", $"Found {importGraph.UnresolvedClrKeys.Count} unresolved type references");

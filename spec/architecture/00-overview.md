@@ -202,7 +202,7 @@ TypeScript names are reserved in **scopes** to enforce uniqueness:
    - Interface view members have separate naming scope
 
 Scopes enable:
-- Class member `ToString()` and view member `ToString()` to coexist
+- Class member `ToString` and view member `ToString` to coexist
 - Static and instance members with same name
 - Explicit interface implementations without collisions
 
@@ -218,7 +218,7 @@ Scopes enable:
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    SinglePhaseBuilder.Build()                   │
+│                    SinglePhaseBuilder.Build                   │
 │          (src/tsbindgen/SinglePhase/SinglePhaseBuilder.cs)      │
 └────────────────────────────┬────────────────────────────────────┘
                              │
@@ -260,7 +260,7 @@ Scopes enable:
         ┌────────────────────────────────────────┐
         │  PHASE 2: Normalize (Build Indices)    │
         │  ┌──────────────────────────────────┐  │
-        │  │  SymbolGraph.WithIndices()       │  │
+        │  │  SymbolGraph.WithIndices       │  │
         │  │  - NamespaceIndex                │  │
         │  │  - TypeIndex (for lookups)       │  │
         │  └──────────────────────────────────┘  │
@@ -436,7 +436,7 @@ public enum EmitScope
 
 **ClassSurface**: Default placement for public members
 - Instance methods, properties, fields emitted on class body
-- Example: `class Decimal { ToString(): string; }`
+- Example: `class Decimal { ToString: string; }`
 
 **StaticSurface**: Static members
 - Emitted in separate static section
@@ -445,7 +445,7 @@ public enum EmitScope
 **ViewOnly**: Explicit interface implementations
 - Can't be on class surface (structural conformance failed)
 - Emitted in `As_IInterface` property
-- Example: `class Decimal { As_IConvertible: { ToBoolean(): boolean; }; }`
+- Example: `class Decimal { As_IConvertible: { ToBoolean: boolean; }; }`
 
 **Omitted**: Intentionally not emitted
 - Indexers (TypeScript limitation)
@@ -468,10 +468,10 @@ TypeScript doesn't have explicit interface implementations. C# does:
 // C# - explicit interface implementation
 class Decimal : IConvertible
 {
-    // Implicit - available as Decimal.ToString()
-    public override string ToString() => "...";
+    // Implicit - available as Decimal.ToString
+    public override string ToString => "...";
 
-    // Explicit - ONLY available as ((IConvertible)d).ToBoolean()
+    // Explicit - ONLY available as ((IConvertible)d).ToBoolean
     bool IConvertible.ToBoolean(IFormatProvider? provider) => ...;
 }
 ```
@@ -481,7 +481,7 @@ class Decimal : IConvertible
 ```typescript
 // TypeScript output
 class Decimal {
-    ToString(): string;  // ClassSurface member
+    ToString: string;  // ClassSurface member
 
     // View property for IConvertible
     As_IConvertible: {
@@ -514,7 +514,7 @@ TypeScript naming rules differ from C#:
 // C# - different members, different names
 class Decimal : IConvertible, IFormattable
 {
-    string ToString() => "1.0";                           // On class
+    string ToString => "1.0";                           // On class
     string IConvertible.ToString(IFormatProvider p) => "1.0";  // IConvertible only
     string IFormattable.ToString(string fmt, IFormatProvider p) => "1.0";  // IFormattable only
 }
@@ -524,12 +524,12 @@ Without separate scopes:
 ```typescript
 // BAD - renamer would see conflict between ToString, ToString, ToString
 class Decimal {
-    ToString(): string;
+    ToString: string;
     As_IConvertible: {
-        ToString(): string;  // ❌ Conflict! Would become ToString2
+        ToString: string;  // ❌ Conflict! Would become ToString2
     };
     As_IFormattable: {
-        ToString(): string;  // ❌ Conflict! Would become ToString3
+        ToString: string;  // ❌ Conflict! Would become ToString3
     };
 }
 ```
@@ -538,12 +538,12 @@ With separate scopes:
 ```typescript
 // GOOD - each scope has its own ToString
 class Decimal {
-    ToString(): string;  // Scope: "type:System.Decimal#instance"
+    ToString: string;  // Scope: "type:System.Decimal#instance"
     As_IConvertible: {
-        ToString(): string;  // Scope: "view:CoreLib:Decimal:CoreLib:IConvertible#instance"
+        ToString: string;  // Scope: "view:CoreLib:Decimal:CoreLib:IConvertible#instance"
     };
     As_IFormattable: {
-        ToString(): string;  // Scope: "view:CoreLib:Decimal:CoreLib:IFormattable#instance"
+        ToString: string;  // Scope: "view:CoreLib:Decimal:CoreLib:IFormattable#instance"
     };
 }
 ```
@@ -637,9 +637,9 @@ class Array {
 
 **Integration**:
 ```csharp
-// In SinglePhaseBuilder.Build()
+// In SinglePhaseBuilder.Build
 PhaseGate.Validate(ctx, graph, imports, constraintFindings);
-if (ctx.Diagnostics.HasErrors())
+if (ctx.Diagnostics.HasErrors)
 {
     return new BuildResult { Success = false, ... };
 }
@@ -776,7 +776,7 @@ public sealed class GenerationPolicy
 
 **Creation**:
 ```csharp
-var policy = PolicyDefaults.Create();
+var policy = PolicyDefaults.Create;
 var ctx = BuildContext.Create(policy, logger, verboseLogging, logCategories);
 ```
 
@@ -841,8 +841,8 @@ void Error(string code, string message);
 void Warning(string code, string message);
 void Info(string code, string message);
 
-bool HasErrors();
-IReadOnlyList<Diagnostic> GetAll();
+bool HasErrors;
+IReadOnlyList<Diagnostic> GetAll;
 ```
 
 **Diagnostic Format**:
@@ -915,7 +915,7 @@ ctx.Log("ViewPlanner", $"Planning views for {type.ClrFullName}");
 
 ---
 
-## Current Validation Metrics (jumanji9 Branch)
+## Current Validation Metrics
 
 ### TypeScript Validation Results
 
@@ -934,13 +934,13 @@ Full BCL generation (4,047 types, 130 namespaces, 50,720 members):
 - **2 TS2315** (1.0%) - Type not generic (Array/System.Array shadowing edge case)
 - **1 TS2440** (0.5%) - Abstract member in concrete class (edge case)
 
-**Errors eliminated in recent work (jumanji9)**:
+**Errors eliminated in recent work**:
 - **TS2304**: 212 → **0** (100% eliminated) - "Cannot find name" errors
 - **TS2420**: 579 → **0** (100% eliminated) - "Class incorrectly implements interface" errors
 - **TS2552**: 5 → **0** (100% eliminated) - "Cannot find name" errors (different context)
 - **TS2416**: 794 → 146 (81.6% reduction) - Property assignability issues
 
-**Key fixes implemented (jumanji9)**:
+**Key fixes implemented**:
 1. **Non-public interface filtering** - Eliminated TS2420 cascade by filtering non-public interfaces from implements clauses
 2. **Cross-namespace qualification** - Fixed TS2304 in facades, view interfaces, and nested types
 3. **Free type variable detection** - Demoted leaked generic parameters to `unknown`

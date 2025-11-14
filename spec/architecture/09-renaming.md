@@ -29,7 +29,7 @@ Central renaming service with dual-scope algorithm. Manages name reservations ac
 
 **M5 CRITICAL FIX**: The `_decisions` dictionary was changed from keying by `StableId` alone to `(StableId, ScopeKey)` to support dual-scope reservations. This allows the same member to have different final names in class scope vs view scope.
 
-### Method: ApplyExplicitOverrides()
+### Method: ApplyExplicitOverrides
 
 ```csharp
 public void ApplyExplicitOverrides(IReadOnlyDictionary<string, string> explicitMap)
@@ -45,7 +45,7 @@ Applies explicit CLI/user overrides for symbol names. Called first, before any o
 - During reservation, explicit overrides take precedence over style transforms
 - If explicit name collides, falls back to numeric suffix strategy
 
-### Method: AdoptTypeStyleTransform()
+### Method: AdoptTypeStyleTransform
 
 ```csharp
 public void AdoptTypeStyleTransform(Func<string, string> transform)
@@ -62,7 +62,7 @@ renamer.AdoptTypeStyleTransform(s => NameTransformation.PascalCase(s));
 // "myClass" → "MyClass"
 ```
 
-### Method: AdoptMemberStyleTransform()
+### Method: AdoptMemberStyleTransform
 
 ```csharp
 public void AdoptMemberStyleTransform(Func<string, string> transform)
@@ -79,7 +79,7 @@ renamer.AdoptMemberStyleTransform(s => NameTransformation.CamelCase(s));
 // "MyMethod" → "myMethod"
 ```
 
-### Method: ReserveTypeName()
+### Method: ReserveTypeName
 
 ```csharp
 public void ReserveTypeName(
@@ -123,7 +123,7 @@ renamer.ReserveTypeName(
     "TypePlanner");
 ```
 
-### Method: ReserveMemberName()
+### Method: ReserveMemberName
 
 ```csharp
 public void ReserveMemberName(
@@ -187,7 +187,7 @@ renamer.ReserveMemberName(
 // Reserves in scope: "view:{TypeStableId}:{InterfaceStableId}#instance"
 ```
 
-### Method: GetFinalTypeName()
+### Method: GetFinalTypeName
 
 ```csharp
 public string GetFinalTypeName(TypeSymbol type, NamespaceArea area = NamespaceArea.Internal)
@@ -209,7 +209,7 @@ string tsName = renamer.GetFinalTypeName(typeSymbol);
 // Returns: "MyClass" or "MyClass2" (if collision)
 ```
 
-### Method: GetFinalTypeNameCore()
+### Method: GetFinalTypeNameCore
 
 ```csharp
 internal string GetFinalTypeNameCore(StableId stableId, NamespaceScope scope)
@@ -231,7 +231,7 @@ Gets the final TypeScript name for a type (INTERNAL CORE - do not call directly)
 3. Return `decision.Final`
 4. If not found, throw with diagnostic message
 
-### Method: GetFinalMemberName()
+### Method: GetFinalMemberName
 
 ```csharp
 public string GetFinalMemberName(StableId stableId, RenameScope scope)
@@ -275,7 +275,7 @@ string viewName = renamer.GetFinalMemberName(
 // Returns: "count_ICollection" (explicit interface impl name)
 ```
 
-### Method: TryGetDecision()
+### Method: TryGetDecision
 
 ```csharp
 public bool TryGetDecision(StableId stableId, RenameScope scope, out RenameDecision? decision)
@@ -300,10 +300,10 @@ if (renamer.TryGetDecision(memberStableId, scope, out var decision))
 }
 ```
 
-### Method: GetAllDecisions()
+### Method: GetAllDecisions
 
 ```csharp
-public IReadOnlyCollection<RenameDecision> GetAllDecisions()
+public IReadOnlyCollection<RenameDecision> GetAllDecisions
 ```
 
 Gets all rename decisions (for metadata/bindings emission).
@@ -312,7 +312,7 @@ Gets all rename decisions (for metadata/bindings emission).
 
 **Usage**: Used by emitters to generate bindings.json and metadata about name transformations.
 
-### Method: HasFinalTypeName()
+### Method: HasFinalTypeName
 
 ```csharp
 public bool HasFinalTypeName(StableId stableId, NamespaceScope scope)
@@ -328,7 +328,7 @@ Checks if a type name has been reserved in the specified namespace scope. Return
 
 **Usage**: Used by PhaseGate to verify all types have names before emission.
 
-### Method: HasFinalMemberName()
+### Method: HasFinalMemberName
 
 ```csharp
 public bool HasFinalMemberName(StableId stableId, TypeScope scope)
@@ -346,7 +346,7 @@ Checks if a member name has been reserved in the CLASS surface scope.
 
 **Throws**: `InvalidOperationException` if called with view scope (use `HasFinalViewMemberName` instead)
 
-### Method: HasFinalViewMemberName()
+### Method: HasFinalViewMemberName
 
 ```csharp
 public bool HasFinalViewMemberName(StableId stableId, TypeScope scope)
@@ -364,7 +364,7 @@ Checks if a member name has been reserved in the VIEW surface scope.
 
 **Throws**: `InvalidOperationException` if called with class scope (use `HasFinalMemberName` instead)
 
-### Method: IsNameTaken()
+### Method: IsNameTaken
 
 ```csharp
 public bool IsNameTaken(RenameScope scope, string name, bool isStatic)
@@ -387,7 +387,7 @@ if (renamer.IsNameTaken(scope, "count", isStatic: false))
 }
 ```
 
-### Method: ListReservedNames()
+### Method: ListReservedNames
 
 ```csharp
 public HashSet<string> ListReservedNames(RenameScope scope, bool isStatic)
@@ -409,7 +409,7 @@ var reserved = renamer.ListReservedNames(
 // Returns: { "toString", "equals", "getHashCode" }
 ```
 
-### Method: PeekFinalMemberName()
+### Method: PeekFinalMemberName
 
 ```csharp
 public string PeekFinalMemberName(RenameScope scope, string requestedBase, bool isStatic)
@@ -442,7 +442,7 @@ string projectedName = renamer.PeekFinalMemberName(
 // Returns: "count" or "count2" (without actually reserving)
 ```
 
-### Private Method: GetOrCreateTable()
+### Private Method: GetOrCreateTable
 
 ```csharp
 private NameReservationTable GetOrCreateTable(RenameScope scope)
@@ -450,7 +450,7 @@ private NameReservationTable GetOrCreateTable(RenameScope scope)
 
 Gets or creates a reservation table for a scope. Lazy initialization.
 
-### Private Method: ResolveNameWithConflicts()
+### Private Method: ResolveNameWithConflicts
 
 ```csharp
 private string ResolveNameWithConflicts(
@@ -498,7 +498,7 @@ Core name resolution algorithm with collision handling.
 "switch" (collision) → "switch_2"
 ```
 
-### Private Method: RecordDecision()
+### Private Method: RecordDecision
 
 ```csharp
 private void RecordDecision(RenameDecision decision)
@@ -506,7 +506,7 @@ private void RecordDecision(RenameDecision decision)
 
 Records a rename decision in the `_decisions` dictionary. **M5 FIX**: Keys by `(StableId, ScopeKey)` to support dual-scope reservations.
 
-### Private Method: ExtractOriginalName()
+### Private Method: ExtractOriginalName
 
 ```csharp
 private string ExtractOriginalName(string requested)
@@ -526,7 +526,7 @@ Extracts the original CLR name from a requested name by removing suffixes.
 "getHashCode3" → "getHashCode"
 ```
 
-### Private Method: AssertNamespaceScope()
+### Private Method: AssertNamespaceScope
 
 ```csharp
 private static void AssertNamespaceScope(NamespaceScope scope)
@@ -536,7 +536,7 @@ Validates that a scope is a valid namespace scope. Throws if scope key doesn't s
 
 **Always enabled** (not just DEBUG).
 
-### Private Method: AssertMemberScope()
+### Private Method: AssertMemberScope
 
 ```csharp
 private static void AssertMemberScope(TypeScope scope)
@@ -570,7 +570,7 @@ Scope for top-level types in a namespace.
 - `Namespace` - `string` (required) - Full namespace name (e.g., "System.Collections.Generic")
 - `IsInternal` - `bool` (required) - True for internal scope, false for facade scope
 
-**Internal constructor** - Use `ScopeFactory.Namespace()` instead.
+**Internal constructor** - Use `ScopeFactory.Namespace` instead.
 
 **Purpose**: Internal and facade are treated as separate scopes to allow clean facade names without collisions from internal names.
 
@@ -638,13 +638,13 @@ Canonical global namespace identifier (for types with null/empty namespace).
 
 ### USAGE PATTERN
 
-**Reservations**: Use BASE scopes (no `#instance`/`#static` suffix) - `ReserveMemberName()` adds it
+**Reservations**: Use BASE scopes (no `#instance`/`#static` suffix) - `ReserveMemberName` adds it
 
-**Lookups**: Use SURFACE scopes (with `#instance`/`#static` suffix) - use `ClassSurface()`/`ViewSurface()`
+**Lookups**: Use SURFACE scopes (with `#instance`/`#static` suffix) - use `ClassSurface`/`ViewSurface`
 
-**M5 CRITICAL**: View members MUST be looked up with `ViewSurface()`, not `ClassSurface()`.
+**M5 CRITICAL**: View members MUST be looked up with `ViewSurface`, not `ClassSurface`.
 
-### Method: Namespace()
+### Method: Namespace
 
 ```csharp
 public static NamespaceScope Namespace(string? ns, NamespaceArea area)
@@ -669,7 +669,7 @@ var globalScope = ScopeFactory.Namespace(null, NamespaceArea.Internal);
 // globalScope.ScopeKey = "ns:(global):internal"
 ```
 
-### Method: ClassBase()
+### Method: ClassBase
 
 ```csharp
 public static TypeScope ClassBase(TypeSymbol type)
@@ -679,7 +679,7 @@ Creates BASE class scope for member reservations (no side suffix).
 
 **Format**: `"type:{TypeFullName}"` (ReserveMemberName will add `#instance`/`#static`)
 
-**Use for**: `ReserveMemberName()` calls
+**Use for**: `ReserveMemberName` calls
 
 **Example**:
 ```csharp
@@ -690,7 +690,7 @@ renamer.ReserveMemberName(memberStableId, "ToString", scope, "...", isStatic: fa
 // Reserves in: "type:System.String#instance"
 ```
 
-### Method: ClassInstance()
+### Method: ClassInstance
 
 ```csharp
 public static TypeScope ClassInstance(TypeSymbol type)
@@ -700,7 +700,7 @@ Creates FULL class scope for instance member lookups.
 
 **Format**: `"type:{TypeFullName}#instance"`
 
-**Use for**: `GetFinalMemberName()`, `TryGetDecision()` calls for instance members
+**Use for**: `GetFinalMemberName`, `TryGetDecision` calls for instance members
 
 **Example**:
 ```csharp
@@ -710,7 +710,7 @@ var scope = ScopeFactory.ClassInstance(typeSymbol);
 string finalName = renamer.GetFinalMemberName(memberStableId, scope);
 ```
 
-### Method: ClassStatic()
+### Method: ClassStatic
 
 ```csharp
 public static TypeScope ClassStatic(TypeSymbol type)
@@ -720,7 +720,7 @@ Creates FULL class scope for static member lookups.
 
 **Format**: `"type:{TypeFullName}#static"`
 
-**Use for**: `GetFinalMemberName()`, `TryGetDecision()` calls for static members
+**Use for**: `GetFinalMemberName`, `TryGetDecision` calls for static members
 
 **Example**:
 ```csharp
@@ -730,7 +730,7 @@ var scope = ScopeFactory.ClassStatic(typeSymbol);
 string finalName = renamer.GetFinalMemberName(memberStableId, scope);
 ```
 
-### Method: ClassSurface()
+### Method: ClassSurface
 
 ```csharp
 public static TypeScope ClassSurface(TypeSymbol type, bool isStatic)
@@ -740,7 +740,7 @@ Creates FULL class scope based on member's `isStatic` flag.
 
 **Format**: `"type:{TypeFullName}#instance"` or `"#static"`
 
-**Use for**: `GetFinalMemberName()`, `TryGetDecision()` calls when `isStatic` is dynamic
+**Use for**: `GetFinalMemberName`, `TryGetDecision` calls when `isStatic` is dynamic
 
 **Preferred over manual ternary** - cleaner call-sites.
 
@@ -750,7 +750,7 @@ var scope = ScopeFactory.ClassSurface(typeSymbol, member.IsStatic);
 string finalName = renamer.GetFinalMemberName(memberStableId, scope);
 ```
 
-### Method: ViewBase()
+### Method: ViewBase
 
 ```csharp
 public static TypeScope ViewBase(TypeSymbol type, string interfaceStableId)
@@ -760,7 +760,7 @@ Creates BASE view scope for member reservations (no side suffix).
 
 **Format**: `"view:{TypeStableId}:{InterfaceStableId}"` (ReserveMemberName will add `#instance`/`#static`)
 
-**Use for**: `ReserveMemberName()` calls for ViewOnly members
+**Use for**: `ReserveMemberName` calls for ViewOnly members
 
 **Example**:
 ```csharp
@@ -771,7 +771,7 @@ renamer.ReserveMemberName(memberStableId, "CompareTo", scope, "...", isStatic: f
 // Reserves in: "view:mscorlib:System.String:mscorlib:System.IComparable#instance"
 ```
 
-### Method: ViewSurface()
+### Method: ViewSurface
 
 ```csharp
 public static TypeScope ViewSurface(TypeSymbol type, string interfaceStableId, bool isStatic)
@@ -781,9 +781,9 @@ Creates FULL view scope for explicit interface view member lookups.
 
 **Format**: `"view:{TypeStableId}:{InterfaceStableId}#instance"` or `"#static"`
 
-**Use for**: `GetFinalMemberName()`, `TryGetDecision()` calls for ViewOnly members
+**Use for**: `GetFinalMemberName`, `TryGetDecision` calls for ViewOnly members
 
-**M5 FIX**: This is what emitters were missing - they were using `ClassInstance()`/`ClassStatic()` for view members, causing PG_NAME_004 collisions.
+**M5 FIX**: This is what emitters were missing - they were using `ClassInstance`/`ClassStatic` for view members, causing PG_NAME_004 collisions.
 
 **Example**:
 ```csharp
@@ -793,7 +793,7 @@ var scope = ScopeFactory.ViewSurface(typeSymbol, interfaceStableId, isStatic: fa
 string finalName = renamer.GetFinalMemberName(memberStableId, scope);
 ```
 
-### Method: GetInterfaceStableId()
+### Method: GetInterfaceStableId
 
 ```csharp
 public static string GetInterfaceStableId(TypeReference ifaceRef)
@@ -812,7 +812,7 @@ Extracts interface StableId from `TypeReference` (same logic as ViewPlanner). Re
 1. If `NamedTypeReference` with pre-stamped `InterfaceStableId` → return it
 2. If `NamedTypeReference` without stamp → return `"{AssemblyName}:{FullName}"`
 3. If `NestedTypeReference` → recursively build `"{DeclaringType}+{NestedName}"`
-4. Otherwise → return `ToString()` or `"unknown"`
+4. Otherwise → return `ToString` or `"unknown"`
 
 **Example**:
 ```csharp
@@ -843,7 +843,7 @@ Stable identity for a type.
 - `AssemblyName` - Inherited from `StableId`
 - `ClrFullName` - `string` (required) - Full CLR type name (e.g., "System.Collections.Generic.List`1")
 
-**ToString()**: `"{AssemblyName}:{ClrFullName}"`
+**ToString**: `"{AssemblyName}:{ClrFullName}"`
 
 **Example**:
 ```csharp
@@ -852,7 +852,7 @@ var stableId = new TypeStableId
     AssemblyName = "System.Private.CoreLib",
     ClrFullName = "System.String"
 };
-// stableId.ToString() = "System.Private.CoreLib:System.String"
+// stableId.ToString = "System.Private.CoreLib:System.String"
 ```
 
 ### Record: MemberStableId
@@ -866,13 +866,13 @@ Stable identity for a member (method, property, field, event). Equality is based
 - `CanonicalSignature` - `string` (required) - Canonical signature that uniquely identifies this member among overloads
 - `MetadataToken` - `int?` (optional) - Optional metadata token for exact CLR correlation
 
-**ToString()**: `"{AssemblyName}:{DeclaringClrFullName}::{MemberName}{CanonicalSignature}"`
+**ToString**: `"{AssemblyName}:{DeclaringClrFullName}::{MemberName}{CanonicalSignature}"`
 
 **Canonical Signature Format**:
 - **Methods**: `"(ParamType1,ParamType2):ReturnType"`
   - Example: `"(System.Int32,System.String):System.Boolean"`
 - **Properties**: `"(IndexerParamTypes)"`
-  - Non-indexer: `"()"`
+  - Non-indexer: `""`
   - Indexer: `"(System.Int32)"`
 - **Fields/Events**: `""`
 
@@ -888,7 +888,7 @@ var stableId = new MemberStableId
     CanonicalSignature = "(System.Int32):System.String",
     MetadataToken = 0x06001234
 };
-// stableId.ToString() = "System.Private.CoreLib:System.String::Substring(System.Int32):System.String"
+// stableId.ToString = "System.Private.CoreLib:System.String::Substring(System.Int32):System.String"
 
 // Two MemberStableIds with same semantic identity but different tokens are equal:
 var id1 = new MemberStableId { AssemblyName = "A", DeclaringClrFullName = "B", MemberName = "C", CanonicalSignature = "D", MetadataToken = 1 };
@@ -974,7 +974,7 @@ Internal structure for tracking name reservations within a scope. Manages collis
 - `_finalNameToId` - `Dictionary<string, StableId>` - Maps final TypeScript name to owning StableId
 - `_nextSuffixByBase` - `Dictionary<string, int>` - Tracks next available numeric suffix for each base name
 
-### Method: IsReserved()
+### Method: IsReserved
 
 ```csharp
 public bool IsReserved(string finalName)
@@ -984,7 +984,7 @@ Checks if a name is already reserved in this scope.
 
 **Returns**: True if name is taken, false if available
 
-### Method: GetOwner()
+### Method: GetOwner
 
 ```csharp
 public StableId? GetOwner(string finalName)
@@ -994,7 +994,7 @@ Gets the StableId that owns a reserved name, or null if not reserved.
 
 **Returns**: StableId owner or null
 
-### Method: TryReserve()
+### Method: TryReserve
 
 ```csharp
 public bool TryReserve(string finalName, StableId id)
@@ -1016,7 +1016,7 @@ Reserves a name for a StableId. Returns true if successful, false if already tak
    - If owned by different StableId → return false (collision)
 2. Reserve name for this StableId → return true
 
-### Method: AllocateNextSuffix()
+### Method: AllocateNextSuffix
 
 ```csharp
 public int AllocateNextSuffix(string baseName)
@@ -1037,26 +1037,26 @@ Allocates the next numeric suffix for a base name. First call for "compare" retu
 
 **Example**:
 ```csharp
-var table = new NameReservationTable();
+var table = new NameReservationTable;
 table.AllocateNextSuffix("compare"); // Returns: 2
 table.AllocateNextSuffix("compare"); // Returns: 3
 table.AllocateNextSuffix("compare"); // Returns: 4
 ```
 
-### Method: GetReservedNames()
+### Method: GetReservedNames
 
 ```csharp
-public IEnumerable<string> GetReservedNames()
+public IEnumerable<string> GetReservedNames
 ```
 
 Gets all reserved names (for debugging/diagnostics).
 
 **Returns**: Enumerable of reserved name strings
 
-### Method: GetAllReservedNames()
+### Method: GetAllReservedNames
 
 ```csharp
-public HashSet<string> GetAllReservedNames()
+public HashSet<string> GetAllReservedNames
 ```
 
 Gets all reserved names as a HashSet for efficient collision detection.
@@ -1100,7 +1100,7 @@ Case-insensitive HashSet containing all TypeScript reserved words:
 - `from`, `of`, `namespace`, `module`, `declare`, `abstract`, `any`, `boolean`
 - `never`, `number`, `object`, `string`, `symbol`, `unknown`, `type`, `readonly`
 
-### Method: IsReservedWord()
+### Method: IsReservedWord
 
 ```csharp
 public static bool IsReservedWord(string name)
@@ -1130,7 +1130,7 @@ Result of sanitization operation with metadata.
 - `WasSanitized` - `bool` (required) - True if the identifier was modified during sanitization
 - `Reason` - `string?` - Reason for sanitization (e.g., "ReservedWord"). Null if no sanitization was needed
 
-### Method: Sanitize()
+### Method: Sanitize
 
 ```csharp
 public static SanitizeResult Sanitize(string identifier)
@@ -1162,7 +1162,7 @@ var result2 = TypeScriptReservedWords.Sanitize("myMethod");
 // result2.Reason = null
 ```
 
-### Method: SanitizeParameterName()
+### Method: SanitizeParameterName
 
 ```csharp
 public static string SanitizeParameterName(string name)
@@ -1182,7 +1182,7 @@ TypeScriptReservedWords.SanitizeParameterName("type");   // "type_"
 TypeScriptReservedWords.SanitizeParameterName("value");  // "value"
 ```
 
-### Method: EscapeIdentifier()
+### Method: EscapeIdentifier
 
 ```csharp
 public static string EscapeIdentifier(string name)
@@ -1202,7 +1202,7 @@ TypeScriptReservedWords.EscapeIdentifier("type");   // "$$type$$"
 TypeScriptReservedWords.EscapeIdentifier("myMethod"); // "myMethod"
 ```
 
-**NOTE**: This method is currently unused in the pipeline. The standard approach is to use trailing `_` via `Sanitize()`.
+**NOTE**: This method is currently unused in the pipeline. The standard approach is to use trailing `_` via `Sanitize`.
 
 ## Key Algorithms
 
@@ -1398,7 +1398,7 @@ string tsName = renamer.GetFinalTypeName(typeSymbol, NamespaceArea.Internal);
 
 ### Scenario 2: Class Surface Method Reservation
 
-**Setup**: Reserving instance method `ToString()` on `System.Object`
+**Setup**: Reserving instance method `ToString` on `System.Object`
 
 **Code**:
 ```csharp
@@ -1408,7 +1408,7 @@ var memberStableId = new MemberStableId
     AssemblyName = "System.Private.CoreLib",
     DeclaringClrFullName = "System.Object",
     MemberName = "ToString",
-    CanonicalSignature = "():System.String"
+    CanonicalSignature = ":System.String"
 };
 
 var classBase = ScopeFactory.ClassBase(typeSymbol);

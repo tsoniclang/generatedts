@@ -28,7 +28,7 @@ The **Normalize** phase is the central name assignment phase that runs after Sha
 
 ### Purpose
 
-Orchestrates the entire name reservation process. This is the **ONLY** place where names are reserved - all other components must use `Renamer.GetFinal*()` to retrieve names.
+Orchestrates the entire name reservation process. This is the **ONLY** place where names are reserved - all other components must use `Renamer.GetFinal*` to retrieve names.
 
 ### Method: `ReserveAllNames(BuildContext, SymbolGraph) -> SymbolGraph`
 
@@ -39,12 +39,12 @@ Reserves all type and member names in the symbol graph through the central Renam
 
 1. **Reserve Type Names**:
    - Iterates through all namespaces and types (deterministic order)
-   - Computes requested base name using `Shared.ComputeTypeRequestedBase()`
-   - Calls `Renamer.ReserveTypeName()` with namespace scope
+   - Computes requested base name using `Shared.ComputeTypeRequestedBase`
+   - Calls `Renamer.ReserveTypeName` with namespace scope
    - Skips compiler-generated types (names containing `<` or `>`)
 
 2. **Reserve Class Surface Member Names**:
-   - Calls `Reservation.ReserveMemberNamesOnly()` for each type
+   - Calls `Reservation.ReserveMemberNamesOnly` for each type
    - Reserves methods, properties, fields, events, constructors
    - Uses class scope: `ScopeFactory.ClassSurface(type, isStatic)`
    - Skips members with existing decisions from earlier passes
@@ -59,18 +59,18 @@ Reserves all type and member names in the symbol graph through the central Renam
    - **Critical**: Must include members renamed by earlier passes (e.g., HiddenMemberPlanner)
 
 4. **Reserve View Member Names**:
-   - Calls `Reservation.ReserveViewMemberNamesOnly()` for each type with explicit views
+   - Calls `Reservation.ReserveViewMemberNamesOnly` for each type with explicit views
    - Passes `classAllNames` for collision detection
    - Uses view scope: `ScopeFactory.ViewSurface(type, interfaceStableId, isStatic)`
    - Applies `$view` suffix if view name collides with class surface
 
 5. **Post-Reservation Audit**:
-   - Calls `Audit.AuditReservationCompleteness()` to verify completeness
+   - Calls `Audit.AuditReservationCompleteness` to verify completeness
    - Ensures every emitted member has a rename decision
    - Throws if any members are missing decisions (fail-fast)
 
 6. **Apply Names to Graph**:
-   - Calls `Application.ApplyNamesToGraph()` to create new graph
+   - Calls `Application.ApplyNamesToGraph` to create new graph
    - Sets `TsEmitName` property on all types and members
    - Returns pure transformation (no mutation)
 
@@ -133,9 +133,9 @@ Core name reservation logic - reserves names through Renamer without mutating sy
    - **Skip if `EmitScope.ViewOnly`**: Will be handled in view-scoped reservation
    - **Skip if `EmitScope.Omitted`**: Doesn't need name
    - **Throw if `EmitScope.Unspecified`**: Developer mistake (must be set in Shape)
-   - **Skip if already renamed**: Check using `Renamer.TryGetDecision()` with class scope
-   - **Compute requested base**: Use `Shared.ComputeMethodBase()` or `Shared.RequestedBaseForMember()`
-   - **Reserve through Renamer**: Call `Renamer.ReserveMemberName()` with base scope
+   - **Skip if already renamed**: Check using `Renamer.TryGetDecision` with class scope
+   - **Compute requested base**: Use `Shared.ComputeMethodBase` or `Shared.RequestedBaseForMember`
+   - **Reserve through Renamer**: Call `Renamer.ReserveMemberName` with base scope
 
 4. Returns tuple of (Reserved count, Skipped count)
 
@@ -163,12 +163,12 @@ Core name reservation logic - reserves names through Renamer without mutating sy
 
 3. **For Each ViewOnly Member** (deterministic order):
    - **Verify EmitScope**: Must be `EmitScope.ViewOnly`
-   - **Find isStatic flag**: Use `Shared.FindMemberIsStatic()` to lookup in type's member collection
+   - **Find isStatic flag**: Use `Shared.FindMemberIsStatic` to lookup in type's member collection
    - **Compute requested base**: Use `Shared.RequestedBaseForMember(clrName)`
-   - **Peek at final name**: Use `Renamer.PeekFinalMemberName()` to see what it would get in view scope
+   - **Peek at final name**: Use `Renamer.PeekFinalMemberName` to see what it would get in view scope
    - **Check collision**: Does peek result exist in `classAllNames` set?
    - **Apply suffix if collision**: Use `requested + "$view"` (or `$view2`, `$view3` if taken)
-   - **Reserve in view scope**: Call `Renamer.ReserveMemberName()` with view base scope
+   - **Reserve in view scope**: Call `Renamer.ReserveMemberName` with view base scope
 
 4. Returns tuple of (Reserved count, Skipped count)
 
@@ -176,8 +176,8 @@ Core name reservation logic - reserves names through Renamer without mutating sy
 
 ```csharp
 // Example: System.Array implements IEnumerable<T>
-// Class surface has: GetEnumerator() -> ArrayEnumerator
-// View (IEnumerable<T>) has: GetEnumerator() -> IEnumerator<T>
+// Class surface has: GetEnumerator -> ArrayEnumerator
+// View (IEnumerable<T>) has: GetEnumerator -> IEnumerator<T>
 
 // Peek at what view would get
 var peek = ctx.Renamer.PeekFinalMemberName(viewScope, "getEnumerator", isStatic: false);
@@ -228,22 +228,22 @@ Apply reserved names from Renamer to symbol graph. This is a pure transformation
 ### Method: `ApplyNamesToGraph(BuildContext, SymbolGraph) -> SymbolGraph`
 
 **What it does**:
-- Iterates through all namespaces and calls `ApplyNamesToNamespace()`
+- Iterates through all namespaces and calls `ApplyNamesToNamespace`
 - Returns new graph with updated namespaces
-- Calls `graph.WithIndices()` to rebuild lookup indices
+- Calls `graph.WithIndices` to rebuild lookup indices
 
 ### Private Method: `ApplyNamesToNamespace(BuildContext, NamespaceSymbol) -> NamespaceSymbol`
 
 **What it does**:
 - Skips compiler-generated types
-- Calls `ApplyNamesToType()` for each type
+- Calls `ApplyNamesToType` for each type
 - Returns new namespace with updated types
 
 ### Private Method: `ApplyNamesToType(BuildContext, TypeSymbol, NamespaceScope) -> TypeSymbol`
 
 **What it does**:
 - Gets `TsEmitName` from `Renamer.GetFinalTypeName(type)`
-- Calls `ApplyNamesToMembers()` to update all members
+- Calls `ApplyNamesToMembers` to update all members
 - Returns new type with `TsEmitName` and updated `Members`
 
 ### Private Method: `ApplyNamesToMembers(BuildContext, TypeSymbol, TypeMembers, TypeScope) -> TypeMembers`
@@ -283,8 +283,8 @@ Verify name reservation completeness - ensures every type and member that will b
 1. **Iterate Through All Namespaces and Types**:
    - Skip compiler-generated types
    - Verify type name reserved in namespace scope
-   - Call `AuditClassSurfaceMembers()` for class members
-   - Call `AuditViewSurfaceMembers()` for view members
+   - Call `AuditClassSurfaceMembers` for class members
+   - Call `AuditViewSurfaceMembers` for view members
 
 2. **Collect Errors**: Build list of missing rename decisions with detailed context
 
@@ -345,7 +345,7 @@ Utility functions for name computation and sanitization. Ensures consistent name
 1. Replace `+` with `_` (nested types: `Outer+Inner` → `Outer_Inner`)
 2. Replace `` ` `` with `_` (generic arity: `List`1` → `List_1`)
 3. Replace invalid TS characters: `<`, `>`, `[`, `]` → `_`
-4. Apply reserved word sanitization: `TypeScriptReservedWords.Sanitize()`
+4. Apply reserved word sanitization: `TypeScriptReservedWords.Sanitize`
 
 **Example**:
 ```csharp
@@ -368,7 +368,7 @@ ComputeTypeRequestedBase("Dictionary`2+KeyCollection")  // → "Dictionary_2_Key
 
 **Regular Methods**:
 - Accessors (`get_`, `set_`, `add_`, `remove_`) use CLR name as-is
-- Regular methods use `SanitizeMemberName()`
+- Regular methods use `SanitizeMemberName`
 
 **Example**:
 ```csharp
@@ -383,7 +383,7 @@ ComputeMethodBase("ToString")     // → "ToString"
 
 **Transformations**:
 1. Replace invalid characters: `<`, `>`, `[`, `]`, `+` → `_`
-2. Apply reserved word sanitization: `TypeScriptReservedWords.Sanitize()`
+2. Apply reserved word sanitization: `TypeScriptReservedWords.Sanitize`
 
 **Example**:
 ```csharp
@@ -401,7 +401,7 @@ SanitizeMemberName("delete")  // → "delete_" (TS reserved word)
 
 **Ensures**: Both class and view members use identical base name computation, so collisions are detected correctly.
 
-**Implementation**: Delegates to `SanitizeMemberName()`
+**Implementation**: Delegates to `SanitizeMemberName`
 
 ### Method: `IsCompilerGenerated(string clrName) -> bool`
 
@@ -422,7 +422,7 @@ SanitizeMemberName("delete")  // → "delete_" (TS reserved word)
 
 **Algorithm**:
 1. Switch on `viewMember.Kind` (Method, Property, Event)
-2. Use `FirstOrDefault()` to find member with matching StableId
+2. Use `FirstOrDefault` to find member with matching StableId
 3. Return member's `IsStatic` flag, or `false` if not found
 
 **Why needed**: ViewMember struct doesn't include `IsStatic` flag, so we must look it up.
@@ -434,7 +434,7 @@ SanitizeMemberName("delete")  // → "delete_" (TS reserved word)
 **Handles**:
 - `NamedTypeReference` → returns `FullName`
 - `NestedTypeReference` → returns `FullReference.FullName`
-- Other types → returns `ToString()` or `"Unknown"`
+- Other types → returns `ToString` or `"Unknown"`
 
 ---
 
@@ -461,10 +461,10 @@ These create duplicate signatures in TypeScript.
 **What it does**:
 
 1. Iterate through all namespaces and types
-2. Call `UnifyTypeOverloads()` for each type
+2. Call `UnifyTypeOverloads` for each type
 3. Collect metrics (total unified, types processed)
 4. Return new graph with `Namespaces` updated
-5. Call `graph.WithIndices()` to rebuild lookup indices
+5. Call `graph.WithIndices` to rebuild lookup indices
 
 **Returns**: Pure transformation - new graph with unified overloads
 
@@ -474,11 +474,11 @@ These create duplicate signatures in TypeScript.
 
 1. **Group Methods by Erasure Key**:
    - Filter to `EmitScope.ClassSurface` or `EmitScope.StaticSurface` methods
-   - Group by `ComputeErasureKey()`
+   - Group by `ComputeErasureKey`
    - Keep only groups with 2+ methods (collisions)
 
 2. **For Each Group**:
-   - Call `SelectWidestSignature()` to pick best method
+   - Call `SelectWidestSignature` to pick best method
    - Mark all other methods as `EmitScope.Omitted`
    - Update method in list
 
@@ -668,25 +668,25 @@ The Normalize phase uses a sophisticated dual-scope algorithm to handle the fact
 // C#
 class Array : IEnumerable<T>, ICollection<T>
 {
-    public ArrayEnumerator GetEnumerator() { ... }  // Class surface
+    public ArrayEnumerator GetEnumerator { ... }  // Class surface
 
-    IEnumerator<T> IEnumerable<T>.GetEnumerator() { ... }  // ViewOnly
-    IEnumerator IEnumerable.GetEnumerator() { ... }        // ViewOnly
+    IEnumerator<T> IEnumerable<T>.GetEnumerator { ... }  // ViewOnly
+    IEnumerator IEnumerable.GetEnumerator { ... }        // ViewOnly
 }
 
 // TypeScript
 class Array_1<T> {
     // Class surface (ClassSurface scope)
-    getEnumerator(): ArrayEnumerator;
+    getEnumerator: ArrayEnumerator;
 
     // View for IEnumerable<T> (View scope)
     readonly asIEnumerable_1: {
-        getEnumerator$view(): IEnumerator_1<T>;
+        getEnumerator$view: IEnumerator_1<T>;
     };
 
     // View for IEnumerable (View scope)
     readonly asIEnumerable: {
-        getEnumerator$view(): IEnumerator;  // Same $view name (different view scope)
+        getEnumerator$view: IEnumerator;  // Same $view name (different view scope)
     };
 }
 ```
@@ -740,7 +740,7 @@ Performed by the Renamer component (not in Normalize phase):
 
 ### Reserved Word Sanitization
 
-Performed by `TypeScriptReservedWords.Sanitize()`:
+Performed by `TypeScriptReservedWords.Sanitize`:
 
 **TypeScript Reserved Words**:
 - Keywords: `break`, `case`, `catch`, `class`, `const`, `continue`, `debugger`, `default`, `delete`, `do`, `else`, `enum`, `export`, `extends`, `false`, `finally`, `for`, `function`, `if`, `import`, `in`, `instanceof`, `new`, `null`, `return`, `super`, `switch`, `this`, `throw`, `true`, `try`, `typeof`, `var`, `void`, `while`, `with`, `yield`
