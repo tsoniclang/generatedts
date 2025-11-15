@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using tsbindgen.SinglePhase.Renaming;
 using tsbindgen.SinglePhase.Model.Symbols;
 using tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
+using tsbindgen.SinglePhase.Model.Types;
 using tsbindgen.SinglePhase.Normalize;
 using tsbindgen.SinglePhase.Plan;
 
@@ -29,8 +30,8 @@ public static class BindingEmitter
             var ns = nsOrder.Namespace;
             ctx.Log("BindingEmitter", $"  Emitting bindings for: {ns.Name}");
 
-            // Generate bindings
-            var bindings = GenerateBindings(ctx, nsOrder);
+            // Generate bindings (pass full plan for base type resolution)
+            var bindings = GenerateBindings(ctx, plan, nsOrder);
 
             // Write to file: output/Namespace.Name/bindings.json
             var namespacePath = Path.Combine(outputDirectory, ns.Name);
@@ -52,13 +53,13 @@ public static class BindingEmitter
         ctx.Log("BindingEmitter", $"Generated {emittedCount} binding files");
     }
 
-    private static NamespaceBindings GenerateBindings(BuildContext ctx, NamespaceEmitOrder nsOrder)
+    private static NamespaceBindings GenerateBindings(BuildContext ctx, EmissionPlan plan, NamespaceEmitOrder nsOrder)
     {
         var typeBindings = new List<TypeBinding>();
 
         foreach (var typeOrder in nsOrder.OrderedTypes)
         {
-            typeBindings.Add(GenerateTypeBinding(typeOrder.Type, ctx));
+            typeBindings.Add(GenerateTypeBinding(typeOrder.Type, ctx, plan));
         }
 
         return new NamespaceBindings
@@ -68,7 +69,7 @@ public static class BindingEmitter
         };
     }
 
-    private static TypeBinding GenerateTypeBinding(TypeSymbol type, BuildContext ctx)
+    private static TypeBinding GenerateTypeBinding(TypeSymbol type, BuildContext ctx, EmissionPlan plan)
     {
         // Get final TypeScript name from Renamer
         var tsEmitName = ctx.Renamer.GetFinalTypeName(type);
@@ -91,20 +92,11 @@ public static class BindingEmitter
             .ToList();
 
         // V2: Generate exposures (what TS shows, and where it forwards)
-        var exposedMethods = type.Members.Methods
-            .Where(m => m.EmitScope != EmitScope.Omitted) // Only expose non-omitted members
-            .Select(m => GenerateMethodExposure(m, type, ctx))
-            .ToList();
-        var exposedProperties = type.Members.Properties
-            .Where(p => p.EmitScope != EmitScope.Omitted)
-            .Select(p => GeneratePropertyExposure(p, type, ctx))
-            .ToList();
-        var exposedFields = type.Members.Fields
-            .Select(f => GenerateFieldExposure(f, type, ctx))
-            .ToList();
-        var exposedEvents = type.Members.Events
-            .Select(e => GenerateEventExposure(e, type, ctx))
-            .ToList();
+        // Collect both own members and inherited members
+        var exposedMethods = CollectMethodExposures(type, ctx, plan);
+        var exposedProperties = CollectPropertyExposures(type, ctx, plan);
+        var exposedFields = CollectFieldExposures(type, ctx, plan);
+        var exposedEvents = CollectEventExposures(type, ctx, plan);
         var exposedConstructors = type.Members.Constructors
             .Select(c => GenerateConstructorExposure(c, type, ctx))
             .ToList();
@@ -272,7 +264,189 @@ public static class BindingEmitter
     }
 
     // ============================================================================
-    // V2 EXPOSURE GENERATION
+    // V2 EXPOSURE COLLECTION (own + inherited members)
+    // ============================================================================
+
+    private static List<MethodExposure> CollectMethodExposures(TypeSymbol type, BuildContext ctx, EmissionPlan plan)
+    {
+        var exposures = new List<MethodExposure>();
+
+        // Start with the type's own methods
+        foreach (var method in type.Members.Methods.Where(m => m.EmitScope != EmitScope.Omitted))
+        {
+            exposures.Add(GenerateMethodExposure(method, type, ctx));
+        }
+
+        // Collect inherited methods from base classes
+        CollectInheritedMethodExposures(type, type, ctx, plan, exposures);
+
+        return exposures;
+    }
+
+    private static List<PropertyExposure> CollectPropertyExposures(TypeSymbol type, BuildContext ctx, EmissionPlan plan)
+    {
+        var exposures = new List<PropertyExposure>();
+
+        // Start with the type's own properties
+        foreach (var property in type.Members.Properties.Where(p => p.EmitScope != EmitScope.Omitted))
+        {
+            exposures.Add(GeneratePropertyExposure(property, type, ctx));
+        }
+
+        // Collect inherited properties from base classes
+        CollectInheritedPropertyExposures(type, type, ctx, plan, exposures);
+
+        return exposures;
+    }
+
+    private static List<FieldExposure> CollectFieldExposures(TypeSymbol type, BuildContext ctx, EmissionPlan plan)
+    {
+        var exposures = new List<FieldExposure>();
+
+        // Start with the type's own fields
+        foreach (var field in type.Members.Fields)
+        {
+            exposures.Add(GenerateFieldExposure(field, type, ctx));
+        }
+
+        // Fields are not inherited in the same way as methods/properties
+        // (they shadow rather than override), so no inheritance collection needed
+
+        return exposures;
+    }
+
+    private static List<EventExposure> CollectEventExposures(TypeSymbol type, BuildContext ctx, EmissionPlan plan)
+    {
+        var exposures = new List<EventExposure>();
+
+        // Start with the type's own events
+        foreach (var evt in type.Members.Events)
+        {
+            exposures.Add(GenerateEventExposure(evt, type, ctx));
+        }
+
+        // Collect inherited events from base classes
+        CollectInheritedEventExposures(type, type, ctx, plan, exposures);
+
+        return exposures;
+    }
+
+    private static void CollectInheritedMethodExposures(
+        TypeSymbol derivedType,
+        TypeSymbol currentType,
+        BuildContext ctx,
+        EmissionPlan plan,
+        List<MethodExposure> exposures)
+    {
+        // Get base type
+        if (currentType.BaseType == null) return;
+
+        var baseTypeRef = currentType.BaseType as NamedTypeReference;
+        if (baseTypeRef == null) return;
+
+        // Resolve base type from graph
+        if (!plan.Graph.TryGetType(baseTypeRef.FullName, out var baseType) || baseType == null)
+            return;
+
+        // Get methods already exposed on the derived type (to detect overrides)
+        var exposedSignatures = new HashSet<string>(
+            exposures.Select(e => e.TsSignatureId));
+
+        // Add exposures for inherited methods not already overridden
+        foreach (var baseMethod in baseType.Members.Methods.Where(m => m.EmitScope != EmitScope.Omitted))
+        {
+            var baseSignature = SignatureNormalization.NormalizeMethod(baseMethod);
+
+            // Skip if already exposed (overridden in derived class)
+            if (exposedSignatures.Contains(baseSignature))
+                continue;
+
+            // Generate exposure with TS name from base class scope, but keep base class as target
+            exposures.Add(GenerateInheritedMethodExposure(baseMethod, baseType, ctx));
+        }
+
+        // Recursively collect from base's base
+        CollectInheritedMethodExposures(derivedType, baseType, ctx, plan, exposures);
+    }
+
+    private static void CollectInheritedPropertyExposures(
+        TypeSymbol derivedType,
+        TypeSymbol currentType,
+        BuildContext ctx,
+        EmissionPlan plan,
+        List<PropertyExposure> exposures)
+    {
+        // Get base type
+        if (currentType.BaseType == null) return;
+
+        var baseTypeRef = currentType.BaseType as NamedTypeReference;
+        if (baseTypeRef == null) return;
+
+        // Resolve base type from graph
+        if (!plan.Graph.TryGetType(baseTypeRef.FullName, out var baseType) || baseType == null)
+            return;
+
+        // Get properties already exposed on the derived type (to detect overrides)
+        var exposedSignatures = new HashSet<string>(
+            exposures.Select(e => e.TsSignatureId));
+
+        // Add exposures for inherited properties not already overridden
+        foreach (var baseProperty in baseType.Members.Properties.Where(p => p.EmitScope != EmitScope.Omitted))
+        {
+            var baseSignature = SignatureNormalization.NormalizeProperty(baseProperty);
+
+            // Skip if already exposed (overridden in derived class)
+            if (exposedSignatures.Contains(baseSignature))
+                continue;
+
+            // Generate exposure with TS name from base class scope
+            exposures.Add(GenerateInheritedPropertyExposure(baseProperty, baseType, ctx));
+        }
+
+        // Recursively collect from base's base
+        CollectInheritedPropertyExposures(derivedType, baseType, ctx, plan, exposures);
+    }
+
+    private static void CollectInheritedEventExposures(
+        TypeSymbol derivedType,
+        TypeSymbol currentType,
+        BuildContext ctx,
+        EmissionPlan plan,
+        List<EventExposure> exposures)
+    {
+        // Get base type
+        if (currentType.BaseType == null) return;
+
+        var baseTypeRef = currentType.BaseType as NamedTypeReference;
+        if (baseTypeRef == null) return;
+
+        // Resolve base type from graph
+        if (!plan.Graph.TryGetType(baseTypeRef.FullName, out var baseType) || baseType == null)
+            return;
+
+        // Get events already exposed on the derived type (to detect shadowing)
+        var exposedSignatures = new HashSet<string>(
+            exposures.Select(e => e.TsSignatureId));
+
+        // Add exposures for inherited events not already shadowed
+        foreach (var baseEvent in baseType.Members.Events)
+        {
+            var baseSignature = SignatureNormalization.NormalizeEvent(baseEvent);
+
+            // Skip if already exposed (shadowed in derived class)
+            if (exposedSignatures.Contains(baseSignature))
+                continue;
+
+            // Generate exposure with TS name from base class scope
+            exposures.Add(GenerateInheritedEventExposure(baseEvent, baseType, ctx));
+        }
+
+        // Recursively collect from base's base
+        CollectInheritedEventExposures(derivedType, baseType, ctx, plan, exposures);
+    }
+
+    // ============================================================================
+    // V2 EXPOSURE GENERATION (for own members)
     // ============================================================================
 
     private static MethodExposure GenerateMethodExposure(MethodSymbol method, TypeSymbol ownerType, BuildContext ctx)
@@ -393,6 +567,97 @@ public static class BindingEmitter
                 DeclaringClrType = ctor.StableId.DeclaringClrFullName,
                 DeclaringAssemblyName = ctor.StableId.AssemblyName,
                 MetadataToken = ctor.StableId.MetadataToken ?? 0
+            }
+        };
+    }
+
+    // ============================================================================
+    // V2 INHERITED EXPOSURE GENERATION
+    // (Use declaring type's scope for TS name lookup)
+    // ============================================================================
+
+    private static MethodExposure GenerateInheritedMethodExposure(MethodSymbol method, TypeSymbol declaringType, BuildContext ctx)
+    {
+        // Get TS name from declaring type's scope (not derived type)
+        string tsName;
+        if (method.EmitScope == EmitScope.ViewOnly && method.SourceInterface != null)
+        {
+            var interfaceStableId = ScopeFactory.GetInterfaceStableId(method.SourceInterface);
+            var viewScope = ScopeFactory.ViewSurface(declaringType, interfaceStableId, method.IsStatic);
+            tsName = ctx.Renamer.GetFinalMemberName(method.StableId, viewScope);
+        }
+        else
+        {
+            var classScope = ScopeFactory.ClassSurface(declaringType, method.IsStatic);
+            tsName = ctx.Renamer.GetFinalMemberName(method.StableId, classScope);
+        }
+
+        var tsSignatureId = SignatureNormalization.NormalizeMethod(method);
+
+        return new MethodExposure
+        {
+            TsName = tsName,
+            IsStatic = method.IsStatic,
+            TsSignatureId = tsSignatureId,
+            Target = new ExposureTarget
+            {
+                DeclaringClrType = method.StableId.DeclaringClrFullName,
+                DeclaringAssemblyName = method.StableId.AssemblyName,
+                MetadataToken = method.StableId.MetadataToken ?? 0
+            }
+        };
+    }
+
+    private static PropertyExposure GenerateInheritedPropertyExposure(PropertySymbol property, TypeSymbol declaringType, BuildContext ctx)
+    {
+        // Get TS name from declaring type's scope (not derived type)
+        string tsName;
+        if (property.EmitScope == EmitScope.ViewOnly && property.SourceInterface != null)
+        {
+            var interfaceStableId = ScopeFactory.GetInterfaceStableId(property.SourceInterface);
+            var viewScope = ScopeFactory.ViewSurface(declaringType, interfaceStableId, property.IsStatic);
+            tsName = ctx.Renamer.GetFinalMemberName(property.StableId, viewScope);
+        }
+        else
+        {
+            var classScope = ScopeFactory.ClassSurface(declaringType, property.IsStatic);
+            tsName = ctx.Renamer.GetFinalMemberName(property.StableId, classScope);
+        }
+
+        var tsSignatureId = SignatureNormalization.NormalizeProperty(property);
+
+        return new PropertyExposure
+        {
+            TsName = tsName,
+            IsStatic = property.IsStatic,
+            TsSignatureId = tsSignatureId,
+            Target = new ExposureTarget
+            {
+                DeclaringClrType = property.StableId.DeclaringClrFullName,
+                DeclaringAssemblyName = property.StableId.AssemblyName,
+                MetadataToken = property.StableId.MetadataToken ?? 0
+            }
+        };
+    }
+
+    private static EventExposure GenerateInheritedEventExposure(EventSymbol evt, TypeSymbol declaringType, BuildContext ctx)
+    {
+        // Events don't have ViewOnly scope, always use class scope
+        var classScope = ScopeFactory.ClassSurface(declaringType, evt.IsStatic);
+        var tsName = ctx.Renamer.GetFinalMemberName(evt.StableId, classScope);
+
+        var tsSignatureId = SignatureNormalization.NormalizeEvent(evt);
+
+        return new EventExposure
+        {
+            TsName = tsName,
+            IsStatic = evt.IsStatic,
+            TsSignatureId = tsSignatureId,
+            Target = new ExposureTarget
+            {
+                DeclaringClrType = evt.StableId.DeclaringClrFullName,
+                DeclaringAssemblyName = evt.StableId.AssemblyName,
+                MetadataToken = evt.StableId.MetadataToken ?? 0
             }
         };
     }
