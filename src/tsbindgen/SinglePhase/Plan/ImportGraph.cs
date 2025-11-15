@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using tsbindgen.SinglePhase.Model;
 using tsbindgen.SinglePhase.Model.Symbols;
+using tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
 using tsbindgen.SinglePhase.Model.Types;
 
 namespace tsbindgen.SinglePhase.Plan;
@@ -181,8 +182,13 @@ public static class ImportGraph
             }
         }
 
-        // Analyze members of this type
+        // Analyze members of this type (own members)
         AnalyzeMemberDependencies(ctx, graph, graphData, ns, type, dependencies);
+
+        // PHASE 3.2: Analyze inherited members for cross-namespace imports
+        // When we emit a type, BindingsProvider will include inherited methods/properties
+        // We need to ensure their return types and parameter types are imported
+        AnalyzeInheritedMemberDependencies(ctx, graph, graphData, ns, type, dependencies);
 
         // TS2304 FIX: Recursively analyze nested types (ONLY PUBLIC nested types)
         foreach (var nestedType in type.NestedTypes.Where(t => t.Accessibility == Accessibility.Public))
@@ -365,6 +371,150 @@ public static class ImportGraph
                         TargetNamespace: targetNs,
                         TargetType: fullName,
                         ReferenceKind: ReferenceKind.EventType));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// PHASE 3.2: Analyze inherited members from base classes for cross-namespace imports.
+    /// This ensures that when BindingsProvider emits inherited methods/properties,
+    /// their return types and parameter types are imported into the derived type's namespace.
+    /// </summary>
+    private static void AnalyzeInheritedMemberDependencies(
+        BuildContext ctx,
+        SymbolGraph graph,
+        ImportGraphData graphData,
+        NamespaceSymbol ns,
+        TypeSymbol type,
+        HashSet<string> dependencies)
+    {
+        // Get base type
+        if (type.BaseType == null) return;
+
+        var baseTypeRef = type.BaseType as NamedTypeReference;
+        if (baseTypeRef == null) return;
+
+        // Resolve base type from graph
+        if (!graph.TryGetType(baseTypeRef.FullName, out var baseType) || baseType == null)
+            return;
+
+        // Analyze base type's public instance methods and properties
+        // (these will be emitted as inherited exposures by BindingsProvider)
+        AnalyzeInheritedMethods(ctx, graph, graphData, ns, type, baseType, dependencies);
+        AnalyzeInheritedProperties(ctx, graph, graphData, ns, type, baseType, dependencies);
+
+        // Recursively analyze base's base
+        AnalyzeInheritedMemberDependenciesRecursive(ctx, graph, graphData, ns, type, baseType, dependencies);
+    }
+
+    private static void AnalyzeInheritedMemberDependenciesRecursive(
+        BuildContext ctx,
+        SymbolGraph graph,
+        ImportGraphData graphData,
+        NamespaceSymbol ns,
+        TypeSymbol derivedType,
+        TypeSymbol currentBase,
+        HashSet<string> dependencies)
+    {
+        // Get next base type
+        if (currentBase.BaseType == null) return;
+
+        var nextBaseRef = currentBase.BaseType as NamedTypeReference;
+        if (nextBaseRef == null) return;
+
+        // Resolve base type from graph
+        if (!graph.TryGetType(nextBaseRef.FullName, out var nextBase) || nextBase == null)
+            return;
+
+        // Analyze this base level
+        AnalyzeInheritedMethods(ctx, graph, graphData, ns, derivedType, nextBase, dependencies);
+        AnalyzeInheritedProperties(ctx, graph, graphData, ns, derivedType, nextBase, dependencies);
+
+        // Continue recursion
+        AnalyzeInheritedMemberDependenciesRecursive(ctx, graph, graphData, ns, derivedType, nextBase, dependencies);
+    }
+
+    private static void AnalyzeInheritedMethods(
+        BuildContext ctx,
+        SymbolGraph graph,
+        ImportGraphData graphData,
+        NamespaceSymbol ns,
+        TypeSymbol derivedType,
+        TypeSymbol baseType,
+        HashSet<string> dependencies)
+    {
+        // Only analyze ClassSurface instance methods (ViewOnly methods are emitted separately)
+        foreach (var method in baseType.Members.Methods.Where(m => m.EmitScope == EmitScope.ClassSurface && !m.IsStatic))
+        {
+            // Analyze return type
+            var returnTypeRefs = new HashSet<(string FullName, string? Namespace)>();
+            CollectTypeReferences(ctx, method.ReturnType, graph, graphData, returnTypeRefs);
+
+            foreach (var (fullName, targetNs) in returnTypeRefs)
+            {
+                if (targetNs != null && targetNs != ns.Name)
+                {
+                    dependencies.Add(targetNs);
+                    graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
+                        SourceNamespace: ns.Name,
+                        SourceType: derivedType.ClrFullName,
+                        TargetNamespace: targetNs,
+                        TargetType: fullName,
+                        ReferenceKind: ReferenceKind.MethodReturn));
+                }
+            }
+
+            // Analyze parameters
+            foreach (var param in method.Parameters)
+            {
+                var paramTypeRefs = new HashSet<(string FullName, string? Namespace)>();
+                CollectTypeReferences(ctx, param.Type, graph, graphData, paramTypeRefs);
+
+                foreach (var (fullName, targetNs) in paramTypeRefs)
+                {
+                    if (targetNs != null && targetNs != ns.Name)
+                    {
+                        dependencies.Add(targetNs);
+                        graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
+                            SourceNamespace: ns.Name,
+                            SourceType: derivedType.ClrFullName,
+                            TargetNamespace: targetNs,
+                            TargetType: fullName,
+                            ReferenceKind: ReferenceKind.MethodParameter));
+                    }
+                }
+            }
+        }
+    }
+
+    private static void AnalyzeInheritedProperties(
+        BuildContext ctx,
+        SymbolGraph graph,
+        ImportGraphData graphData,
+        NamespaceSymbol ns,
+        TypeSymbol derivedType,
+        TypeSymbol baseType,
+        HashSet<string> dependencies)
+    {
+        // Only analyze ClassSurface instance properties (ViewOnly properties are emitted separately)
+        foreach (var property in baseType.Members.Properties.Where(p => p.EmitScope == EmitScope.ClassSurface && !p.IsStatic))
+        {
+            // Analyze property type
+            var propTypeRefs = new HashSet<(string FullName, string? Namespace)>();
+            CollectTypeReferences(ctx, property.PropertyType, graph, graphData, propTypeRefs);
+
+            foreach (var (fullName, targetNs) in propTypeRefs)
+            {
+                if (targetNs != null && targetNs != ns.Name)
+                {
+                    dependencies.Add(targetNs);
+                    graphData.CrossNamespaceReferences.Add(new CrossNamespaceReference(
+                        SourceNamespace: ns.Name,
+                        SourceType: derivedType.ClrFullName,
+                        TargetNamespace: targetNs,
+                        TargetType: fullName,
+                        ReferenceKind: ReferenceKind.PropertyType));
                 }
             }
         }

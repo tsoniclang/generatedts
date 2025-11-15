@@ -64,6 +64,9 @@ public static class InternalIndexEmitter
         // TS2693 FIX: Pass ImportPlan and current namespace for qualified name resolution
         var resolver = new TypeNameResolver(ctx, graph, importPlan, nsOrder.Namespace.Name);
 
+        // V2 FIX: Create BindingsProvider for inherited member exposure (TS2416 fix)
+        var bindingsProvider = new BindingsProvider(ctx, graph);
+
         var sb = new StringBuilder();
 
         // File header
@@ -151,7 +154,7 @@ public static class InternalIndexEmitter
             if (hasViews)
             {
                 // Emit class with $instance suffix - PUBLIC TYPES GET export KEYWORD
-                var instanceClass = ClassPrinter.PrintInstance(typeOrder.Type, resolver, ctx, graph);
+                var instanceClass = ClassPrinter.PrintInstance(typeOrder.Type, resolver, ctx, graph, bindingsProvider);
                 var indentedInstance = Indent(instanceClass, indent);
 
                 // PUBLIC TYPES: Always export (both root and namespaces)
@@ -184,7 +187,7 @@ public static class InternalIndexEmitter
             else
             {
                 // Normal emission (no views) - PUBLIC TYPES GET export KEYWORD
-                var typeDecl = ClassPrinter.Print(typeOrder.Type, resolver, ctx, graph, typesWithoutGenerics);
+                var typeDecl = ClassPrinter.Print(typeOrder.Type, resolver, ctx, graph, typesWithoutGenerics, bindingsProvider);
                 var indented = Indent(typeDecl, indent);
 
                 // PUBLIC TYPES: Always export (both root and namespaces)

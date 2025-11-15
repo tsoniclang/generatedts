@@ -22,7 +22,8 @@ public static class ClassPrinter
     /// GUARD: Only prints public types - internal types are rejected.
     /// </summary>
     /// <param name="typesWithoutGenerics">Optional set to track types that had generics in CLR but were emitted without them (e.g., static classes)</param>
-    public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, HashSet<string>? typesWithoutGenerics = null)
+    /// <param name="bindingsProvider">Optional bindings provider for V2 inherited member exposure (if null, falls back to V1 behavior)</param>
+    public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, HashSet<string>? typesWithoutGenerics = null, BindingsProvider? bindingsProvider = null)
     {
         // GUARD: Never print non-public types
         if (type.Accessibility != Accessibility.Public)
@@ -33,8 +34,8 @@ public static class ClassPrinter
 
         return type.Kind switch
         {
-            TypeKind.Class => PrintClass(type, resolver, ctx, graph),
-            TypeKind.Struct => PrintStruct(type, resolver, ctx, graph),
+            TypeKind.Class => PrintClass(type, resolver, ctx, graph, bindingsProvider: bindingsProvider),
+            TypeKind.Struct => PrintStruct(type, resolver, ctx, graph, bindingsProvider: bindingsProvider),
             TypeKind.StaticNamespace => PrintStaticClass(type, resolver, ctx, typesWithoutGenerics),
             TypeKind.Enum => PrintEnum(type, ctx),
             TypeKind.Delegate => PrintDelegate(type, resolver, ctx),
@@ -48,7 +49,7 @@ public static class ClassPrinter
     /// Used when type has explicit interface views that will be in separate companion interface.
     /// GUARD: Only prints public types - internal types are rejected.
     /// </summary>
-    public static string PrintInstance(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph)
+    public static string PrintInstance(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, BindingsProvider? bindingsProvider = null)
     {
         // GUARD: Never print non-public types
         if (type.Accessibility != Accessibility.Public)
@@ -59,13 +60,13 @@ public static class ClassPrinter
 
         return type.Kind switch
         {
-            TypeKind.Class => PrintClass(type, resolver, ctx, graph, instanceSuffix: true),
-            TypeKind.Struct => PrintStruct(type, resolver, ctx, graph, instanceSuffix: true),
-            _ => Print(type, resolver, ctx, graph) // Fallback (guard already checked above)
+            TypeKind.Class => PrintClass(type, resolver, ctx, graph, instanceSuffix: true, bindingsProvider: bindingsProvider),
+            TypeKind.Struct => PrintStruct(type, resolver, ctx, graph, instanceSuffix: true, bindingsProvider: bindingsProvider),
+            _ => Print(type, resolver, ctx, graph, bindingsProvider: bindingsProvider) // Fallback (guard already checked above)
         };
     }
 
-    private static string PrintClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, bool instanceSuffix = false)
+    private static string PrintClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, bool instanceSuffix = false, BindingsProvider? bindingsProvider = null)
     {
         var sb = new StringBuilder();
 
@@ -131,14 +132,14 @@ public static class ClassPrinter
         sb.AppendLine(" {");
 
         // Emit members
-        EmitMembers(sb, type, resolver, ctx, graph);
+        EmitMembers(sb, type, resolver, ctx, graph, bindingsProvider);
 
         sb.AppendLine("}");
 
         return sb.ToString();
     }
 
-    private static string PrintStruct(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, bool instanceSuffix = false)
+    private static string PrintStruct(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, bool instanceSuffix = false, BindingsProvider? bindingsProvider = null)
     {
         // Structs emit as classes in TypeScript (with metadata noting value semantics)
         var sb = new StringBuilder();
@@ -175,7 +176,7 @@ public static class ClassPrinter
         sb.AppendLine(" {");
 
         // Emit members
-        EmitMembers(sb, type, resolver, ctx, graph);
+        EmitMembers(sb, type, resolver, ctx, graph, bindingsProvider);
 
         sb.AppendLine("}");
 
@@ -325,7 +326,7 @@ public static class ClassPrinter
         return sb.ToString();
     }
 
-    private static void EmitMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph)
+    private static void EmitMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, BindingsProvider? bindingsProvider = null)
     {
         var members = type.Members;
 
@@ -356,62 +357,173 @@ public static class ClassPrinter
             sb.AppendLine(";");
         }
 
-        // Properties - only emit ClassSurface members
-        // CLR-NAME CONTRACT: Use PascalCase CLR names (Count, not count)
-        foreach (var prop in members.Properties.Where(p => !p.IsStatic && p.EmitScope == EmitScope.ClassSurface))
+        // Properties - V2: Use ExposedProperties from bindings if available (own + inherited)
+        var exposedProperties = bindingsProvider?.GetExposedProperties(type);
+        if (exposedProperties != null)
         {
-            // Apply CLR surface name policy
-            var emitName = NameUtilities.ApplyClrSurfaceNamePolicy(prop.ClrName);
+            // V2 path: Use ExposedProperties (complete property sets including inherited)
+            // Group by CLR name and use TsName from OWN properties for emission
+            var propertyGroups = exposedProperties
+                .GroupBy(e => e.Property.ClrName)  // Group by CLR name
+                .OrderBy(g => g.Key);
 
-            // FIX D EXTENSION: Substitute generic parameters for properties from interfaces
-            var propToEmit = SubstituteMemberIfNeeded(type, prop, ctx, graph);
+            foreach (var group in propertyGroups)
+            {
+                var exposures = group.ToList();
 
-            sb.Append("    ");
-            if (!propToEmit.HasSetter)
-                sb.Append("readonly ");
-            sb.Append(emitName);
-            sb.Append(": ");
-            sb.Append(TypeRefPrinter.Print(propToEmit.PropertyType, resolver, ctx));
-            sb.AppendLine(";");
+                // PHASE 5 FIX: Only emit properties where we have an OWN (non-inherited) exposure
+                // Inherited properties are automatically available through TypeScript's extends clause
+                // Re-declaring them causes TS2416 errors even if types are identical
+                var ownProperty = exposures.FirstOrDefault(e => !e.IsInherited);
+                if (ownProperty == null)
+                {
+                    // All exposures are inherited - skip emitting (already available from base)
+                    continue;
+                }
+
+                var tsName = ownProperty.TsName;
+
+                // Emit property (use own property for type)
+                // FIX D EXTENSION: Substitute generic parameters for properties from interfaces
+                var propToEmit = SubstituteMemberIfNeeded(type, ownProperty.Property, ctx, graph);
+
+                sb.Append("    ");
+                if (!propToEmit.HasSetter)
+                    sb.Append("readonly ");
+                sb.Append(tsName);  // V2: Use TsName from BindingsProvider
+                sb.Append(": ");
+                sb.Append(TypeRefPrinter.Print(propToEmit.PropertyType, resolver, ctx));
+                sb.AppendLine(";");
+            }
+        }
+        else
+        {
+            // Fallback: Old path for types without bindings
+            // CLR-NAME CONTRACT: Use PascalCase CLR names (Count, not count)
+            foreach (var prop in members.Properties.Where(p => !p.IsStatic && p.EmitScope == EmitScope.ClassSurface))
+            {
+                // Apply CLR surface name policy
+                var emitName = NameUtilities.ApplyClrSurfaceNamePolicy(prop.ClrName);
+
+                // FIX D EXTENSION: Substitute generic parameters for properties from interfaces
+                var propToEmit = SubstituteMemberIfNeeded(type, prop, ctx, graph);
+
+                sb.Append("    ");
+                if (!propToEmit.HasSetter)
+                    sb.Append("readonly ");
+                sb.Append(emitName);
+                sb.Append(": ");
+                sb.Append(TypeRefPrinter.Print(propToEmit.PropertyType, resolver, ctx));
+                sb.AppendLine(";");
+            }
         }
 
         // Methods - only emit ClassSurface members
         // TS2416/TS2420 FIX: Emit methods as TypeScript overload sets (grouped by CLR name)
         // TS2512 FIX: Ensure all overloads in a group have consistent abstract/non-abstract status
+        // V2 FIX: Use ExposedMethods from bindings if available (includes inherited methods)
         var shouldSkipAbstract = !type.IsAbstract;
-        var instanceMethods = members.Methods
-            .Where(m => !m.IsStatic && m.EmitScope == EmitScope.ClassSurface)
-            .ToList();
 
-        // Group by CLR base name for overload emission
-        var methodGroups = GroupMethodsByClrName(instanceMethods, isStatic: false);
-
-        foreach (var (clrName, overloads) in methodGroups.OrderBy(kvp => kvp.Key))
+        // V2: Use ExposedMethods from bindings if available (own + inherited)
+        var exposedMethods = bindingsProvider?.GetExposedMethods(type);
+        if (exposedMethods != null)
         {
-            // Get the CLR-based emit name (preserves casing like "Equals", "GetHashCode")
-            var emitName = GetClrEmitName(clrName);
+            // V2 path: Use ExposedMethods (complete overload sets including inherited)
+            // CRITICAL: Group by CLR name to unify overload sets across inheritance
+            // But use TsName from OWN methods for emission (inherited methods may have different disambiguation)
+            var methodGroups = exposedMethods
+                .GroupBy(e => e.Method.ClrName)  // Group by CLR name to unify overloads
+                .OrderBy(g => g.Key);
 
-            // TS2512 FIX: Compute single abstract status for entire overload group
-            // If ALL overloads are abstract, mark the group as abstract
-            // Otherwise, emit all as non-abstract (TypeScript requires consistency)
-            var groupIsAbstract = overloads.All(m => m.IsAbstract) && type.IsAbstract;
-
-            // Emit each overload signature
-            foreach (var method in overloads)
+            foreach (var group in methodGroups)
             {
-                // Skip abstract methods in concrete classes - they're inherited declarations only
-                if (shouldSkipAbstract && method.IsAbstract)
+                var exposures = group.ToList();
+
+                // PHASE 5 FIX: Only emit OWN (non-inherited) methods
+                // Inherited methods are automatically available through TypeScript's extends clause
+                // Re-declaring them causes TS2416 errors even if types are identical
+                // EXCEPTION: Always emit methods that implement abstract base members (TS2654 fix)
+                var ownMethods = exposures.Where(e => !e.IsInherited).ToList();
+                if (!ownMethods.Any())
+                {
+                    // All methods are inherited - skip emitting (already available from base)
                     continue;
+                }
 
-                sb.Append("    ");
+                // PHASE 5.1 FIX (TS2654): Choose TsName carefully for abstract method implementations
+                // If one of the overloads implements an abstract base method, use that TsName
+                // (it will have the correct name from the base, not a renamed collision-avoiding variant)
+                string tsName;
+                var preferredName = ownMethods.FirstOrDefault(m => !NameUtilities.HasNumericSuffix(m.TsName));
+                if (preferredName != null)
+                {
+                    // Prefer method without numeric suffix (e.g., "equals" not "equals3")
+                    tsName = preferredName.TsName;
+                }
+                else
+                {
+                    // All have numeric suffixes - use first
+                    tsName = ownMethods.First().TsName;
+                }
 
-                // FIX D EXTENSION: Substitute generic parameters for methods from interfaces
-                var methodToEmit = SubstituteMemberIfNeeded(type, method, ctx, graph);
+                // TS2512 FIX: Compute single abstract status for OWN methods only
+                var groupIsAbstract = ownMethods.All(e => e.Method.IsAbstract) && type.IsAbstract;
 
-                // TS2416/TS2420 FIX: Use CLR-cased name instead of Renamer's lowercase name
-                // TS2512 FIX: Pass group-level abstract status to ensure consistency
-                sb.Append(MethodPrinter.PrintWithName(methodToEmit, type, emitName, resolver, ctx, emitAbstract: groupIsAbstract));
-                sb.AppendLine(";");
+                // Emit ONLY own method overload signatures (not inherited)
+                foreach (var exposure in ownMethods)
+                {
+                    // Skip abstract methods in concrete classes - they're inherited declarations only
+                    if (shouldSkipAbstract && exposure.Method.IsAbstract)
+                        continue;
+
+                    sb.Append("    ");
+
+                    // FIX D EXTENSION: Substitute generic parameters if needed
+                    var methodToEmit = SubstituteMemberIfNeeded(type, exposure.Method, ctx, graph);
+
+                    // V2: Use unified TsName from derived type's own methods
+                    sb.Append(MethodPrinter.PrintWithName(methodToEmit, type, tsName, resolver, ctx, emitAbstract: groupIsAbstract));
+                    sb.AppendLine(";");
+                }
+            }
+        }
+        else
+        {
+            // V1 fallback path: Use only type's own methods
+            var instanceMethods = members.Methods
+                .Where(m => !m.IsStatic && m.EmitScope == EmitScope.ClassSurface)
+                .ToList();
+
+            // Group by CLR base name for overload emission
+            var methodGroups = GroupMethodsByClrName(instanceMethods, isStatic: false);
+
+            foreach (var (clrName, overloads) in methodGroups.OrderBy(kvp => kvp.Key))
+            {
+                // Get the CLR-based emit name (preserves casing like "Equals", "GetHashCode")
+                var emitName = GetClrEmitName(clrName);
+
+                // TS2512 FIX: Compute single abstract status for entire overload group
+                // If ALL overloads are abstract, mark the group as abstract
+                // Otherwise, emit all as non-abstract (TypeScript requires consistency)
+                var groupIsAbstract = overloads.All(m => m.IsAbstract) && type.IsAbstract;
+
+                // Emit each overload signature
+                foreach (var method in overloads)
+                {
+                    // Skip abstract methods in concrete classes - they're inherited declarations only
+                    if (shouldSkipAbstract && method.IsAbstract)
+                        continue;
+
+                    sb.Append("    ");
+
+                    // FIX D EXTENSION: Substitute generic parameters for methods from interfaces
+                    var methodToEmit = SubstituteMemberIfNeeded(type, method, ctx, graph);
+
+                    // TS2416/TS2420 FIX: Use CLR-cased name instead of Renamer's lowercase name
+                    // TS2512 FIX: Pass group-level abstract status to ensure consistency
+                    sb.Append(MethodPrinter.PrintWithName(methodToEmit, type, emitName, resolver, ctx, emitAbstract: groupIsAbstract));
+                    sb.AppendLine(";");
+                }
             }
         }
 

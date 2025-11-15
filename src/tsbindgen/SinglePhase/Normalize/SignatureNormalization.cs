@@ -1,5 +1,7 @@
+using System.Linq;
 using System.Text;
 using tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
+using tsbindgen.SinglePhase.Model.Types;
 
 namespace tsbindgen.SinglePhase.Normalize;
 
@@ -17,8 +19,9 @@ public static class SignatureNormalization
 {
     /// <summary>
     /// Normalize a method signature to canonical form.
-    /// Format: "MethodName|arity=N|(param1:kind,param2:kind)|->ReturnType|static=bool"
-    /// Example: "CompareTo|arity=0|(T:in)|->int|static=false"
+    /// Format: "MethodName|signature|static=bool"
+    /// Uses the StableId's CanonicalSignature which preserves exact CLR metadata.
+    /// CRITICAL: StableId captures raw reflection data before TypeReference normalization.
     /// </summary>
     public static string NormalizeMethod(MethodSymbol method)
     {
@@ -27,39 +30,10 @@ public static class SignatureNormalization
         // Method name
         sb.Append(method.ClrName);
 
-        // Generic arity
-        sb.Append("|arity=");
-        sb.Append(method.Arity);
-
-        // Parameters with kinds
-        sb.Append("|(");
-        for (int i = 0; i < method.Parameters.Length; i++)
-        {
-            if (i > 0) sb.Append(',');
-
-            var param = method.Parameters[i];
-            sb.Append(NormalizeTypeName(param.Type.ToString() ?? "unknown"));
-            sb.Append(':');
-
-            // Parameter kind
-            if (param.IsOut)
-                sb.Append("out");
-            else if (param.IsRef)
-                sb.Append("ref");
-            else if (param.IsParams)
-                sb.Append("params");
-            else
-                sb.Append("in");
-
-            // Optional flag
-            if (param.HasDefaultValue)
-                sb.Append("?");
-        }
-        sb.Append(')');
-
-        // Return type
-        sb.Append("|->");
-        sb.Append(NormalizeTypeName(method.ReturnType.ToString() ?? "void"));
+        // Use the StableId's canonical signature which preserves the exact CLR metadata
+        // This avoids issues where TypeReference normalization might lose distinctions
+        sb.Append("|");
+        sb.Append(method.StableId.CanonicalSignature);
 
         // Static flag
         sb.Append("|static=");
@@ -70,9 +44,8 @@ public static class SignatureNormalization
 
     /// <summary>
     /// Normalize a property signature to canonical form.
-    /// Format: "PropertyName|(indexParam1,indexParam2)|->PropertyType|static=bool|accessor=get/set/getset"
-    /// Example: "Count|->int|static=false|accessor=get"
-    /// Example: "Item|(int)|->T|static=false|accessor=getset"
+    /// Format: "PropertyName|signature|static=bool|accessor=get/set/getset"
+    /// Uses the StableId's CanonicalSignature which preserves exact CLR metadata.
     /// </summary>
     public static string NormalizeProperty(PropertySymbol property)
     {
@@ -81,22 +54,9 @@ public static class SignatureNormalization
         // Property name
         sb.Append(property.ClrName);
 
-        // Index parameters (for indexers)
-        sb.Append('|');
-        if (property.IndexParameters.Length > 0)
-        {
-            sb.Append('(');
-            for (int i = 0; i < property.IndexParameters.Length; i++)
-            {
-                if (i > 0) sb.Append(',');
-                sb.Append(NormalizeTypeName(property.IndexParameters[i].Type.ToString() ?? "unknown"));
-            }
-            sb.Append(')');
-        }
-
-        // Property type
-        sb.Append("|->");
-        sb.Append(NormalizeTypeName(property.PropertyType.ToString() ?? "unknown"));
+        // Use the StableId's canonical signature
+        sb.Append("|");
+        sb.Append(property.StableId.CanonicalSignature);
 
         // Static flag
         sb.Append("|static=");
@@ -118,8 +78,8 @@ public static class SignatureNormalization
 
     /// <summary>
     /// Normalize a field signature to canonical form.
-    /// Format: "FieldName|->FieldType|static=bool|const=bool"
-    /// Example: "MaxValue|->int|static=true|const=true"
+    /// Format: "FieldName|signature|static=bool|const=bool"
+    /// Uses the StableId's CanonicalSignature which preserves exact CLR metadata.
     /// </summary>
     public static string NormalizeField(FieldSymbol field)
     {
@@ -128,9 +88,9 @@ public static class SignatureNormalization
         // Field name
         sb.Append(field.ClrName);
 
-        // Field type
-        sb.Append("|->");
-        sb.Append(NormalizeTypeName(field.FieldType.ToString() ?? "unknown"));
+        // Use the StableId's canonical signature
+        sb.Append("|");
+        sb.Append(field.StableId.CanonicalSignature);
 
         // Static flag
         sb.Append("|static=");
@@ -145,8 +105,8 @@ public static class SignatureNormalization
 
     /// <summary>
     /// Normalize an event signature to canonical form.
-    /// Format: "EventName|->DelegateType|static=bool"
-    /// Example: "Click|->EventHandler|static=false"
+    /// Format: "EventName|signature|static=bool"
+    /// Uses the StableId's CanonicalSignature which preserves exact CLR metadata.
     /// </summary>
     public static string NormalizeEvent(EventSymbol evt)
     {
@@ -155,9 +115,9 @@ public static class SignatureNormalization
         // Event name
         sb.Append(evt.ClrName);
 
-        // Delegate type
-        sb.Append("|->");
-        sb.Append(NormalizeTypeName(evt.EventHandlerType.ToString() ?? "unknown"));
+        // Use the StableId's canonical signature
+        sb.Append("|");
+        sb.Append(evt.StableId.CanonicalSignature);
 
         // Static flag
         sb.Append("|static=");
@@ -168,8 +128,8 @@ public static class SignatureNormalization
 
     /// <summary>
     /// Normalize a constructor signature to canonical form.
-    /// Format: "constructor|(param1:kind,param2:kind)|static=bool"
-    /// Example: "constructor|(int:in,string:in)|static=false"
+    /// Format: "constructor|signature|static=bool"
+    /// Uses the StableId's CanonicalSignature which preserves exact CLR metadata.
     /// </summary>
     public static string NormalizeConstructor(ConstructorSymbol ctor)
     {
@@ -178,31 +138,9 @@ public static class SignatureNormalization
         // Constructor keyword
         sb.Append("constructor");
 
-        // Parameters with kinds
-        sb.Append("|(");
-        for (int i = 0; i < ctor.Parameters.Length; i++)
-        {
-            if (i > 0) sb.Append(',');
-
-            var param = ctor.Parameters[i];
-            sb.Append(NormalizeTypeName(param.Type.ToString() ?? "unknown"));
-            sb.Append(':');
-
-            // Parameter kind
-            if (param.IsOut)
-                sb.Append("out");
-            else if (param.IsRef)
-                sb.Append("ref");
-            else if (param.IsParams)
-                sb.Append("params");
-            else
-                sb.Append("in");
-
-            // Optional flag
-            if (param.HasDefaultValue)
-                sb.Append("?");
-        }
-        sb.Append(')');
+        // Use the StableId's canonical signature
+        sb.Append("|");
+        sb.Append(ctor.StableId.CanonicalSignature);
 
         // Static flag (static constructors exist)
         sb.Append("|static=");
@@ -212,8 +150,70 @@ public static class SignatureNormalization
     }
 
     /// <summary>
-    /// Normalize a type name for signature matching.
-    /// Handles generics, arrays, nullability, etc.
+    /// Normalize a TypeReference to canonical form with FULL type arguments.
+    /// This is critical for distinguishing overloads like TryFormat(Span&lt;char&gt;) vs TryFormat(Span&lt;byte&gt;).
+    /// </summary>
+    private static string NormalizeType(TypeReference type)
+    {
+        switch (type)
+        {
+            case NamedTypeReference named:
+                var sb = new StringBuilder();
+
+                // Base identity: Namespace.Name
+                if (!string.IsNullOrEmpty(named.Namespace))
+                {
+                    sb.Append(named.Namespace);
+                    sb.Append('.');
+                }
+                sb.Append(named.Name.Replace('`', '_')); // List`1 -> List_1
+
+                // Include type arguments recursively
+                if (named.TypeArguments.Count > 0)
+                {
+                    sb.Append('[');
+                    sb.Append(string.Join(",", named.TypeArguments.Select(NormalizeType)));
+                    sb.Append(']');
+                }
+
+                // Mark value types to distinguish from reference types if needed
+                if (named.IsValueType)
+                    sb.Append("#vt");
+
+                return sb.ToString();
+
+            case NestedTypeReference nested:
+                // Use full reference for nested types
+                return NormalizeType(nested.FullReference);
+
+            case ArrayTypeReference arr:
+                // Array with rank
+                var rankStr = arr.Rank == 1 ? "[]" : $"[{new string(',', arr.Rank - 1)}]";
+                return $"{NormalizeType(arr.ElementType)}{rankStr}";
+
+            case PointerTypeReference ptr:
+                return $"{NormalizeType(ptr.PointeeType)}*";
+
+            case ByRefTypeReference byref:
+                // ByRef-ness is encoded separately via parameter refKind
+                return NormalizeType(byref.ReferencedType);
+
+            case GenericParameterReference gp:
+                // Type parameters: use position to distinguish them
+                return $"`{gp.Position}";
+
+            case PlaceholderTypeReference:
+                return "?placeholder";
+
+            default:
+                // Fallback for unknown types
+                return type.ToString()?.Replace(" ", "").Replace('`', '_') ?? "unknown";
+        }
+    }
+
+    /// <summary>
+    /// Normalize a type name for signature matching (legacy string-based version).
+    /// Kept for backwards compatibility but prefer NormalizeType(TypeReference).
     /// </summary>
     private static string NormalizeTypeName(string typeName)
     {
