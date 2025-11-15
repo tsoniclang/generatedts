@@ -185,7 +185,7 @@ public static class ImportGraph
         // Analyze members of this type (own members)
         AnalyzeMemberDependencies(ctx, graph, graphData, ns, type, dependencies);
 
-        // PHASE 3.2: Analyze inherited members for cross-namespace imports
+        // Analyze inherited members for cross-namespace imports
         // When we emit a type, BindingsProvider will include inherited methods/properties
         // We need to ensure their return types and parameter types are imported
         AnalyzeInheritedMemberDependencies(ctx, graph, graphData, ns, type, dependencies);
@@ -377,7 +377,7 @@ public static class ImportGraph
     }
 
     /// <summary>
-    /// PHASE 3.2: Analyze inherited members from base classes for cross-namespace imports.
+    /// Analyze inherited members from base classes for cross-namespace imports.
     /// This ensures that when BindingsProvider emits inherited methods/properties,
     /// their return types and parameter types are imported into the derived type's namespace.
     /// </summary>

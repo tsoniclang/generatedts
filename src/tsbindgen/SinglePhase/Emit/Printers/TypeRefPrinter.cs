@@ -20,22 +20,27 @@ public static class TypeRefPrinter
     /// If provided, any GenericParameterReference NOT in this set will be demoted to 'unknown'.
     /// This prevents "free type variables" from leaking into signatures.
     /// </param>
+    /// <param name="forValuePosition">
+    /// If true, this is for extends/implements (value position).
+    /// Use qualified names for reflection types to avoid TS2693 errors.
+    /// </param>
     public static string Print(
         TypeReference typeRef,
         TypeNameResolver resolver,
         BuildContext ctx,
-        HashSet<string>? allowedTypeParameterNames = null)
+        HashSet<string>? allowedTypeParameterNames = null,
+        bool forValuePosition = false)
     {
         return typeRef switch
         {
             // Defensive guard: Placeholders should never reach output after ConstraintCloser
             PlaceholderTypeReference placeholder => PrintPlaceholder(placeholder, ctx),
-            NamedTypeReference named => PrintNamed(named, resolver, ctx, allowedTypeParameterNames),
+            NamedTypeReference named => PrintNamed(named, resolver, ctx, allowedTypeParameterNames, forValuePosition),
             GenericParameterReference gp => PrintGenericParameter(gp, ctx, allowedTypeParameterNames),
-            ArrayTypeReference arr => PrintArray(arr, resolver, ctx, allowedTypeParameterNames),
-            PointerTypeReference ptr => PrintPointer(ptr, resolver, ctx, allowedTypeParameterNames),
-            ByRefTypeReference byref => PrintByRef(byref, resolver, ctx, allowedTypeParameterNames),
-            NestedTypeReference nested => PrintNested(nested, resolver, ctx, allowedTypeParameterNames),
+            ArrayTypeReference arr => PrintArray(arr, resolver, ctx, allowedTypeParameterNames, forValuePosition),
+            PointerTypeReference ptr => PrintPointer(ptr, resolver, ctx, allowedTypeParameterNames, forValuePosition),
+            ByRefTypeReference byref => PrintByRef(byref, resolver, ctx, allowedTypeParameterNames, forValuePosition),
+            NestedTypeReference nested => PrintNested(nested, resolver, ctx, allowedTypeParameterNames, forValuePosition),
             _ => "any" // Fallback for unknown types
         };
     }
@@ -56,7 +61,8 @@ public static class TypeRefPrinter
         NamedTypeReference named,
         TypeNameResolver resolver,
         BuildContext ctx,
-        HashSet<string>? allowedTypeParameterNames)
+        HashSet<string>? allowedTypeParameterNames,
+        bool forValuePosition = false)
     {
         // Map CLR primitive types to TypeScript built-in types (short-circuit)
         var primitiveType = TypeNameResolver.TryMapPrimitive(named.FullName);
@@ -75,7 +81,8 @@ public static class TypeRefPrinter
         // This ensures printed names match import statements (single source of truth)
         // For types in graph: uses Renamer final name (may have suffix)
         // For external types: uses sanitized CLR simple name
-        var baseName = resolver.ResolveTypeName(named);
+        // Pass forValuePosition to distinguish extends/implements from signatures
+        var baseName = resolver.For(named, forValuePosition);
 
         // HARDENING: Guarantee non-empty type names (defensive check)
         if (string.IsNullOrWhiteSpace(baseName))
@@ -142,9 +149,10 @@ public static class TypeRefPrinter
         ArrayTypeReference arr,
         TypeNameResolver resolver,
         BuildContext ctx,
-        HashSet<string>? allowedTypeParameterNames)
+        HashSet<string>? allowedTypeParameterNames,
+        bool forValuePosition = false)
     {
-        var elementType = Print(arr.ElementType, resolver, ctx, allowedTypeParameterNames);
+        var elementType = Print(arr.ElementType, resolver, ctx, allowedTypeParameterNames, forValuePosition);
 
         // Multi-dimensional arrays: T[][], T[][][]
         if (arr.Rank == 1)
@@ -163,12 +171,13 @@ public static class TypeRefPrinter
         PointerTypeReference ptr,
         TypeNameResolver resolver,
         BuildContext ctx,
-        HashSet<string>? allowedTypeParameterNames)
+        HashSet<string>? allowedTypeParameterNames,
+        bool forValuePosition = false)
     {
         // TypeScript has no pointer types
         // Use branded marker type: TSUnsafePointer<T> = unknown
         // This preserves type information while being type-safe (forces explicit handling)
-        var pointeeType = Print(ptr.PointeeType, resolver, ctx, allowedTypeParameterNames);
+        var pointeeType = Print(ptr.PointeeType, resolver, ctx, allowedTypeParameterNames, forValuePosition);
         return $"TSUnsafePointer<{pointeeType}>";
     }
 
@@ -176,12 +185,13 @@ public static class TypeRefPrinter
         ByRefTypeReference byref,
         TypeNameResolver resolver,
         BuildContext ctx,
-        HashSet<string>? allowedTypeParameterNames)
+        HashSet<string>? allowedTypeParameterNames,
+        bool forValuePosition = false)
     {
         // TypeScript has no ref types (ref/out/in parameters)
         // Use branded marker type: TSByRef<T> = unknown
         // This preserves type information while being type-safe
-        var referencedType = Print(byref.ReferencedType, resolver, ctx, allowedTypeParameterNames);
+        var referencedType = Print(byref.ReferencedType, resolver, ctx, allowedTypeParameterNames, forValuePosition);
         return $"TSByRef<{referencedType}>";
     }
 
@@ -189,11 +199,12 @@ public static class TypeRefPrinter
         NestedTypeReference nested,
         TypeNameResolver resolver,
         BuildContext ctx,
-        HashSet<string>? allowedTypeParameterNames)
+        HashSet<string>? allowedTypeParameterNames,
+        bool forValuePosition = false)
     {
         // CRITICAL: Nested types use resolver just like named types
         // The FullReference is a NamedTypeReference that the resolver will handle correctly
-        return PrintNamed(nested.FullReference, resolver, ctx, allowedTypeParameterNames);
+        return PrintNamed(nested.FullReference, resolver, ctx, allowedTypeParameterNames, forValuePosition);
     }
 
     /// <summary>

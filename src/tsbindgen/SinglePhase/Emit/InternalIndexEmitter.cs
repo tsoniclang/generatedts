@@ -103,7 +103,26 @@ public static class InternalIndexEmitter
                 var valueImports = import.TypeImports.Where(ti => ti.IsValueImport).ToList();
                 var typeOnlyImports = import.TypeImports.Where(ti => !ti.IsValueImport).ToList();
 
-                // Emit namespace import for value imports (accessible inside namespace blocks)
+                // Emit BOTH named AND namespace imports for reflection types
+                // - Named imports work outside namespace blocks (for simple names in return types)
+                // - Namespace imports work inside namespace blocks (for base classes)
+                // We need both to support reflection types used in both positions
+                var reflectionValueImports = valueImports
+                    .Where(ti => ReflectionTypes.IsCommonReflectionTypeName(import.TargetNamespace, ti.TypeName))
+                    .ToList();
+
+                // Emit named value imports for reflection types (accessible outside namespace)
+                if (reflectionValueImports.Count > 0)
+                {
+                    var reflectionList = string.Join(", ", reflectionValueImports
+                        .OrderBy(ti => ti.TypeName)
+                        .Select(ti => ti.Alias != null ? $"{ti.TypeName} as {ti.Alias}" : ti.TypeName));
+
+                    sb.AppendLine($"import {{ {reflectionList} }} from \"{import.ImportPath}\";");
+                }
+
+                // CRITICAL: Always emit namespace import for ALL value imports (not just non-reflection)
+                // Namespace imports are required for accessing types inside namespace blocks
                 if (valueImports.Count > 0)
                 {
                     sb.AppendLine($"import * as {import.NamespaceAlias} from \"{import.ImportPath}\";");
@@ -403,9 +422,142 @@ public static class InternalIndexEmitter
             sb.AppendLine(";");
         }
 
+        // TS2344 FIX: Add structural method bridges for numeric interface constraints
+        // TypeScript uses structural typing - interfaces require PascalCase methods
+        // but instance classes use camelCase. Add PascalCase methods to satisfy constraints.
+        var numericInterfaces = GetNumericInterfaceSet(views);
+        if (numericInterfaces != null)
+        {
+            sb.AppendLine();
+            sb.AppendLine("    // Structural method bridges for numeric interface constraints");
+            EmitNumericStructuralMethods(sb, type, numericInterfaces, resolver, ctx);
+        }
+
         sb.Append("}");
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Get the set of numeric interfaces that require structural method bridges.
+    /// Returns null if no numeric interfaces are implemented.
+    /// </summary>
+    private static HashSet<string>? GetNumericInterfaceSet(ImmutableArray<Shape.ViewPlanner.ExplicitView> views)
+    {
+        HashSet<string>? interfaces = null;
+
+        foreach (var view in views)
+        {
+            if (view.InterfaceReference is Model.Types.NamedTypeReference named)
+            {
+                var interfaceName = named.FullName;
+
+                // Track which specific numeric interfaces are implemented
+                if (interfaceName.Contains("System.Numerics.INumber`1") ||
+                    interfaceName.Contains("System.Numerics.IBinaryInteger`1") ||
+                    interfaceName.Contains("System.Numerics.IFloatingPoint`1") ||
+                    interfaceName.Contains("System.Numerics.INumberBase`1") ||
+                    interfaceName.Contains("System.Numerics.IRootFunctions`1") ||
+                    interfaceName.Contains("System.Numerics.ITrigonometricFunctions`1") ||
+                    interfaceName.Contains("System.IEquatable`1") ||
+                    interfaceName.Contains("System.IComparable"))
+                {
+                    interfaces ??= new HashSet<string>();
+
+                    // Normalize to generic base name for easier checking
+                    if (interfaceName.Contains("System.Numerics.INumber`1"))
+                        interfaces.Add("INumber");
+                    if (interfaceName.Contains("System.Numerics.IBinaryInteger`1"))
+                        interfaces.Add("IBinaryInteger");
+                    if (interfaceName.Contains("System.Numerics.IFloatingPoint`1"))
+                        interfaces.Add("IFloatingPoint");
+                    if (interfaceName.Contains("System.Numerics.INumberBase`1"))
+                        interfaces.Add("INumberBase");
+                    if (interfaceName.Contains("System.Numerics.IRootFunctions`1"))
+                        interfaces.Add("IRootFunctions");
+                    if (interfaceName.Contains("System.Numerics.ITrigonometricFunctions`1"))
+                        interfaces.Add("ITrigonometricFunctions");
+                    if (interfaceName.Contains("System.IEquatable`1"))
+                        interfaces.Add("IEquatable");
+                    if (interfaceName.Contains("System.IComparable"))
+                        interfaces.Add("IComparable");
+                }
+            }
+        }
+
+        return interfaces;
+    }
+
+    /// <summary>
+    /// Emit structural method bridges to satisfy numeric interface constraints.
+    /// These methods use PascalCase (matching C# interface definitions) while instance
+    /// methods use camelCase. This satisfies TypeScript's structural type checking.
+    /// Only emits methods for the specific interfaces actually implemented.
+    /// </summary>
+    private static void EmitNumericStructuralMethods(
+        StringBuilder sb,
+        TypeSymbol type,
+        HashSet<string> numericInterfaces,
+        TypeNameResolver resolver,
+        BuildContext ctx)
+    {
+        // Get the actual type name with generic parameters for use in signatures
+        var typeName = ctx.Renamer.GetFinalTypeName(type);
+        if (type.GenericParameters.Length > 0)
+        {
+            typeName += $"<{string.Join(", ", type.GenericParameters.Select(gp => gp.Name))}>";
+        }
+
+        // Determine if we're in System namespace (can use simple names)
+        var inSystemNamespace = type.Namespace == "System";
+
+        // Helper to get qualified type name
+        string Qualified(string simpleName)
+        {
+            if (inSystemNamespace)
+                return simpleName;
+            else
+                return $"import(\"../../System/internal/index\").{simpleName}";
+        }
+
+        // IEquatable<T>.Equals
+        if (numericInterfaces.Contains("IEquatable"))
+        {
+            sb.AppendLine($"    Equals(other: {typeName}): boolean;");
+        }
+
+        // IComparable.CompareTo
+        if (numericInterfaces.Contains("IComparable"))
+        {
+            sb.AppendLine("    CompareTo(obj: any): int;");
+        }
+
+        // INumberBase<TSelf>, INumber<TSelf>, IBinaryInteger<TSelf>, IFloatingPoint<TSelf>, etc.
+        // All require ToString and TryFormat
+        if (numericInterfaces.Contains("INumberBase") ||
+            numericInterfaces.Contains("INumber") ||
+            numericInterfaces.Contains("IBinaryInteger") ||
+            numericInterfaces.Contains("IFloatingPoint") ||
+            numericInterfaces.Contains("IRootFunctions") ||
+            numericInterfaces.Contains("ITrigonometricFunctions"))
+        {
+            sb.AppendLine($"    ToString(format: string, formatProvider: {Qualified("IFormatProvider")}): string;");
+            // TSByRef is from _support/types, so never qualify it
+            sb.AppendLine($"    TryFormat(destination: {Qualified("Span_1")}<{Qualified("CLROf")}<string>>, charsWritten: {{ value: TSByRef<int> }}, format: {Qualified("ReadOnlySpan_1")}<{Qualified("CLROf")}<string>>, provider: {Qualified("IFormatProvider")}): boolean;");
+        }
+
+        // IBinaryInteger<TSelf> - GetByteCount
+        if (numericInterfaces.Contains("IBinaryInteger"))
+        {
+            sb.AppendLine("    GetByteCount(): int;");
+        }
+
+        // IFloatingPoint<TSelf> - GetExponentByteCount, GetExponentShortestBitLength
+        if (numericInterfaces.Contains("IFloatingPoint"))
+        {
+            sb.AppendLine("    GetExponentByteCount(): int;");
+            sb.AppendLine("    GetExponentShortestBitLength(): int;");
+        }
     }
 
     /// <summary>
@@ -611,4 +763,5 @@ public static class InternalIndexEmitter
             _ => false
         };
     }
+
 }

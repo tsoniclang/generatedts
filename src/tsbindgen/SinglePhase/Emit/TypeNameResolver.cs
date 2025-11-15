@@ -53,9 +53,11 @@ public sealed class TypeNameResolver
     /// Wrapper for ResolveTypeName to provide consistent API.
     /// CRITICAL: Uses TypeMap to short-circuit built-in types BEFORE graph lookup.
     /// This prevents PG_LOAD_001 false positives for primitives.
-    /// TS2693 FIX: Qualifies value-imported types with namespace alias.
+    /// Distinguishes between type positions (signatures) and value positions (extends/implements).
     /// </summary>
-    public string For(NamedTypeReference named)
+    /// <param name="named">The type reference to resolve.</param>
+    /// <param name="forValuePosition">If true, this is for extends/implements (value position) - use qualified names to avoid TS2693.</param>
+    public string For(NamedTypeReference named, bool forValuePosition = false)
     {
         // 1. Try TypeMap FIRST (short-circuit built-in types before graph lookup)
         if (TypeMap.TryMapBuiltin(named.FullName, out var builtinType))
@@ -63,16 +65,27 @@ public sealed class TypeNameResolver
             return builtinType;
         }
 
-        // 2. TS2693 FIX: Check if this type needs qualification with namespace alias
+        // 2. Check if this type needs qualification with namespace alias
         //    This happens when the type is used as a value (base class/interface)
         if (_importPlan != null && _currentNamespace != null)
         {
             var clrFullName = named.FullName;
             if (_importPlan.ValueImportQualifiedNames.TryGetValue((_currentNamespace, clrFullName), out var qualifiedName))
             {
-                // This type was imported as a value and needs qualification
-                // Return qualified name: "System_Internal.Exception"
-                return qualifiedName;
+                // For common reflection types, prefer simple names in TYPE positions only
+                // In value positions (extends/implements), always use qualified names to avoid TS2693
+                if (!forValuePosition && ReflectionTypes.IsCommonReflectionType(clrFullName))
+                {
+                    // Type position (return type, parameter, property): use simple name
+                    // This prevents TS2416 errors when signatures need to match base class
+                    // Fall through to step 3
+                }
+                else
+                {
+                    // Value position OR non-reflection type: use qualified name
+                    // Return qualified name: "System_Reflection_Internal.MethodInfo"
+                    return qualifiedName;
+                }
             }
         }
 
@@ -141,6 +154,7 @@ public sealed class TypeNameResolver
 
         return finalName;
     }
+
 
     /// <summary>
     /// Get the TypeScript import alias for a namespace.

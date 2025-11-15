@@ -95,7 +95,9 @@ public static class ClassPrinter
         // Base class: extends BaseClass
         if (type.BaseType != null)
         {
-            var baseTypeName = TypeRefPrinter.Print(type.BaseType, resolver, ctx);
+            // Pass forValuePosition=true to use qualified names for reflection types
+            // This avoids TS2693 "type used as value" errors in extends clauses
+            var baseTypeName = TypeRefPrinter.Print(type.BaseType, resolver, ctx, allowedTypeParameterNames: null, forValuePosition: true);
             // TS2693 FIX (Same-Namespace): For same-namespace types with views, use instance class name
             baseTypeName = ApplyInstanceSuffixForSameNamespaceViews(baseTypeName, type.BaseType, type.Namespace, graph, ctx);
 
@@ -122,7 +124,8 @@ public static class ClassPrinter
             sb.Append(" implements ");
             var interfaceNames = publicInterfaces.Select(i =>
             {
-                var name = TypeRefPrinter.Print(i, resolver, ctx);
+                // Pass forValuePosition=true to use qualified names for reflection types
+                var name = TypeRefPrinter.Print(i, resolver, ctx, allowedTypeParameterNames: null, forValuePosition: true);
                 // TS2693 FIX (Same-Namespace): For same-namespace types with views, use instance class name
                 return ApplyInstanceSuffixForSameNamespaceViews(name, i, type.Namespace, graph, ctx);
             });
@@ -371,7 +374,7 @@ public static class ClassPrinter
             {
                 var exposures = group.ToList();
 
-                // PHASE 5 FIX: Only emit properties where we have an OWN (non-inherited) exposure
+                // Only emit properties where we have an OWN (non-inherited) exposure
                 // Inherited properties are automatically available through TypeScript's extends clause
                 // Re-declaring them causes TS2416 errors even if types are identical
                 var ownProperty = exposures.FirstOrDefault(e => !e.IsInherited);
@@ -439,7 +442,7 @@ public static class ClassPrinter
             {
                 var exposures = group.ToList();
 
-                // PHASE 5 FIX: Only emit OWN (non-inherited) methods
+                // Only emit OWN (non-inherited) methods
                 // Inherited methods are automatically available through TypeScript's extends clause
                 // Re-declaring them causes TS2416 errors even if types are identical
                 // EXCEPTION: Always emit methods that implement abstract base members (TS2654 fix)
@@ -450,7 +453,7 @@ public static class ClassPrinter
                     continue;
                 }
 
-                // PHASE 5.1 FIX (TS2654): Choose TsName carefully for abstract method implementations
+                // Choose TsName carefully for abstract method implementations
                 // If one of the overloads implements an abstract base method, use that TsName
                 // (it will have the correct name from the base, not a renamed collision-avoiding variant)
                 string tsName;

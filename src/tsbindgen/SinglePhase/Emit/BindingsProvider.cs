@@ -93,7 +93,7 @@ public sealed class BindingsProvider
         // Collect inherited methods from base classes
         CollectInheritedMethods(type, type, exposures);
 
-        // PHASE 1.1: Explicit override-wins deduplication
+        // Explicit override-wins deduplication
         // Group by (ClrName, TsSignatureId, IsStatic) and ensure only one exposure per signature
         var deduplicated = DeduplicateMethodExposures(type, exposures);
 
@@ -171,7 +171,7 @@ public sealed class BindingsProvider
                 // Derived type's version wins
                 winner = ownMethods[0];
 
-                // PHASE 5.1 FIX (TS2654): If overriding abstract base method, use base's TsName
+                // If overriding abstract base method, use base's TsName
                 // When Renamer adds numeric suffixes due to ViewOnly collisions (equals -> equals3),
                 // we must use the base abstract method's TsName so TypeScript sees the implementation
                 var inheritedMethods = candidates.Where(e => e.IsInherited).ToList();
@@ -213,7 +213,7 @@ public sealed class BindingsProvider
         if (!_graph.TryGetType(baseTypeRef.FullName, out var baseType) || baseType == null)
             return;
 
-        // PHASE 3.1: Cross-namespace inheritance now enabled
+        // Cross-namespace inheritance now enabled
         // Import planning (Phase 3.2) will handle types from other namespaces
 
         // Add ALL inherited ClassSurface methods (deduplication happens in DeduplicateMethodExposures)
@@ -262,7 +262,7 @@ public sealed class BindingsProvider
         // Collect inherited properties from base classes
         CollectInheritedProperties(type, type, exposures);
 
-        // PHASE 1.1: Explicit override-wins deduplication
+        // Explicit override-wins deduplication
         // Group by (ClrName, TsSignatureId, IsStatic) and ensure only one exposure per signature
         var deduplicated = DeduplicatePropertyExposures(type, exposures);
 
@@ -310,7 +310,7 @@ public sealed class BindingsProvider
                 // Derived type's version wins
                 winner = ownProperties[0];
 
-                // PHASE 5.1 FIX (TS2654): If overriding abstract base property, use base's TsName
+                // If overriding abstract base property, use base's TsName
                 // When Renamer adds numeric suffixes due to ViewOnly collisions,
                 // we must use the base abstract property's TsName so TypeScript sees the implementation
                 var inheritedProperties = candidates.Where(e => e.IsInherited).ToList();
@@ -352,7 +352,7 @@ public sealed class BindingsProvider
         if (!_graph.TryGetType(baseTypeRef.FullName, out var baseType) || baseType == null)
             return;
 
-        // PHASE 3.1: Cross-namespace inheritance now enabled
+        // Cross-namespace inheritance now enabled
         // Import planning (Phase 3.2) will handle types from other namespaces
 
         // Add ALL inherited ClassSurface properties (deduplication happens in DeduplicatePropertyExposures)
