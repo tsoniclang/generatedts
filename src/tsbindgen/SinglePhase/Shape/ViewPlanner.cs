@@ -240,32 +240,52 @@ public static class ViewPlanner
         // Build view name with type arguments for disambiguation
         var viewName = $"As_{baseName}";
 
-        // Add type arguments if generic
-        if (ifaceRef is NamedTypeReference { TypeArguments.Count: > 0 } namedType)
+        // TS2344 FIX: Skip type argument suffix for numeric self-referential interfaces
+        // These interfaces use TSelf pattern and including type args creates wrong names
+        var isNumericSelfReferentialInterface = baseName.StartsWith("I") && (
+            baseName.Contains("Number") ||
+            baseName.Contains("Binary") ||
+            baseName.Contains("Floating") ||
+            baseName.Contains("MinMaxValue") ||
+            baseName.Contains("Additive") ||
+            baseName.Contains("Multiplicative"));
+
+        // Add type arguments if generic (unless it's a numeric self-referential interface)
+        if (!isNumericSelfReferentialInterface &&
+            ifaceRef is NamedTypeReference { TypeArguments.Count: > 0 } namedType)
         {
             var typeArgNames = namedType.TypeArguments
                 .Select(arg => GetTypeArgumentName(arg))
+                .Where(name => name != null) // Filter out null (generic parameters)
                 .ToList();
 
-            viewName += "_of_" + string.Join("_and_", typeArgNames);
+            // Only add type argument suffix if we have concrete type arguments
+            if (typeArgNames.Count > 0)
+            {
+                viewName += "_of_" + string.Join("_and_", typeArgNames);
+            }
         }
 
         return viewName;
     }
 
-    private static string GetTypeArgumentName(TypeReference typeRef)
+    private static string? GetTypeArgumentName(TypeReference typeRef)
     {
         // Convert type reference to sanitized name for view naming
-        return typeRef switch
+        var result = typeRef switch
         {
             NamedTypeReference named => SanitizeTypeName(named.Name),
             NestedTypeReference nested => SanitizeTypeName(nested.NestedName),
-            GenericParameterReference gp => gp.Name, // Use parameter name directly (T, U, etc.)
+            // TS2344 FIX: Return null for generic parameters (TSelf, T, U, etc.)
+            // This prevents incorrect view names for self-referential interfaces
+            GenericParameterReference gp => null,
             ArrayTypeReference arr => GetTypeArgumentName(arr.ElementType) + "_array",
             PointerTypeReference ptr => GetTypeArgumentName(ptr.PointeeType) + "_ptr",
             ByRefTypeReference byref => GetTypeArgumentName(byref.ReferencedType) + "_ref",
             _ => "unknown"
         };
+
+        return result;
     }
 
     private static string SanitizeTypeName(string name)
