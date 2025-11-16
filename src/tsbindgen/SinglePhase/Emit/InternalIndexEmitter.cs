@@ -214,6 +214,34 @@ public static class InternalIndexEmitter
                 sb.AppendLine(indented);
                 sb.AppendLine();
 
+                // C.5.2 FIX: For interfaces without views, emit alias pointing to $instance
+                // This allows cross-namespace references like System.Collections.IEnumerable to work
+                // Example: export type IEnumerable = IEnumerable$instance;
+                // Only do this for interfaces - not for static classes, delegates, or enums
+                var finalName = ctx.Renamer.GetFinalTypeName(typeOrder.Type);
+                var instanceName = ctx.Renamer.GetInstanceTypeName(typeOrder.Type);
+                var isInterface = typeOrder.Type.Kind == Model.Symbols.TypeKind.Interface;
+                var isStaticClass = typesWithoutGenerics != null && typesWithoutGenerics.Contains(finalName);
+
+                // Only emit alias for interfaces that aren't static classes
+                if (isInterface && finalName != instanceName && !isStaticClass)
+                {
+                    sb.Append(indent);
+                    sb.Append("export type ");
+                    sb.Append(finalName);
+
+                    // Add type parameters if needed
+                    var typeArgs = AliasEmit.GenerateTypeArguments(typeOrder.Type);
+                    var typeParams = AliasEmit.GenerateTypeParametersWithConstraints(typeOrder.Type, resolver, ctx);
+                    sb.Append(typeParams);
+
+                    sb.Append(" = ");
+                    sb.Append(instanceName);
+                    sb.Append(typeArgs);
+                    sb.AppendLine(";");
+                    sb.AppendLine();
+                }
+
                 // PHASE-1 FIX: Collect type for top-level re-export
                 if (!isRoot)
                     topLevelExports.Add(typeOrder.Type);
