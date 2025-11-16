@@ -70,12 +70,9 @@ public static class ClassPrinter
     {
         var sb = new StringBuilder();
 
-        // Get final TypeScript name from Renamer
-        var finalName = ctx.Renamer.GetFinalTypeName(type);
-
-        // Add $instance suffix if requested (for companion views pattern)
-        if (instanceSuffix)
-            finalName += "$instance";
+        // STEP 1: Always use instance type name for classes
+        // instanceSuffix parameter kept for compatibility but ignored - we always use $instance now
+        var finalName = ctx.Renamer.GetInstanceTypeName(type);
 
         // Class modifiers and declaration
         if (type.IsAbstract)
@@ -147,11 +144,9 @@ public static class ClassPrinter
         // Structs emit as classes in TypeScript (with metadata noting value semantics)
         var sb = new StringBuilder();
 
-        var finalName = ctx.Renamer.GetFinalTypeName(type);
-
-        // Add $instance suffix if requested (for companion views pattern)
-        if (instanceSuffix)
-            finalName += "$instance";
+        // STEP 1: Always use instance type name for structs
+        // instanceSuffix parameter kept for compatibility but ignored - we always use $instance now
+        var finalName = ctx.Renamer.GetInstanceTypeName(type);
 
         sb.Append("class ");
         sb.Append(finalName);
@@ -194,7 +189,8 @@ public static class ClassPrinter
         // Instead, we lift class generic parameters to method-level generics in EmitStaticMembers.
         var sb = new StringBuilder();
 
-        var finalName = ctx.Renamer.GetFinalTypeName(type);
+        // STEP 1: Use instance type name for static classes too (they're still classes)
+        var finalName = ctx.Renamer.GetInstanceTypeName(type);
 
         // TS2315 FIX: Track types that had generics in CLR but are emitted without them
         // This prevents convenience export aliases from referencing them with type parameters
@@ -299,7 +295,8 @@ public static class ClassPrinter
     {
         var sb = new StringBuilder();
 
-        var finalName = ctx.Renamer.GetFinalTypeName(type);
+        // STEP 1: Use instance type name for interfaces
+        var finalName = ctx.Renamer.GetInstanceTypeName(type);
 
         sb.Append("interface ");
         sb.Append(finalName);
@@ -1273,6 +1270,13 @@ public static class ClassPrinter
             // Type has views - return instance class name
             // The type alias "SafeHandle" exists at module level but isn't accessible as a value
             // inside namespace declarations. Must use "SafeHandle$instance".
+
+            // TS2693 FIX: Check if $instance is already present (from TypeNameResolver qualification)
+            // Don't double-add $instance suffix
+            if (resolvedName.Contains("$instance"))
+            {
+                return resolvedName; // Already has $instance suffix
+            }
 
             // CRITICAL: If the resolved name contains generic arguments (e.g., "Foo<T>"),
             // we need to insert $instance BEFORE the '<', not at the end:

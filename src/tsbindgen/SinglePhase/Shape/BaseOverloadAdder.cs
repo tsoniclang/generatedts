@@ -40,10 +40,15 @@ public static class BaseOverloadAdder
             .Where(t => t.Kind == TypeKind.Class && t.BaseType != null)
             .ToList();
 
+        // FIX TS2416: Sort classes by inheritance depth (base classes first)
+        // This ensures base classes get their BaseOverload methods added before derived classes look for them
+        var sortedClasses = SortByInheritanceDepth(graph, classes);
+
         int totalAdded = 0;
         var updatedGraph = graph;
 
-        foreach (var derivedClass in classes)
+
+        foreach (var derivedClass in sortedClasses)
         {
             var (newGraph, added) = AddOverloadsForClass(ctx, updatedGraph, derivedClass);
             updatedGraph = newGraph;
@@ -52,6 +57,90 @@ public static class BaseOverloadAdder
 
         ctx.Log("BaseOverloadAdder", $"Added {totalAdded} base overloads");
         return updatedGraph;
+    }
+
+    /// <summary>
+    /// Sort classes by inheritance depth (base classes first, derived classes later).
+    /// This ensures base classes get their BaseOverload methods added before derived classes look for them.
+    /// </summary>
+    private static List<TypeSymbol> SortByInheritanceDepth(SymbolGraph graph, List<TypeSymbol> classes)
+    {
+        // Calculate depth for each class (0 = no base class in graph, 1 = base has no base class, etc.)
+        var depthMap = new Dictionary<string, int>();
+
+        int GetDepth(TypeSymbol type)
+        {
+            if (depthMap.TryGetValue(type.ClrFullName, out var cached))
+                return cached;
+
+            if (type.BaseType == null)
+            {
+                depthMap[type.ClrFullName] = 0;
+                return 0;
+            }
+
+            // Try to find base class in graph
+            var baseTypeRef = type.BaseType as Model.Types.NamedTypeReference;
+            if (baseTypeRef != null && graph.TryGetType(baseTypeRef.FullName, out var baseType) && baseType != null)
+            {
+                // Base class is in graph, recurse
+                var depth = 1 + GetDepth(baseType);
+                depthMap[type.ClrFullName] = depth;
+                return depth;
+            }
+            else
+            {
+                // Base class is external (e.g., System.Object) - depth is 0
+                depthMap[type.ClrFullName] = 0;
+                return 0;
+            }
+        }
+
+        // Calculate depths
+        foreach (var cls in classes)
+        {
+            GetDepth(cls);
+        }
+
+        // Sort by depth (ascending - base classes first)
+        return classes.OrderBy(c => depthMap[c.ClrFullName]).ToList();
+    }
+
+    /// <summary>
+    /// Collect all methods from the base class hierarchy.
+    /// Groups methods by name, collecting all overloads across the entire inheritance chain.
+    /// </summary>
+    private static Dictionary<string, List<MethodSymbol>> CollectHierarchyMethods(SymbolGraph graph, TypeSymbol baseClass)
+    {
+        var allMethods = new List<MethodSymbol>();
+        var visited = new HashSet<string>();  // Track visited types to avoid cycles
+
+        void WalkHierarchy(TypeSymbol currentClass)
+        {
+            if (visited.Contains(currentClass.ClrFullName))
+                return;
+            visited.Add(currentClass.ClrFullName);
+
+            // Add this class's methods
+            allMethods.AddRange(currentClass.Members.Methods.Where(m => !m.IsStatic));
+
+            // Recurse to base class
+            if (currentClass.BaseType != null)
+            {
+                var baseTypeRef = currentClass.BaseType as Model.Types.NamedTypeReference;
+                if (baseTypeRef != null && graph.TryGetType(baseTypeRef.FullName, out var nextBase) && nextBase != null)
+                {
+                    WalkHierarchy(nextBase);
+                }
+            }
+        }
+
+        WalkHierarchy(baseClass);
+
+        // Group by method name
+        return allMethods
+            .GroupBy(m => m.ClrName)
+            .ToDictionary(g => g.Key, g => g.ToList());
     }
 
     private static (SymbolGraph UpdatedGraph, int AddedCount) AddOverloadsForClass(BuildContext ctx, SymbolGraph graph, TypeSymbol derivedClass)
@@ -70,12 +159,15 @@ public static class BaseOverloadAdder
             .GroupBy(m => m.ClrName)
             .ToDictionary(g => g.Key, g => g.ToList());
 
-        var baseMethodsByName = baseClass.Members.Methods
-            .Where(m => !m.IsStatic)
-            .GroupBy(m => m.ClrName)
-            .ToDictionary(g => g.Key, g => g.ToList());
+        // FIX TS2416: Collect methods from ENTIRE base class hierarchy, not just immediate base
+        // Example: ArrayConverter overrides TypeConverter.getPropertiesSupported(context)
+        //          but TypeConverter also has getPropertiesSupported() without params
+        //          CollectionConverter (immediate base) doesn't override either
+        //          We need to find the parameterless overload from TypeConverter
+        var baseMethodsByName = CollectHierarchyMethods(graph, baseClass);
 
         var addedMethods = new List<MethodSymbol>();
+
 
         // For each base method name, check if derived has all the same overloads
         // Sort by method name for deterministic iteration

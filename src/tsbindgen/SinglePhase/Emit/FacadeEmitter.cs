@@ -125,12 +125,11 @@ public static class FacadeEmitter
                     }
 
                     // FACADE CONSTRAINTS: Use unified alias emitter with constraints
-                    // Export types by referencing Internal namespace
-                    // CRITICAL: Always use Internal.{ns.Name}.{export.ExportName} for non-root
-                    // This ensures we're referencing the actual location in internal/index.d.ts
-                    var rhsBase = ns.IsRoot
-                        ? $"Internal.{export.ExportName}"
-                        : $"Internal.{ns.Name}.{export.ExportName}";
+                    // STEP 1 RE-EXPORT FIX: Reference the top-level type aliases from internal/index.d.ts
+                    // internal/index.d.ts exports: export type Console = Internal.Console$instance;
+                    // So facade should use: Internal.Console (the top-level alias, not Internal.Internal.Console)
+                    // This follows Option A from architect spec: facade points through top-level aliases
+                    var rhsBase = $"Internal.{export.ExportName}";
 
                     AliasEmit.EmitGenericAlias(
                         sb,

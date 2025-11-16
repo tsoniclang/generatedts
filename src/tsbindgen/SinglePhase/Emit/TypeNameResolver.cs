@@ -36,7 +36,11 @@ public sealed class TypeNameResolver
     /// </summary>
     public string For(Model.Symbols.TypeSymbol type)
     {
-        return _ctx.Renamer.GetFinalTypeName(type);
+        // TS2416 FIX: Use ALIAS name for type positions (properties, parameters, returns, constraints)
+        // The alias includes views union: Foo_ = Foo_$instance | __Foo_$views
+        // This ensures signatures match across inheritance hierarchy
+        // Example: readonly module_: Module_ (not Module_$instance)
+        return type.TsEmitName;
     }
 
     /// <summary>
@@ -94,7 +98,6 @@ public sealed class TypeNameResolver
 
         if (!_graph.TypeIndex.TryGetValue(stableId, out var typeSymbol))
         {
-            _ctx.Log("TypeNameResolver", $"External type (not in graph): {stableId}");
             // Type not in graph - this is an EXTERNAL type from another assembly
             // Use the CLR name as-is (it will be in imports if needed)
 
@@ -125,6 +128,16 @@ public sealed class TypeNameResolver
             var result = TypeScriptReservedWords.Sanitize(sanitized);
             var finalExternalName = result.Sanitized;
 
+            // TS2693 FIX (Same-Namespace External): For value positions with same-namespace external types,
+            // qualify with namespace AND add $instance to avoid top-level type alias collision.
+            // Example: ValidationAttribute from System.ComponentModel.Annotations assembly appears in
+            // System.ComponentModel.DataAnnotations namespace alongside its subclasses.
+            // NOTE: ApplyInstanceSuffixForSameNamespaceViews can't add $instance (type not in graph)
+            if (forValuePosition && _currentNamespace != null && externalNamespace == _currentNamespace)
+            {
+                return $"{externalNamespace}.{finalExternalName}$instance";
+            }
+
             // TS2304 FIX (Facade): Qualify external cross-namespace types in facade mode
             if (_facadeMode && _currentNamespace != null && externalNamespace != _currentNamespace && !string.IsNullOrEmpty(externalNamespace))
             {
@@ -136,9 +149,37 @@ public sealed class TypeNameResolver
         }
 
         // 4. Get final TypeScript name from Renamer (single source of truth)
-        var finalName = _ctx.Renamer.GetFinalTypeName(typeSymbol);
+        // TS2416 FIX: Type positions use ALIAS (e.g., Module_ = Module_$instance | __Module_$views)
+        //             Value positions use INSTANCE (e.g., Module_$instance)
+        // This ensures signatures match across inheritance hierarchy.
+        string finalName;
+        if (forValuePosition)
+        {
+            // VALUE POSITION (extends/implements): Use instance type name
+            // Example: extends Foo_$instance
+            finalName = _ctx.Renamer.GetInstanceTypeName(typeSymbol);
 
-        // 5. TS2304 FIX (Facade): In facade mode, qualify cross-namespace types with namespace alias
+            // TS2693 FIX: Qualify with namespace to avoid collision with top-level type aliases
+            // Example: Inside "namespace Foo {}", "extends Bar" could resolve to:
+            // - Top-level alias "export type Bar = Foo.Bar$instance" (type-only - TS2693!)
+            // - Or the actual class "Foo.Bar$instance" (value - correct)
+            // Solution: Always use "extends Foo.Bar$instance" in value positions
+            if (!string.IsNullOrEmpty(typeSymbol.Namespace))
+            {
+                // Value position: qualify with namespace to avoid alias collision
+                return $"{typeSymbol.Namespace}.{finalName}";
+            }
+        }
+        else
+        {
+            // TYPE POSITION (properties, parameters, returns, constraints): Use alias name
+            // Example: readonly foo: Module_ (not Module_$instance)
+            // The alias includes the views union: Module_ = Module_$instance | __Module_$views
+            // This ensures derived class properties match base class property types
+            finalName = typeSymbol.TsEmitName;
+        }
+
+        // 6. TS2304 FIX (Facade): In facade mode, qualify cross-namespace types with namespace alias
         //    This prevents "Cannot find name 'IEquatable_1'" errors in facade constraint clauses
         if (_facadeMode && _currentNamespace != null)
         {
@@ -148,10 +189,13 @@ public sealed class TypeNameResolver
                 // Cross-namespace reference in facade - must qualify
                 // Convert "System.Runtime.InteropServices" → "System_Runtime_InteropServices"
                 var namespaceAlias = GetNamespaceAlias(targetNamespace);
-                return $"{namespaceAlias}.{finalName}";
+                var facadeQualified = $"{namespaceAlias}.{finalName}";
+                _ctx.Log("TypeNameResolver", $"  → Facade mode cross-namespace: {facadeQualified}");
+                return facadeQualified;
             }
         }
 
+        _ctx.Log("TypeNameResolver", $"  → Returning unqualified: {finalName}");
         return finalName;
     }
 

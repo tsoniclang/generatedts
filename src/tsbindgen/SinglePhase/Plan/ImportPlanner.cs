@@ -161,20 +161,17 @@ public static class ImportPlanner
 
                 if (!string.IsNullOrEmpty(clrName))
                 {
-                    // TS2339 FIX: Use instance class name for types with views
-                    // Types with views emit as: Exception$instance + type alias Exception
+                    // STEP 1 RE-EXPORT FIX: Use instance type name for all class-like types
+                    // All classes/interfaces/structs emit as T$instance (not just those with views)
                     // Heritage clauses need the INSTANCE CLASS (value), not type alias
                     string emittedName = ti.TypeName;
 
-                    // Check if this type has views by looking it up in the graph
+                    // Check if this type exists in the graph to get correct instance name
                     if (graph.TryGetType(clrName, out var targetType) && targetType != null)
                     {
-                        // If type has explicit views, use $instance suffix
-                        if (targetType.ExplicitViews.Length > 0 &&
-                            (targetType.Kind == Model.Symbols.TypeKind.Class || targetType.Kind == Model.Symbols.TypeKind.Struct))
-                        {
-                            emittedName = $"{ti.TypeName}$instance";
-                        }
+                        // STEP 1: Use GetInstanceTypeName for all classes/interfaces/structs
+                        // This includes $instance suffix for all except enums/delegates
+                        emittedName = ctx.Renamer.GetInstanceTypeName(targetType, Renaming.NamespaceArea.Internal);
                     }
 
                     // TS2339 FIX: Qualified name must include the target namespace

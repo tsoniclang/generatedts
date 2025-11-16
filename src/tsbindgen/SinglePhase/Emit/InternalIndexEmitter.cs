@@ -241,7 +241,12 @@ public static class InternalIndexEmitter
                 // INTERNAL CONSTRAINTS: Emit type aliases with generic constraints preserved
                 foreach (var type in sortedExports)
                 {
-                    var typeName = ctx.Renamer.GetFinalTypeName(type);
+                    // STEP 1 RE-EXPORT FIX (Updated for views):
+                    // - LHS (aliasName): Use bare stem for user-friendly name (e.g., "Console", "List_1")
+                    // - RHS (rhsExpression): Depends on whether type has views:
+                    //   * WITH views: Use alias (Module_ = Module_$instance & __Module_$views)
+                    //   * WITHOUT views: Use instance name (Console$instance)
+                    var typeName = ctx.Renamer.GetFinalTypeName(type);  // Bare stem for alias
 
                     // TS2315 FIX: Skip convenience exports for types that lost their generics during emission
                     // These are static classes with generic static members - emitted as non-generic classes
@@ -251,13 +256,20 @@ public static class InternalIndexEmitter
                         continue;
                     }
 
-                    // Use unified alias emitter with constraints
+                    // TS2416 FIX: Determine which name to reference based on views
+                    // Types WITH views have an alias inside the namespace (Foo = Foo$instance & __Foo$views)
+                    // Types WITHOUT views only have the instance type (Foo$instance)
+                    var hasViews = type.ExplicitViews.Length > 0 &&
+                                   (type.Kind == Model.Symbols.TypeKind.Class || type.Kind == Model.Symbols.TypeKind.Struct);
+                    var rhsTypeName = hasViews ? typeName : ctx.Renamer.GetInstanceTypeName(type);
+
                     // Emit: export type Foo<T extends IFoo> = Namespace.Foo<T>;
+                    //   or: export type Foo<T extends IFoo> = Namespace.Foo$instance<T>;
                     AliasEmit.EmitGenericAlias(
                         sb,
                         aliasName: typeName,
                         sourceType: type,
-                        rhsExpression: $"{nsOrder.Namespace.Name}.{typeName}",
+                        rhsExpression: $"{nsOrder.Namespace.Name}.{rhsTypeName}",
                         resolver,
                         ctx,
                         withConstraints: true); // Internal convenience exports preserve constraints

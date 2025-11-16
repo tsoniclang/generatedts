@@ -141,11 +141,54 @@ public sealed class SymbolRenamer
     /// <summary>
     /// Get the final TypeScript name for a type (SAFE API - use this).
     /// Automatically derives the correct namespace scope from the type.
+    /// This is the "stem" name - variants like T$instance, T$static build on top of this.
     /// </summary>
     public string GetFinalTypeName(TypeSymbol type, NamespaceArea area = NamespaceArea.Internal)
     {
         var nsScope = ScopeFactory.Namespace(type.Namespace, area);
         return GetFinalTypeNameCore(type.StableId, nsScope);
+    }
+
+    /// <summary>
+    /// Get the instance type name for a CLR type (e.g., "List_1$instance").
+    /// Used for class declarations and instance type references.
+    /// Enums and delegates don't get the suffix (they're already type+value in TS).
+    /// </summary>
+    public string GetInstanceTypeName(TypeSymbol type, NamespaceArea area = NamespaceArea.Internal)
+    {
+        var stem = GetFinalTypeName(type, area);
+
+        // Enums are both type and value in TypeScript - no $instance split
+        if (type.Kind == TypeKind.Enum)
+            return stem;
+
+        // Delegates are emitted as function types/aliases - no $instance split
+        if (type.Kind == TypeKind.Delegate)
+            return stem;
+
+        // All other types (class, struct, interface) get $instance suffix
+        return stem + "$instance";
+    }
+
+    /// <summary>
+    /// Get the static interface name for a CLR type (e.g., "List_1$static").
+    /// Used for static surface interfaces.
+    /// </summary>
+    public string GetStaticInterfaceName(TypeSymbol type, NamespaceArea area = NamespaceArea.Internal)
+    {
+        var stem = GetFinalTypeName(type, area);
+        return stem + "$static";
+    }
+
+    /// <summary>
+    /// Get the static value name for a CLR type (e.g., "List_1").
+    /// This is the runtime value symbol - the bare stem name.
+    /// Used for "export const T: T$static" declarations.
+    /// </summary>
+    public string GetStaticValueName(TypeSymbol type, NamespaceArea area = NamespaceArea.Internal)
+    {
+        // The value symbol stays exactly the stem
+        return GetFinalTypeName(type, area);
     }
 
     /// <summary>

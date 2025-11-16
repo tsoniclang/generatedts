@@ -45,7 +45,8 @@ internal static class Types
             }
 
             // Compare what resolver produces vs what renamer says
-            var renamerName = ctx.Renamer.GetFinalTypeName(targetType);
+            // TS2416 FIX: Both should use ALIAS names (type positions)
+            var renamerName = targetType.TsEmitName; // Alias name
             var resolverName = resolver.For(named);
 
             if (!string.Equals(renamerName, resolverName, StringComparison.Ordinal))
@@ -99,8 +100,11 @@ internal static class Types
                 var typeId = $"{ns.Name}.{type.ClrFullName}";
 
                 // 1. Validate the type identifier itself (quick sanity check)
-                var renamerName = ctx.Renamer.GetFinalTypeName(type);
-                var resolverName = resolver.For(type);
+                // TS2416 FIX: Both should use ALIAS names (type positions)
+                // Alias = public type name (includes views union)
+                // Instance = internal class name (Foo_$instance)
+                var renamerName = type.TsEmitName; // Alias name
+                var resolverName = resolver.For(type); // Also returns alias now
                 if (renamerName != resolverName)
                 {
                     validationCtx.RecordDiagnostic(
