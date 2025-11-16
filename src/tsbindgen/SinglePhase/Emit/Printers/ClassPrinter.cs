@@ -32,11 +32,17 @@ public static class ClassPrinter
             return string.Empty;
         }
 
+        // TS2315 FIX: Route static classes (including abstract ones with static members) to PrintStaticClass
+        // This handles both StaticNamespace and Class types that are marked as static
+        if (type.IsStatic || type.Kind == TypeKind.StaticNamespace)
+        {
+            return PrintStaticClass(type, resolver, ctx, typesWithoutGenerics);
+        }
+
         return type.Kind switch
         {
             TypeKind.Class => PrintClass(type, resolver, ctx, graph, bindingsProvider: bindingsProvider),
             TypeKind.Struct => PrintStruct(type, resolver, ctx, graph, bindingsProvider: bindingsProvider),
-            TypeKind.StaticNamespace => PrintStaticClass(type, resolver, ctx, typesWithoutGenerics),
             TypeKind.Enum => PrintEnum(type, ctx),
             TypeKind.Delegate => PrintDelegate(type, resolver, ctx),
             TypeKind.Interface => PrintInterface(type, resolver, ctx),
@@ -194,10 +200,12 @@ public static class ClassPrinter
 
         // TS2315 FIX: Track types that had generics in CLR but are emitted without them
         // This prevents convenience export aliases from referencing them with type parameters
+        // NOTE: Track using bare stem (without $instance) to match InternalIndexEmitter check
         if (typesWithoutGenerics != null && type.GenericParameters.Length > 0)
         {
-            typesWithoutGenerics.Add(finalName);
-            ctx.Log("TS2315Fix", $"Tracking type without generics: {finalName} (CLR had {type.GenericParameters.Length} generic parameters)");
+            var bareStem = ctx.Renamer.GetFinalTypeName(type);  // Bare stem without $instance suffix
+            typesWithoutGenerics.Add(bareStem);
+            ctx.Log("TS2315Fix", $"Tracking type without generics: {bareStem} (CLR had {type.GenericParameters.Length} generic parameters)");
         }
 
         sb.Append("abstract class ");
