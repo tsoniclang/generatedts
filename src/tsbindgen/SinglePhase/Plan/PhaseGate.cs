@@ -86,6 +86,11 @@ public static class PhaseGate
         // Numeric suffixes in CLR names are legitimate, not collision-resolution artifacts
         // Names.ValidateNoNumericSuffixesOnSurface(ctx, graph, validationContext);
 
+        // PhaseGate Hardening - M6b: Alias/instance naming pattern (PG_NAME_ALIAS_001)
+        // Validates Step B invariants: type positions use aliases, value positions use instances
+        // Ensures universal T$instance naming is applied consistently across all classes/structs
+        Names.ValidateAliasInstancePattern(ctx, graph, validationContext);
+
         // PhaseGate Hardening - M7: Printer name consistency (PG_PRINT_001)
         // Validates TypeRefPrinter→TypeNameResolver→Renamer chain integrity
         Types.ValidatePrinterNameConsistency(ctx, graph, validationContext);

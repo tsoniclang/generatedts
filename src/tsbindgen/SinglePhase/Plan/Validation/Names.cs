@@ -904,4 +904,87 @@ internal static class Names
 
         ctx.Log("[PG]", $"PG_NAME_SURF_002: Checked {totalMembersChecked} members, found {numericSuffixes} numeric suffixes");
     }
+
+    /// <summary>
+    /// PG_NAME_ALIAS_001: Validate alias/instance naming pattern consistency.
+    /// Ensures Step B invariants hold:
+    /// 1. Type positions use ALIAS names (T_)
+    /// 2. Value positions use INSTANCE names (T_$instance, qualified)
+    /// 3. Types with views follow the T_ = T_$instance &amp; __T_$views pattern
+    /// </summary>
+    internal static void ValidateAliasInstancePattern(BuildContext ctx, SymbolGraph graph, ValidationContext validationCtx)
+    {
+        ctx.Log("[PG]", "PG_NAME_ALIAS_001: Validating alias/instance naming pattern...");
+
+        int totalTypesChecked = 0;
+        int aliasViolations = 0;
+        int instanceViolations = 0;
+
+        foreach (var ns in graph.Namespaces)
+        {
+            foreach (var type in ns.Types)
+            {
+                totalTypesChecked++;
+
+                // Get naming components from Renamer
+                var aliasName = ctx.Renamer.GetFinalTypeName(type);  // Public alias (T_)
+                var instanceName = ctx.Renamer.GetInstanceTypeName(type);  // Instance class (T_$instance)
+                var tsEmitName = type.TsEmitName;  // Should equal alias
+
+                // Invariant 1: TsEmitName should equal the alias (GetFinalTypeName)
+                if (tsEmitName != aliasName)
+                {
+                    validationCtx.RecordDiagnostic(
+                        DiagnosticCodes.ValidationFailed,
+                        "ERROR",
+                        $"[PG_NAME_ALIAS_001] Type {type.ClrFullName}: TsEmitName '{tsEmitName}' != alias '{aliasName}'");
+                    aliasViolations++;
+                }
+
+                // Invariant 2: For classes/structs with views, instance name should use $instance suffix
+                if (type.Kind == TypeKind.Class || type.Kind == TypeKind.Struct)
+                {
+                    var hasViews = type.ExplicitViews.Length > 0;
+
+                    if (hasViews)
+                    {
+                        // Instance name should have $instance suffix
+                        if (!instanceName.EndsWith("$instance"))
+                        {
+                            validationCtx.RecordDiagnostic(
+                                DiagnosticCodes.ValidationFailed,
+                                "ERROR",
+                                $"[PG_NAME_ALIAS_001] Type {type.ClrFullName} has views but instance name '{instanceName}' doesn't end with '$instance'");
+                            instanceViolations++;
+                        }
+
+                        // Alias should NOT have $instance suffix (it's the public name)
+                        if (aliasName.EndsWith("$instance"))
+                        {
+                            validationCtx.RecordDiagnostic(
+                                DiagnosticCodes.ValidationFailed,
+                                "ERROR",
+                                $"[PG_NAME_ALIAS_001] Type {type.ClrFullName} has views but alias '{aliasName}' ends with '$instance' (should be bare name)");
+                            aliasViolations++;
+                        }
+                    }
+                }
+
+                // Invariant 3: All classes/structs should use $instance pattern (universal T$instance naming)
+                if (type.Kind == TypeKind.Class || type.Kind == TypeKind.Struct)
+                {
+                    if (!instanceName.EndsWith("$instance"))
+                    {
+                        validationCtx.RecordDiagnostic(
+                            DiagnosticCodes.ValidationFailed,
+                            "ERROR",
+                            $"[PG_NAME_ALIAS_001] Type {type.ClrFullName} (class/struct) instance name '{instanceName}' doesn't end with '$instance' (universal naming violated)");
+                        instanceViolations++;
+                    }
+                }
+            }
+        }
+
+        ctx.Log("[PG]", $"PG_NAME_ALIAS_001: Checked {totalTypesChecked} types, found {aliasViolations} alias violations, {instanceViolations} instance violations");
+    }
 }
