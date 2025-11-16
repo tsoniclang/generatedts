@@ -307,13 +307,18 @@ public static class SinglePhaseBuilder
         ctx.Log("Build", "\n--- Phase 4.8: Static Conflict Detection ---");
         var staticConflicts = Shape.StaticConflictDetector.Plan(ctx, graph);
 
+        // D3: Detect instance member override conflicts between base/derived classes
+        ctx.Log("Build", "\n--- Phase 4.9: Override Conflict Detection ---");
+        var overrideConflicts = Shape.OverrideConflictDetector.Plan(ctx, graph);
+
         return new EmissionPlan
         {
             Graph = graph,
             Imports = imports,
             EmissionOrder = order,
             StaticFlattening = staticFlattening,
-            StaticConflicts = staticConflicts
+            StaticConflicts = staticConflicts,
+            OverrideConflicts = overrideConflicts
         };
     }
 
@@ -427,6 +432,11 @@ public sealed record EmissionPlan
     /// D2: Plan for suppressing conflicting static members to eliminate TS2417 errors.
     /// </summary>
     public required Shape.StaticConflictPlan StaticConflicts { get; init; }
+
+    /// <summary>
+    /// D3: Plan for suppressing conflicting instance member overrides to eliminate TS2416 errors.
+    /// </summary>
+    public required Shape.OverrideConflictPlan OverrideConflicts { get; init; }
 
     public int NamespaceCount => Graph.Namespaces.Length;
 }
