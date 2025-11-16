@@ -263,6 +263,19 @@ public static class InternalIndexEmitter
                                    (type.Kind == Model.Symbols.TypeKind.Class || type.Kind == Model.Symbols.TypeKind.Struct);
                     var rhsTypeName = hasViews ? typeName : ctx.Renamer.GetInstanceTypeName(type);
 
+                    // STEP A.2 VALIDATION: Re-export correctness assertions
+                    // Ensures views-based re-export logic is working correctly
+                    if (hasViews && rhsTypeName.Contains("$instance"))
+                    {
+                        throw new InvalidOperationException(
+                            $"[RE-EXPORT BUG] Type {type.ClrFullName} has views but re-export uses instance name '{rhsTypeName}' instead of alias '{typeName}'");
+                    }
+                    if (!hasViews && !rhsTypeName.Contains("$instance") && (type.Kind == Model.Symbols.TypeKind.Class || type.Kind == Model.Symbols.TypeKind.Struct))
+                    {
+                        throw new InvalidOperationException(
+                            $"[RE-EXPORT BUG] Type {type.ClrFullName} has no views but re-export uses alias '{rhsTypeName}' instead of instance name");
+                    }
+
                     // Emit: export type Foo<T extends IFoo> = Namespace.Foo<T>;
                     //   or: export type Foo<T extends IFoo> = Namespace.Foo$instance<T>;
                     AliasEmit.EmitGenericAlias(
