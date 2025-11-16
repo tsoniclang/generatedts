@@ -690,15 +690,27 @@ public static class ClassPrinter
         {
             sb.Append(" extends ");
 
-            if (gp.Constraints.Length == 1)
+            // TS2344 FIX: Filter out "any" from constraints
+            // C# value type constraints (struct, unmanaged) can't be represented in TS and emit as "any"
+            // "any & IFoo" is invalid - just use "IFoo"
+            var printedConstraints = gp.Constraints
+                .Select(c => TypeRefPrinter.Print(c, resolver, ctx))
+                .Where(c => c != "any" && c != "unknown")  // Filter out fallback types
+                .ToArray();
+
+            if (printedConstraints.Length == 0)
             {
-                sb.Append(TypeRefPrinter.Print(gp.Constraints[0], resolver, ctx));
+                // All constraints were "any" - just use "any"
+                sb.Append("any");
+            }
+            else if (printedConstraints.Length == 1)
+            {
+                sb.Append(printedConstraints[0]);
             }
             else
             {
                 // Multiple constraints: T extends IFoo & IBar
-                var constraints = gp.Constraints.Select(c => TypeRefPrinter.Print(c, resolver, ctx));
-                sb.Append(string.Join(" & ", constraints));
+                sb.Append(string.Join(" & ", printedConstraints));
             }
         }
 
