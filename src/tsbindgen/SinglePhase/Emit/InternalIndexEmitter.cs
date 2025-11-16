@@ -417,11 +417,15 @@ public static class InternalIndexEmitter
         // Companion interface: __TypeName$views<...>
         sb.Append($"interface __{finalName}$views");
 
-        // Generic parameters
+        // TS2344 FIX: Generic parameters WITH CONSTRAINTS
+        // View interface must have same constraints as the type alias
+        // Otherwise: type Foo<T extends IBar<T>> = Foo$instance<T> & __Foo$views<T>
+        // fails because __Foo$views<T> doesn't have the constraint
         if (type.GenericParameters.Length > 0)
         {
             sb.Append('<');
-            sb.Append(string.Join(", ", type.GenericParameters.Select(gp => gp.Name)));
+            sb.Append(string.Join(", ", type.GenericParameters.Select(gp =>
+                PrintGenericParameterWithConstraints(gp, resolver, ctx))));
             sb.Append('>');
         }
 
@@ -439,10 +443,15 @@ public static class InternalIndexEmitter
             var matchedInterface = FindMatchingInterface(type, view.InterfaceReference);
             var interfaceToEmit = matchedInterface ?? view.InterfaceReference;
 
+            // TS2344 FIX: Detect numeric self-referential interfaces and omit type arguments
+            // to avoid circular constraint checking during type definition
+            var isNumericSelfReferential = IsNumericSelfReferentialInterface(interfaceToEmit);
+
             // TS2304 FIX: View interfaces need namespace qualification
             // Some view interfaces (like IEnumerable) are transitively implemented and not in
             // ValueImportQualifiedNames, so we need to manually qualify cross-namespace types
-            var viewTypeName = QualifyViewInterface(interfaceToEmit, type.Namespace, resolver, ctx);
+            var viewTypeName = QualifyViewInterface(interfaceToEmit, type.Namespace, resolver, ctx,
+                omitTypeArguments: isNumericSelfReferential);
             sb.Append(viewTypeName);
             sb.AppendLine(";");
         }
@@ -586,6 +595,63 @@ public static class InternalIndexEmitter
     }
 
     /// <summary>
+    /// Print a generic parameter with its constraints for use in type declarations.
+    /// E.g., "T extends IFoo & IBar"
+    /// </summary>
+    private static string PrintGenericParameterWithConstraints(
+        Model.Symbols.GenericParameterSymbol gp,
+        TypeNameResolver resolver,
+        BuildContext ctx)
+    {
+        var sb = new StringBuilder();
+        sb.Append(gp.Name);
+
+        // Add constraints
+        if (gp.Constraints.Length > 0)
+        {
+            sb.Append(" extends ");
+
+            if (gp.Constraints.Length == 1)
+            {
+                sb.Append(Printers.TypeRefPrinter.Print(gp.Constraints[0], resolver, ctx));
+            }
+            else
+            {
+                // Multiple constraints: T extends IFoo & IBar
+                var constraints = gp.Constraints.Select(c =>
+                    Printers.TypeRefPrinter.Print(c, resolver, ctx));
+                sb.Append(string.Join(" & ", constraints));
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// TS2344 FIX: Detect numeric self-referential interfaces that use TSelf pattern.
+    /// These interfaces have circular constraints (TSelf extends IFoo<TSelf>) which cause
+    /// TypeScript to fail constraint checking during type definition.
+    /// </summary>
+    private static bool IsNumericSelfReferentialInterface(Model.Types.TypeReference interfaceRef)
+    {
+        if (interfaceRef is not Model.Types.NamedTypeReference named)
+            return false;
+
+        var baseName = named.Name;
+
+        // Check if it's a numeric interface with self-referential constraint pattern
+        return baseName.StartsWith("I") && (
+            baseName.Contains("Number") ||
+            baseName.Contains("Binary") ||
+            baseName.Contains("Floating") ||
+            baseName.Contains("MinMaxValue") ||
+            baseName.Contains("Additive") ||
+            baseName.Contains("Multiplicative") ||
+            baseName.Contains("Parsable") ||
+            baseName.Contains("Formattable"));
+    }
+
+    /// <summary>
     /// TS2304 FIX: Qualify view interface types with namespace alias if cross-namespace.
     /// View interfaces that are transitively implemented (not directly in implements clause)
     /// don't get added to ValueImportQualifiedNames, so we need manual qualification.
@@ -594,10 +660,44 @@ public static class InternalIndexEmitter
         Model.Types.TypeReference interfaceRef,
         string currentNamespace,
         TypeNameResolver resolver,
-        BuildContext ctx)
+        BuildContext ctx,
+        bool omitTypeArguments = false)
     {
-        // Try to get the base type name first
-        var baseName = Printers.TypeRefPrinter.Print(interfaceRef, resolver, ctx);
+        // TS2344 FIX: For numeric self-referential interfaces, omit type arguments to avoid circular constraints
+        // For other interfaces, use instance interface type (forValuePosition=true)
+        string baseName;
+
+        if (omitTypeArguments && interfaceRef is Model.Types.NamedTypeReference namedRef)
+        {
+            // Replace type arguments with 'any' to avoid circular constraint checking
+            // e.g., "IFoo<T>" → "IFoo$instance<any>"
+            // Get the base instance name without type arguments
+            var baseInstanceName = resolver.For(namedRef, forValuePosition: true);
+
+            // Strip any existing type arguments
+            var bracketIndex = baseInstanceName.IndexOf('<');
+            var nameWithoutArgs = bracketIndex >= 0
+                ? baseInstanceName.Substring(0, bracketIndex)
+                : baseInstanceName;
+
+            // Add 'any' type arguments if the interface is generic
+            if (namedRef.TypeArguments.Count > 0)
+            {
+                var anyArgs = string.Join(", ", Enumerable.Repeat("any", namedRef.TypeArguments.Count));
+                baseName = $"{nameWithoutArgs}<{anyArgs}>";
+            }
+            else
+            {
+                // Not generic, use as-is
+                baseName = nameWithoutArgs;
+            }
+        }
+        else
+        {
+            // Normal path: include type arguments
+            baseName = Printers.TypeRefPrinter.Print(interfaceRef, resolver, ctx,
+                forValuePosition: true);
+        }
 
         // If it's a NamedTypeReference, check if it's cross-namespace
         if (interfaceRef is Model.Types.NamedTypeReference named)
