@@ -23,7 +23,9 @@ public static class ClassPrinter
     /// </summary>
     /// <param name="typesWithoutGenerics">Optional set to track types that had generics in CLR but were emitted without them (e.g., static classes)</param>
     /// <param name="bindingsProvider">Optional bindings provider for V2 inherited member exposure (if null, falls back to V1 behavior)</param>
-    public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, HashSet<string>? typesWithoutGenerics = null, BindingsProvider? bindingsProvider = null)
+    /// <param name="staticFlattening">D1: Plan for flattening static-only type hierarchies (if null, no flattening)</param>
+    /// <param name="staticConflicts">D2: Plan for suppressing conflicting static members (if null, no suppression)</param>
+    public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, HashSet<string>? typesWithoutGenerics = null, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null)
     {
         // GUARD: Never print non-public types
         if (type.Accessibility != Accessibility.Public)
@@ -41,8 +43,8 @@ public static class ClassPrinter
 
         return type.Kind switch
         {
-            TypeKind.Class => PrintClass(type, resolver, ctx, graph, bindingsProvider: bindingsProvider),
-            TypeKind.Struct => PrintStruct(type, resolver, ctx, graph, bindingsProvider: bindingsProvider),
+            TypeKind.Class => PrintClass(type, resolver, ctx, graph, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts),
+            TypeKind.Struct => PrintStruct(type, resolver, ctx, graph, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts),
             TypeKind.Enum => PrintEnum(type, ctx),
             TypeKind.Delegate => PrintDelegate(type, resolver, ctx),
             TypeKind.Interface => PrintInterface(type, resolver, ctx),
@@ -55,7 +57,7 @@ public static class ClassPrinter
     /// Used when type has explicit interface views that will be in separate companion interface.
     /// GUARD: Only prints public types - internal types are rejected.
     /// </summary>
-    public static string PrintInstance(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, BindingsProvider? bindingsProvider = null)
+    public static string PrintInstance(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null)
     {
         // GUARD: Never print non-public types
         if (type.Accessibility != Accessibility.Public)
@@ -66,13 +68,13 @@ public static class ClassPrinter
 
         return type.Kind switch
         {
-            TypeKind.Class => PrintClass(type, resolver, ctx, graph, instanceSuffix: true, bindingsProvider: bindingsProvider),
-            TypeKind.Struct => PrintStruct(type, resolver, ctx, graph, instanceSuffix: true, bindingsProvider: bindingsProvider),
-            _ => Print(type, resolver, ctx, graph, bindingsProvider: bindingsProvider) // Fallback (guard already checked above)
+            TypeKind.Class => PrintClass(type, resolver, ctx, graph, instanceSuffix: true, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts),
+            TypeKind.Struct => PrintStruct(type, resolver, ctx, graph, instanceSuffix: true, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts),
+            _ => Print(type, resolver, ctx, graph, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts) // Fallback (guard already checked above)
         };
     }
 
-    private static string PrintClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, bool instanceSuffix = false, BindingsProvider? bindingsProvider = null)
+    private static string PrintClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, bool instanceSuffix = false, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null)
     {
         var sb = new StringBuilder();
 
@@ -96,7 +98,10 @@ public static class ClassPrinter
         }
 
         // Base class: extends BaseClass
-        if (type.BaseType != null)
+        // D1 FIX: Skip extends for static-only types that are being flattened
+        var shouldFlatten = staticFlattening?.ShouldFlattenType(type.StableId.ToString()) ?? false;
+
+        if (type.BaseType != null && !shouldFlatten)
         {
             // Pass forValuePosition=true to use qualified names for reflection types
             // This avoids TS2693 "type used as value" errors in extends clauses
@@ -114,6 +119,10 @@ public static class ClassPrinter
                 sb.Append(" extends ");
                 sb.Append(baseTypeName);
             }
+        }
+        else if (shouldFlatten)
+        {
+            ctx.Log("StaticFlattening", $"  Suppressing extends for static-only type: {type.ClrFullName}");
         }
 
         // Interfaces: implements IFoo, IBar
@@ -138,14 +147,65 @@ public static class ClassPrinter
         sb.AppendLine(" {");
 
         // Emit members
-        EmitMembers(sb, type, resolver, ctx, graph, bindingsProvider);
+        EmitMembers(sb, type, resolver, ctx, graph, bindingsProvider, staticConflicts);
+
+        // D1 FIX: Emit inherited static members for flattened types
+        if (shouldFlatten && staticFlattening != null)
+        {
+            var inheritedMembers = staticFlattening.GetInheritedMembers(type.StableId.ToString());
+            if (inheritedMembers.Count > 0)
+            {
+                ctx.Log("StaticFlattening", $"  Emitting {inheritedMembers.Count} inherited static members for {type.ClrFullName}");
+
+                // Filter out members that already exist in the derived class (by CLR name)
+                var existingFieldNames = new HashSet<string>(type.Members.Fields.Where(f => f.IsStatic).Select(f => f.ClrName));
+                var existingPropertyNames = new HashSet<string>(type.Members.Properties.Where(p => p.IsStatic).Select(p => p.ClrName));
+                var existingMethodNames = new HashSet<string>(type.Members.Methods.Where(m => m.IsStatic).Select(m => m.ClrName));
+
+                var fieldsToEmit = inheritedMembers.Fields.Where(f => !existingFieldNames.Contains(f.ClrName)).ToList();
+                var propertiesToEmit = inheritedMembers.Properties.Where(p => !existingPropertyNames.Contains(p.ClrName)).ToList();
+                var methodsToEmit = inheritedMembers.Methods.Where(m => !existingMethodNames.Contains(m.ClrName)).ToList();
+
+                var totalToEmit = fieldsToEmit.Count + propertiesToEmit.Count + methodsToEmit.Count;
+
+                if (totalToEmit > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("    // Inherited static members from base classes (hierarchy flattened)");
+
+                    // Emit inherited fields
+                    foreach (var field in fieldsToEmit)
+                    {
+                        EmitInheritedStaticField(sb, field, type, resolver, ctx);
+                    }
+
+                    // Emit inherited properties
+                    foreach (var property in propertiesToEmit)
+                    {
+                        EmitInheritedStaticProperty(sb, property, type, resolver, ctx);
+                    }
+
+                    // Emit inherited methods
+                    foreach (var method in methodsToEmit)
+                    {
+                        EmitInheritedStaticMethod(sb, method, type, resolver, ctx);
+                    }
+
+                    ctx.Log("StaticFlattening", $"  Actually emitted {totalToEmit} inherited members (filtered {inheritedMembers.Count - totalToEmit} duplicates)");
+                }
+                else
+                {
+                    ctx.Log("StaticFlattening", $"  All {inheritedMembers.Count} inherited members already exist in derived class - skipped");
+                }
+            }
+        }
 
         sb.AppendLine("}");
 
         return sb.ToString();
     }
 
-    private static string PrintStruct(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, bool instanceSuffix = false, BindingsProvider? bindingsProvider = null)
+    private static string PrintStruct(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, bool instanceSuffix = false, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null)
     {
         // Structs emit as classes in TypeScript (with metadata noting value semantics)
         var sb = new StringBuilder();
@@ -180,7 +240,7 @@ public static class ClassPrinter
         sb.AppendLine(" {");
 
         // Emit members
-        EmitMembers(sb, type, resolver, ctx, graph, bindingsProvider);
+        EmitMembers(sb, type, resolver, ctx, graph, bindingsProvider, staticConflicts);
 
         sb.AppendLine("}");
 
@@ -334,7 +394,7 @@ public static class ClassPrinter
         return sb.ToString();
     }
 
-    private static void EmitMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, BindingsProvider? bindingsProvider = null)
+    private static void EmitMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, BindingsProvider? bindingsProvider = null, Shape.StaticConflictPlan? staticConflicts = null)
     {
         var members = type.Members;
 
@@ -536,15 +596,31 @@ public static class ClassPrinter
         }
 
         // Static members
-        EmitStaticMembers(sb, type, resolver, ctx);
+        EmitStaticMembers(sb, type, resolver, ctx, staticConflicts);
     }
 
-    private static void EmitStaticMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx)
+    private static void EmitStaticMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Shape.StaticConflictPlan? staticConflicts = null)
     {
         var members = type.Members;
 
         // Create type scope for static member name resolution
         var staticTypeScope = ScopeFactory.ClassStatic(type); // Static members
+
+        // D2: Helper to check if a static member should be suppressed due to conflict with base
+        var typeStableId = type.StableId.ToString();
+        bool ShouldSuppressMember(string memberStableId)
+        {
+            if (staticConflicts == null)
+                return false;
+
+            var shouldSuppress = staticConflicts.ShouldSuppress(typeStableId, memberStableId);
+            if (shouldSuppress)
+            {
+                var reason = staticConflicts.GetSuppressionReason(typeStableId, memberStableId);
+                ctx.Log("StaticConflict", $"  Suppressing: {type.ClrFullName} static member (StableId: {memberStableId}) - {reason}");
+            }
+            return shouldSuppress;
+        }
 
         // Skip abstract static methods in concrete classes (same rule as instance methods)
         var shouldSkipAbstract = !type.IsAbstract;
@@ -554,6 +630,10 @@ public static class ClassPrinter
         foreach (var field in members.Fields.Where(f => f.IsStatic && !f.IsConst &&
             (f.EmitScope == EmitScope.ClassSurface || f.EmitScope == EmitScope.StaticSurface)))
         {
+            // D2: Skip if this static field conflicts with base class
+            if (ShouldSuppressMember(field.StableId.ToString()))
+                continue;
+
             var finalName = ctx.Renamer.GetFinalMemberName(field.StableId, staticTypeScope);
             sb.Append("    static ");
             if (field.IsReadOnly)
@@ -572,6 +652,10 @@ public static class ClassPrinter
         foreach (var field in members.Fields.Where(f => f.IsConst &&
             (f.EmitScope == EmitScope.ClassSurface || f.EmitScope == EmitScope.StaticSurface)))
         {
+            // D2: Skip if this const field conflicts with base class
+            if (ShouldSuppressMember(field.StableId.ToString()))
+                continue;
+
             // Apply CLR surface name policy
             var emitName = NameUtilities.ApplyClrSurfaceNamePolicy(field.ClrName);
 
@@ -590,6 +674,10 @@ public static class ClassPrinter
         foreach (var prop in members.Properties.Where(p => p.IsStatic &&
             (p.EmitScope == EmitScope.ClassSurface || p.EmitScope == EmitScope.StaticSurface)))
         {
+            // D2: Skip if this static property conflicts with base class
+            if (ShouldSuppressMember(prop.StableId.ToString()))
+                continue;
+
             // Apply CLR surface name policy
             var emitName = NameUtilities.ApplyClrSurfaceNamePolicy(prop.ClrName);
 
@@ -623,6 +711,10 @@ public static class ClassPrinter
 
             foreach (var method in overloads)
             {
+                // D2: Skip if this static method conflicts with base class
+                if (ShouldSuppressMember(method.StableId.ToString()))
+                    continue;
+
                 // Skip abstract static methods in concrete classes
                 if (shouldSkipAbstract && method.IsAbstract)
                     continue;
@@ -1374,5 +1466,47 @@ public static class ClassPrinter
             .Where(m => m.IsStatic == isStatic)
             .GroupBy(m => m.ClrName)
             .ToDictionary(g => g.Key, g => g.OrderBy(m => m.StableId.ToString()).ToList());
+    }
+
+    /// <summary>
+    /// D1: Emit an inherited static field from a base class (for static hierarchy flattening).
+    /// </summary>
+    private static void EmitInheritedStaticField(StringBuilder sb, FieldSymbol field, TypeSymbol derivedType, TypeNameResolver resolver, BuildContext ctx)
+    {
+        var fieldEmitName = NameUtilities.ApplyClrSurfaceNamePolicy(field.ClrName);
+        sb.Append("    static ");
+        if (field.IsReadOnly || field.IsConst)
+            sb.Append("readonly ");
+        sb.Append(fieldEmitName);
+        sb.Append(": ");
+        sb.Append(TypeRefPrinter.Print(field.FieldType, resolver, ctx));
+        sb.AppendLine(";");
+    }
+
+    /// <summary>
+    /// D1: Emit an inherited static property from a base class (for static hierarchy flattening).
+    /// </summary>
+    private static void EmitInheritedStaticProperty(StringBuilder sb, PropertySymbol property, TypeSymbol derivedType, TypeNameResolver resolver, BuildContext ctx)
+    {
+        var propEmitName = NameUtilities.ApplyClrSurfaceNamePolicy(property.ClrName);
+        sb.Append("    static ");
+        if (!property.HasSetter)
+            sb.Append("readonly ");
+        sb.Append(propEmitName);
+        sb.Append(": ");
+        sb.Append(TypeRefPrinter.Print(property.PropertyType, resolver, ctx));
+        sb.AppendLine(";");
+    }
+
+    /// <summary>
+    /// D1: Emit an inherited static method from a base class (for static hierarchy flattening).
+    /// Note: MethodPrinter.PrintWithName already includes "static" keyword for static methods.
+    /// </summary>
+    private static void EmitInheritedStaticMethod(StringBuilder sb, MethodSymbol method, TypeSymbol derivedType, TypeNameResolver resolver, BuildContext ctx)
+    {
+        var emitName = NameUtilities.ApplyClrSurfaceNamePolicy(method.ClrName);
+        sb.Append("    ");
+        sb.Append(MethodPrinter.PrintWithName(method, derivedType, emitName, resolver, ctx));
+        sb.AppendLine(";");
     }
 }

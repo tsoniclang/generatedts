@@ -299,11 +299,21 @@ public static class SinglePhaseBuilder
         // Validate before proceeding
         PhaseGate.Validate(ctx, graph, imports, constraintFindings);
 
+        // D1: Plan static hierarchy flattening to eliminate TS2417 errors
+        ctx.Log("Build", "\n--- Phase 4.7: Static Hierarchy Flattening ---");
+        var staticFlattening = Shape.StaticHierarchyFlattener.Plan(ctx, graph);
+
+        // D2: Detect static member conflicts between base/derived classes
+        ctx.Log("Build", "\n--- Phase 4.8: Static Conflict Detection ---");
+        var staticConflicts = Shape.StaticConflictDetector.Plan(ctx, graph);
+
         return new EmissionPlan
         {
             Graph = graph,
             Imports = imports,
-            EmissionOrder = order
+            EmissionOrder = order,
+            StaticFlattening = staticFlattening,
+            StaticConflicts = staticConflicts
         };
     }
 
@@ -407,6 +417,16 @@ public sealed record EmissionPlan
     public required SymbolGraph Graph { get; init; }
     public required ImportPlan Imports { get; init; }
     public required EmitOrder EmissionOrder { get; init; }
+
+    /// <summary>
+    /// D1: Plan for flattening static-only type hierarchies to eliminate TS2417 errors.
+    /// </summary>
+    public required Shape.StaticFlatteningPlan StaticFlattening { get; init; }
+
+    /// <summary>
+    /// D2: Plan for suppressing conflicting static members to eliminate TS2417 errors.
+    /// </summary>
+    public required Shape.StaticConflictPlan StaticConflicts { get; init; }
 
     public int NamespaceCount => Graph.Namespaces.Length;
 }
