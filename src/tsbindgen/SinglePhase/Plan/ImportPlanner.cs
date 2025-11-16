@@ -114,7 +114,8 @@ public static class ImportPlanner
                     continue; // Skip this import to prevent emission
                 }
 
-                var alias = DetermineAlias(ctx, ns.Name, targetNamespace, tsName, aliases);
+                // C.5.3 FIX: Pass namespace symbol to detect collisions with local types
+                var alias = DetermineAlias(ctx, ns, targetNamespace, tsName, aliases);
 
                 // TS2693 FIX: Determine if this type needs a value import (not just type import)
                 // Base classes and interfaces used in extends/implements need to be imported as values
@@ -224,12 +225,28 @@ public static class ImportPlanner
 
     private static string? DetermineAlias(
         BuildContext ctx,
-        string sourceNamespace,
+        NamespaceSymbol sourceNamespace,
         string targetNamespace,
         string typeName,
         Dictionary<string, string> existingAliases)
     {
-        // Check if alias is needed (name collision)
+        // C.5.3 FIX: Check if imported type name collides with local type declaration
+        // Example: System.Reflection imports AssemblyHashAlgorithm but also has local enum AssemblyHashAlgorithm
+        var hasLocalCollision = sourceNamespace.Types.Any(localType =>
+        {
+            var localTypeName = ctx.Renamer.GetFinalTypeName(localType);
+            return localTypeName == typeName;
+        });
+
+        if (hasLocalCollision)
+        {
+            // Name collision with local type - need alias
+            // Use source namespace suffix to disambiguate (e.g., AssemblyHashAlgorithm_Assemblies)
+            var targetNsShort = GetNamespaceShortName(targetNamespace);
+            return $"{typeName}_{targetNsShort}";
+        }
+
+        // Check if alias is needed (name collision with other imports)
         if (existingAliases.ContainsKey(typeName))
         {
             // Name collision - need alias
