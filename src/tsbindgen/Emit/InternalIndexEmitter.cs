@@ -152,26 +152,10 @@ public static class InternalIndexEmitter
             sb.AppendLine(); // Blank line after imports
         }
 
-        // ROOT NAMESPACE FIX: Types in root namespace (empty name) are emitted at module level
-        // No namespace wrapper for root - types are module-level declarations
-        var isRoot = nsOrder.Namespace.IsRoot;
-        var indent = isRoot ? "" : "    ";
+        var indent = string.Empty;
 
-        // PHASE-1 FIX: Collect types for top-level re-export shim (TS2305/TS2315 fix)
-        // Non-root namespaces need top-level re-exports so imports can use named imports
-        // Store TypeSymbol to preserve generic parameter information
-        var topLevelExports = new List<TypeSymbol>();
-
-        // TS2315 FIX: Track types that had generics in CLR but were emitted without them
-        // (e.g., static classes with generic static members - TypeScript doesn't support class-level generics for static-only classes)
-        // This prevents convenience export aliases from referencing them with type parameters
+        // Track types that lost generics during emission (used for diagnostics/aliases)
         var typesWithoutGenerics = new HashSet<string>();
-
-        if (!isRoot)
-        {
-            // Non-root: Wrap in namespace declaration
-            sb.AppendLine($"export namespace {nsOrder.Namespace.Name} {{");
-        }
 
         // Emit types in order (PUBLIC ONLY - internal types should not appear in .d.ts)
         foreach (var typeOrder in nsOrder.OrderedTypes.Where(to => ShouldEmit(to.Type)))
@@ -208,10 +192,6 @@ public static class InternalIndexEmitter
                 sb.AppendLine(indentedAlias);
                 sb.AppendLine();
 
-                // PHASE-1 FIX: Collect type for top-level re-export
-                // For views pattern: export the final type alias
-                if (!isRoot)
-                    topLevelExports.Add(typeOrder.Type);
             }
             else
             {
@@ -252,79 +232,25 @@ public static class InternalIndexEmitter
                     sb.AppendLine();
                 }
 
-                // PHASE-1 FIX: Collect type for top-level re-export
-                if (!isRoot)
-                    topLevelExports.Add(typeOrder.Type);
-            }
-        }
-
-        if (!isRoot)
-        {
-            // Close namespace wrapper
-            sb.AppendLine("}");
-            sb.AppendLine();
-
-            // PHASE-1 FIX: Emit top-level re-exports for TS2305/TS2315 fix
-            // This allows: import type { Object_ } from "../../System/internal/index"
-            // Instead of:  import type { System } from "../../System/internal/index"
-            // Once verified working, we can remove namespace wrapper entirely (PHASE-2)
-            if (topLevelExports.Count > 0)
-            {
-                sb.AppendLine("// Top-level re-exports (transitional shim for import compatibility)");
-                sb.AppendLine($"// These allow named imports instead of namespace imports");
-
-                // Sort by type name for stable output
-                var sortedExports = topLevelExports.OrderBy(t => ctx.Renamer.GetFinalTypeName(t)).ToList();
-
-                // INTERNAL CONSTRAINTS: Emit type aliases with generic constraints preserved
-                foreach (var type in sortedExports)
+                // ESM FLATTENING: Provide module-level aliases for class/struct types without views
+                // With namespace blocks removed, the stem name (GetFinalTypeName) must be exported
+                // so facade/type-position references resolve. Skip static classes that lost generics
+                // to avoid TS2315 (non-generic emitted type referenced as generic).
+                var isClassLike = typeOrder.Type.Kind is Model.Symbols.TypeKind.Class or Model.Symbols.TypeKind.Struct or Model.Symbols.TypeKind.StaticNamespace;
+                var needsAlias = isClassLike && finalName != instanceName && !isStaticClass;
+                if (needsAlias)
                 {
-                    // STEP 1 RE-EXPORT FIX (Updated for views):
-                    // - LHS (aliasName): Use bare stem for user-friendly name (e.g., "Console", "List_1")
-                    // - RHS (rhsExpression): Depends on whether type has views:
-                    //   * WITH views: Use alias (Module_ = Module_$instance & __Module_$views)
-                    //   * WITHOUT views: Use instance name (Console$instance)
-                    var typeName = ctx.Renamer.GetFinalTypeName(type);  // Bare stem for alias
-
-                    // TS2315 FIX: Skip convenience exports for types that lost their generics during emission
-                    // These are static classes with generic static members - emitted as non-generic classes
-                    if (typesWithoutGenerics.Contains(typeName))
-                    {
-                        ctx.Log("TS2315Fix", $"Skipping convenience export for {typeName} (type was emitted without generics)");
-                        continue;
-                    }
-
-                    // TS2416 FIX: Determine which name to reference based on views
-                    // Types WITH views have an alias inside the namespace (Foo = Foo$instance & __Foo$views)
-                    // Types WITHOUT views only have the instance type (Foo$instance)
-                    var hasViews = type.ExplicitViews.Length > 0 &&
-                                   (type.Kind == Model.Symbols.TypeKind.Class || type.Kind == Model.Symbols.TypeKind.Struct);
-                    var rhsTypeName = hasViews ? typeName : ctx.Renamer.GetInstanceTypeName(type);
-
-                    // STEP A.2 VALIDATION: Re-export correctness assertions
-                    // Ensures views-based re-export logic is working correctly
-                    if (hasViews && rhsTypeName.Contains("$instance"))
-                    {
-                        throw new InvalidOperationException(
-                            $"[RE-EXPORT BUG] Type {type.ClrFullName} has views but re-export uses instance name '{rhsTypeName}' instead of alias '{typeName}'");
-                    }
-                    if (!hasViews && !rhsTypeName.Contains("$instance") && (type.Kind == Model.Symbols.TypeKind.Class || type.Kind == Model.Symbols.TypeKind.Struct))
-                    {
-                        throw new InvalidOperationException(
-                            $"[RE-EXPORT BUG] Type {type.ClrFullName} has no views but re-export uses alias '{rhsTypeName}' instead of instance name");
-                    }
-
-                    // Emit: export type Foo<T extends IFoo> = Namespace.Foo<T>;
-                    //   or: export type Foo<T extends IFoo> = Namespace.Foo$instance<T>;
                     AliasEmit.EmitGenericAlias(
                         sb,
-                        aliasName: typeName,
-                        sourceType: type,
-                        rhsExpression: $"{nsOrder.Namespace.Name}.{rhsTypeName}",
+                        aliasName: finalName,
+                        sourceType: typeOrder.Type,
+                        rhsExpression: instanceName,
                         resolver,
                         ctx,
-                        withConstraints: true); // Internal convenience exports preserve constraints
+                        withConstraints: true);
+                    sb.AppendLine();
                 }
+
             }
         }
 
@@ -757,10 +683,9 @@ public static class InternalIndexEmitter
                 interfaceNamespace != currentNamespace &&
                 !baseName.Contains('.'))
             {
-                // Generate namespace alias (e.g., "System.Collections" → "System_Collections_Internal")
+                // Flat ESM: qualify with namespace import alias only
                 var namespaceAlias = interfaceNamespace.Replace('.', '_') + "_Internal";
-                var qualifiedName = $"{namespaceAlias}.{interfaceNamespace}.{baseName}";
-                return qualifiedName;
+                return $"{namespaceAlias}.{baseName}";
             }
         }
 
