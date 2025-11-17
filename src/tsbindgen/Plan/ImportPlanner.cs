@@ -175,11 +175,9 @@ public static class ImportPlanner
                         emittedName = ctx.Renamer.GetInstanceTypeName(targetType, Renaming.NamespaceArea.Internal);
                     }
 
-                    // TS2339 FIX: Qualified name must include the target namespace
-                    // because types are inside "export namespace X {}" blocks
-                    // Format: NamespaceAlias.TargetNamespace.InstanceClassName
-                    // Example: "System_Internal.System.Exception$instance"
-                    var qualifiedName = $"{namespaceAlias}.{targetNamespace}.{emittedName}";
+                    // Flat ESM: qualify with namespace alias only (module namespace import)
+                    // Example: System_Internal.Exception$instance
+                    var qualifiedName = $"{namespaceAlias}.{emittedName}";
                     plan.ValueImportQualifiedNames[(ns.Name, clrName)] = qualifiedName;
                 }
             }

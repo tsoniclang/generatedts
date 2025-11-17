@@ -57,39 +57,33 @@ public static class FacadeEmitter
         sb.AppendLine($"import * as Internal from './{subdirName}/index';");
         sb.AppendLine();
 
-        // Import from dependencies (if any)
-        if (plan.Imports.NamespaceImports.TryGetValue(ns.Name, out var imports))
+        // Flat ESM: import cross-namespace types for facade constraints (type-only)
+        if (plan.Imports.NamespaceImports.TryGetValue(ns.Name, out var imports) && imports.Count > 0)
         {
-            if (imports.Count > 0)
+            sb.AppendLine("// Cross-namespace type imports for constraints");
+            foreach (var import in imports.OrderBy(i => i.ImportPath))
             {
-                sb.AppendLine("// Import dependencies");
-                foreach (var import in imports)
+                var typeImports = import.TypeImports;
+                if (typeImports.Count == 0)
+                    continue;
+
+                var typeList = string.Join(", ", typeImports
+                    .OrderBy(ti => ti.TypeName)
+                    .Select(ti => ti.Alias != null ? $"{ti.TypeName} as {ti.Alias}" : ti.TypeName));
+                var facadePath = import.ImportPath switch
                 {
-                    // Facade files are one level shallower than internal files
-                    // Internal: Namespace/internal/index.d.ts uses ../../Target/internal/index
-                    // Facade: Namespace/index.d.ts needs ../Target/internal/index
-                    var facadePath = AdjustPathForFacade(import.ImportPath);
-                    sb.AppendLine($"import * as {GetImportAlias(import.TargetNamespace)} from '{facadePath}';");
-                }
-                sb.AppendLine();
+                    // internal files are one level deeper than facades (../)
+                    var p when p.StartsWith("../../") => "../" + p.Substring(6),
+                    _ => import.ImportPath
+                };
+                sb.AppendLine($"import type {{ {typeList} }} from '{facadePath}';");
             }
+            sb.AppendLine();
         }
 
-        // ROOT NAMESPACE FIX: Re-export internal namespace
-        // For root namespace (empty name), use direct re-export instead of import alias
-        // For non-root, skip dotted namespaces as TypeScript doesn't support dots in export import identifiers
-        if (ns.IsRoot)
-        {
-            sb.AppendLine("// Re-export root namespace types (module-level)");
-            sb.AppendLine($"export * from './{subdirName}/index';");
-            sb.AppendLine();
-        }
-        else if (!ns.Name.Contains('.'))
-        {
-            sb.AppendLine("// Re-export namespace");
-            sb.AppendLine($"export import {ns.Name} = Internal.{ns.Name};");
-            sb.AppendLine();
-        }
+        // Flattened ESM: re-export everything from internal
+        sb.AppendLine($"export * from './{subdirName}/index';");
+        sb.AppendLine();
 
         // Export individual types (for convenience)
         if (plan.Imports.NamespaceExports.TryGetValue(ns.Name, out var exports))
@@ -100,7 +94,8 @@ public static class FacadeEmitter
 
                 // TS2304 FIX: Create TypeNameResolver in facade mode to qualify cross-namespace types
                 // This ensures constraints like "T extends IEquatable_1<T>" become "T extends System.IEquatable_1<T>"
-                var resolver = new TypeNameResolver(ctx, plan.Graph, importPlan: null, currentNamespace: ns.Name, facadeMode: true);
+                // Use ImportPlan so type-only imports can be referenced without qualification
+                var resolver = new TypeNameResolver(ctx, plan.Graph, importPlan: plan.Imports, currentNamespace: ns.Name, facadeMode: false);
 
                 foreach (var export in exports)
                 {
@@ -157,32 +152,6 @@ public static class FacadeEmitter
         }
 
         return sb.ToString();
-    }
-
-    /// <summary>
-    /// Adjusts import path for facade files (one directory level shallower than internal files).
-    /// Converts "../../Target/internal/index" to "../Target/internal/index"
-    /// </summary>
-    private static string AdjustPathForFacade(string internalPath)
-    {
-        // Internal files are at: Namespace/internal/index.d.ts
-        // Facade files are at: Namespace/index.d.ts
-        // So facade files need one less "../" in relative paths
-
-        if (internalPath.StartsWith("../../"))
-        {
-            // Strip one "../" from the beginning
-            return "../" + internalPath.Substring(6); // Remove "../../", keep rest
-        }
-
-        // For paths that don't start with "../../" (shouldn't happen, but defensive)
-        return internalPath;
-    }
-
-    private static string GetImportAlias(string namespaceName)
-    {
-        // Convert "System.Collections.Generic" to "System_Collections_Generic"
-        return namespaceName.Replace('.', '_');
     }
 
     /// <summary>

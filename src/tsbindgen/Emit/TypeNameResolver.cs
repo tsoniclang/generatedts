@@ -87,12 +87,12 @@ public sealed class TypeNameResolver
         //    This happens when the type is used as a value (base class/interface)
         if (_importPlan != null && _currentNamespace != null)
         {
-            var clrFullName = named.FullName;
-            if (_importPlan.ValueImportQualifiedNames.TryGetValue((_currentNamespace, clrFullName), out var qualifiedName))
+            var valueClrFullName = named.FullName;
+            if (_importPlan.ValueImportQualifiedNames.TryGetValue((_currentNamespace, valueClrFullName), out var qualifiedName))
             {
                 // For common reflection types, prefer simple names in TYPE positions only
                 // In value positions (extends/implements), always use qualified names to avoid TS2693
-                if (!forValuePosition && ReflectionTypes.IsCommonReflectionType(clrFullName))
+                if (!forValuePosition && ReflectionTypes.IsCommonReflectionType(valueClrFullName))
                 {
                     // Type position (return type, parameter, property): use simple name
                     // This prevents TS2416 errors when signatures need to match base class
@@ -107,10 +107,10 @@ public sealed class TypeNameResolver
             }
         }
 
-        // 4. Look up TypeSymbol in graph using StableId
-        var stableId = $"{named.AssemblyName}:{named.FullName}";
+        // 4. Look up TypeSymbol in graph using CLR full name (TypeIndex key)
+        var graphClrFullName = named.FullName;
 
-        if (!_graph.TypeIndex.TryGetValue(stableId, out var typeSymbol))
+        if (!_graph.TypeIndex.TryGetValue(graphClrFullName, out var typeSymbol))
         {
             // Type not in graph - this is an EXTERNAL type from another assembly
             // Use the CLR name as-is (it will be in imports if needed)
@@ -142,23 +142,6 @@ public sealed class TypeNameResolver
             var result = TypeScriptReservedWords.Sanitize(sanitized);
             var finalExternalName = result.Sanitized;
 
-            // TS2693 FIX (Same-Namespace External): For value positions with same-namespace external types,
-            // qualify with namespace AND add $instance to avoid top-level type alias collision.
-            // Example: ValidationAttribute from System.ComponentModel.Annotations assembly appears in
-            // System.ComponentModel.DataAnnotations namespace alongside its subclasses.
-            // NOTE: ApplyInstanceSuffixForSameNamespaceViews can't add $instance (type not in graph)
-            if (forValuePosition && _currentNamespace != null && externalNamespace == _currentNamespace)
-            {
-                return $"{externalNamespace}.{finalExternalName}$instance";
-            }
-
-            // TS2304 FIX (Facade): Qualify external cross-namespace types in facade mode
-            if (_facadeMode && _currentNamespace != null && externalNamespace != _currentNamespace && !string.IsNullOrEmpty(externalNamespace))
-            {
-                var namespaceAlias = GetNamespaceAlias(externalNamespace);
-                return $"{namespaceAlias}.{finalExternalName}";
-            }
-
             return finalExternalName;
         }
 
@@ -172,17 +155,6 @@ public sealed class TypeNameResolver
             // VALUE POSITION (extends/implements): Use instance type name
             // Example: extends Foo_$instance
             finalName = _ctx.Renamer.GetInstanceTypeName(typeSymbol);
-
-            // TS2693 FIX: Qualify with namespace to avoid collision with top-level type aliases
-            // Example: Inside "namespace Foo {}", "extends Bar" could resolve to:
-            // - Top-level alias "export type Bar = Foo.Bar$instance" (type-only - TS2693!)
-            // - Or the actual class "Foo.Bar$instance" (value - correct)
-            // Solution: Always use "extends Foo.Bar$instance" in value positions
-            if (!string.IsNullOrEmpty(typeSymbol.Namespace))
-            {
-                // Value position: qualify with namespace to avoid alias collision
-                return $"{typeSymbol.Namespace}.{finalName}";
-            }
         }
         else
         {

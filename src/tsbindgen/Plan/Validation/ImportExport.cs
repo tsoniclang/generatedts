@@ -485,24 +485,47 @@ internal static class ImportExport
 
         foreach (var ((sourceNamespace, targetTypeCLRName), qualifiedName) in imports.ValueImportQualifiedNames)
         {
-            // Parse qualified name: "System_Internal.System.Exception$instance"
-            // Format: NamespaceAlias.TargetNamespace.TypeName
+            // Parse qualified name.
+            // Legacy format: NamespaceAlias.TargetNamespace.TypeName
+            // Flat ESM format: NamespaceAlias.TypeName
             var parts = qualifiedName.Split('.');
-            if (parts.Length < 3)
+            if (parts.Length < 2)
             {
                 validationCtx.RecordDiagnostic(
                     DiagnosticCodes.QualifiedExportPathInvalid,
                     "ERROR",
-                    $"{sourceNamespace}: qualified name '{qualifiedName}' is malformed (expected format: NamespaceAlias.TargetNamespace.TypeName)");
+                    $"{sourceNamespace}: qualified name '{qualifiedName}' is malformed (expected format: NamespaceAlias.TypeName)");
                 invalidPaths++;
                 continue;
             }
 
-            // Extract parts
             var namespaceAlias = parts[0];
-            var targetNamespaceParts = parts.Skip(1).Take(parts.Length - 2).ToArray();
-            var targetNamespace = string.Join(".", targetNamespaceParts);
-            var typeName = parts[parts.Length - 1];
+            string targetNamespace;
+            string typeName;
+
+            if (parts.Length == 2)
+            {
+                // Flat format: NamespaceAlias.TypeName
+                typeName = parts[1];
+
+                // Resolve target namespace from CLR name or import statement
+                if (graph.TryGetType(targetTypeCLRName, out var targetType) && targetType != null)
+                {
+                    targetNamespace = targetType.Namespace;
+                }
+                else
+                {
+                    var lastDot = targetTypeCLRName.LastIndexOf('.');
+                    targetNamespace = lastDot >= 0 ? targetTypeCLRName.Substring(0, lastDot) : string.Empty;
+                }
+            }
+            else
+            {
+                // Legacy format: NamespaceAlias.TargetNamespace.TypeName
+                var targetNamespaceParts = parts.Skip(1).Take(parts.Length - 2).ToArray();
+                targetNamespace = string.Join(".", targetNamespaceParts);
+                typeName = parts[parts.Length - 1];
+            }
 
             // Validate: Namespace import exists
             if (!imports.NamespaceImports.TryGetValue(sourceNamespace, out var importStatements))
@@ -526,6 +549,12 @@ internal static class ImportExport
                     $"but no import statement found with that alias");
                 invalidPaths++;
                 continue;
+            }
+
+            // For flat format, prefer the target namespace from the import statement if available
+            if (string.IsNullOrEmpty(targetNamespace) && !string.IsNullOrEmpty(importStmt.TargetNamespace))
+            {
+                targetNamespace = importStmt.TargetNamespace;
             }
 
             // Validate: Target namespace exports the type
