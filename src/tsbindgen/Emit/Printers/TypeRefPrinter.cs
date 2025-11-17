@@ -101,7 +101,7 @@ public static class TypeRefPrinter
         // Print generic type with arguments: Foo<T, U>
         // CRITICAL: Wrap ONLY concrete primitive types with CLROf<> to lift to their CLR types
         // This ensures generic constraints (IEquatable_1<Int32>, IComparable_1<Int32>) are satisfied
-        // CLROf<T> maps: int → Int32, string → String_, byte → Byte, etc.
+        // CLROf<T> maps: int → Int32, string → String, byte → Byte, etc.
         // Generic parameters (T, U, TKey) pass through unchanged to avoid double-wrapping
         // Uses PrimitiveLift.IsLiftableTs as single source of truth (PG_GENERIC_PRIM_LIFT_001)
         var argParts = named.TypeArguments.Select(arg =>

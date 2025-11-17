@@ -17,18 +17,9 @@ internal static class Shared
     /// Compute the requested base name for a type (before reservation/numeric suffix).
     /// Handles nested types, generic arity, and reserved word sanitization.
     /// FIX C: TypeSymbol overload correctly composes nested type names.
-    /// C.5.1 FIX: Special-case System.Array → Array_ (like String_, Boolean_) to avoid shadowing built-in Array<T>
     /// </summary>
     internal static string ComputeTypeRequestedBase(TypeSymbol type)
     {
-        // C.5.1 FIX: Special-case types that shadow TypeScript built-ins
-        // System.Array is non-generic CLR class that would shadow TS's built-in Array<T> when imported
-        // Similar to how String → String_, Boolean → Boolean_
-        if (type.ClrFullName == "System.Array")
-        {
-            return "Array_";
-        }
-
         // FIX C: For nested types, we need to use the composed name that includes the parent
         // Example: System.Buffers.ReadOnlySequence`1+Enumerator
         //   → Extract: ReadOnlySequence`1+Enumerator (without namespace)

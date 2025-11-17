@@ -252,6 +252,13 @@ public static class ImportPlanner
         string typeName,
         Dictionary<string, string> existingAliases)
     {
+        // Avoid shadowing TypeScript built-ins (Array, String, Boolean, Object, Symbol, BigInt)
+        // when importing CLR types with matching names.
+        if (IsTypeScriptBuiltinIdentifier(typeName))
+        {
+            return $"Clr{typeName}";
+        }
+
         // C.5.3 FIX: Check if imported type name collides with local type declaration
         // Example: System.Reflection imports AssemblyHashAlgorithm but also has local enum AssemblyHashAlgorithm
         var hasLocalCollision = sourceNamespace.Types.Any(localType =>
@@ -294,6 +301,12 @@ public static class ImportPlanner
         // "System.Collections.Generic" -> "Generic"
         var lastDot = namespaceName.LastIndexOf('.');
         return lastDot >= 0 ? namespaceName.Substring(lastDot + 1) : namespaceName;
+    }
+
+    private static bool IsTypeScriptBuiltinIdentifier(string typeName)
+    {
+        // TypeScript global types/constructors that we must not shadow with CLR imports
+        return typeName is "Array" or "String" or "Boolean" or "Object" or "Symbol" or "BigInt";
     }
 
     /// <summary>
