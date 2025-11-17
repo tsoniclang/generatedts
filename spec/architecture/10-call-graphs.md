@@ -2457,7 +2457,7 @@ BuildResult result = new BuildResult {
 }
   ↓
 GenerateCommand.ExecuteNewPipelineAsync reports success
-  Console.WriteLine("✓ Single-phase generation complete")
+  Console.WriteLine("✓ Generation complete")
   Console.WriteLine($"  Output directory: {Path.GetFullPath("out")}")
   Console.WriteLine($"  Types: {result.Statistics.TypeCount}")
   ↓

@@ -1,5 +1,5 @@
-using tsbindgen.SinglePhase.Model.Symbols.MemberSymbols;
-using tsbindgen.SinglePhase.Renaming;
+using tsbindgen.Model.Symbols.MemberSymbols;
+using tsbindgen.Renaming;
 
 namespace tsbindgen.Core.Format;
 
@@ -94,21 +94,21 @@ public static class SignatureFormatter
     /// Format a type reference for diagnostics.
     /// Shows assembly-qualified name.
     /// </summary>
-    public static string FormatTypeReference(SinglePhase.Model.Types.TypeReference typeRef)
+    public static string FormatTypeReference(Model.Types.TypeReference typeRef)
     {
         return typeRef switch
         {
-            SinglePhase.Model.Types.NamedTypeReference named =>
+            Model.Types.NamedTypeReference named =>
                 $"{named.AssemblyName}:{named.FullName}",
-            SinglePhase.Model.Types.NestedTypeReference nested =>
+            Model.Types.NestedTypeReference nested =>
                 $"{FormatTypeReference(nested.DeclaringType)}+{nested.NestedName}",
-            SinglePhase.Model.Types.ArrayTypeReference array =>
+            Model.Types.ArrayTypeReference array =>
                 $"{FormatTypeReference(array.ElementType)}[]",
-            SinglePhase.Model.Types.PointerTypeReference pointer =>
+            Model.Types.PointerTypeReference pointer =>
                 $"{FormatTypeReference(pointer.PointeeType)}*",
-            SinglePhase.Model.Types.ByRefTypeReference byRef =>
+            Model.Types.ByRefTypeReference byRef =>
                 $"ref {FormatTypeReference(byRef.ReferencedType)}",
-            SinglePhase.Model.Types.GenericParameterReference genericParam =>
+            Model.Types.GenericParameterReference genericParam =>
                 genericParam.Name,
             _ => typeRef.ToString() ?? "unknown"
         };

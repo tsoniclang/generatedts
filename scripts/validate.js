@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 /**
- * Validation script for tsbindgen Single-Phase Architecture (NEW PIPELINE)
+ * Validation script for tsbindgen
  *
  * This script:
- * 1. Cleans the validation-new directory
- * 2. Runs tsbindgen generate command with --use-new-pipeline flag
+ * 1. Cleans the validation directory
+ * 2. Runs tsbindgen generate command
  * 3. Creates a tsconfig.json in the output directory
  * 4. Runs TypeScript compiler to validate all declarations
  * 5. Reports error breakdown by category
  *
  * Usage:
- *   node scripts/validate-new.js              # Full validation
- *   node scripts/validate-new.js --skip-tsc   # Skip TypeScript compilation
- *   node scripts/validate-new.js --verbose    # Enable verbose logging from tsbindgen
+ *   node scripts/validate.js              # Full validation
+ *   node scripts/validate.js --skip-tsc   # Skip TypeScript compilation
+ *   node scripts/validate.js --verbose    # Enable verbose logging from tsbindgen
  */
 
 import { execSync, spawn } from 'child_process';
@@ -33,15 +33,15 @@ const VALIDATION_DIR = path.join(__dirname, '..', '.tests', 'validate');
 const PROJECT_ROOT = path.join(__dirname, '..');
 
 function log(message) {
-    console.log(`[validate-new] ${message}`);
+    console.log(`[validate] ${message}`);
 }
 
 function error(message) {
-    console.error(`[validate-new] ERROR: ${message}`);
+    console.error(`[validate] ERROR: ${message}`);
 }
 
 function cleanValidationDir() {
-    log('Cleaning validation-new directory...');
+    log('Cleaning validation directory...');
     if (fs.existsSync(VALIDATION_DIR)) {
         fs.rmSync(VALIDATION_DIR, { recursive: true, force: true });
     }
@@ -50,10 +50,9 @@ function cleanValidationDir() {
 
 function generateTypes(verbose = false) {
     return new Promise((resolve, reject) => {
-        log('Generating TypeScript declarations using Single-Phase Architecture...');
+        log('Generating TypeScript declarations...');
         log(`  Source: ${DOTNET_RUNTIME_PATH}`);
         log(`  Output: ${VALIDATION_DIR}`);
-        log(`  Pipeline: Single-Phase Architecture (--use-new-pipeline)`);
         if (verbose) {
             log(`  Verbose: enabled`);
         }
@@ -68,8 +67,7 @@ function generateTypes(verbose = false) {
             '--',
             'generate',
             '-d', DOTNET_RUNTIME_PATH,
-            '-o', VALIDATION_DIR,
-            '--use-new-pipeline'
+            '-o', VALIDATION_DIR
         ];
 
         // Add --verbose only if requested
@@ -163,7 +161,7 @@ function runTypeScriptCompiler() {
     }
 
     // Save full output to file
-    const outputPath = path.join(PROJECT_ROOT, '.tests', 'tsc-validation-new.txt');
+    const outputPath = path.join(PROJECT_ROOT, '.tests', 'tsc-validation.txt');
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     fs.writeFileSync(outputPath, output);
 
@@ -205,7 +203,7 @@ function runTypeScriptCompiler() {
 function validateMetadataFiles() {
     log('Validating metadata files...');
 
-    // New pipeline outputs namespace folders directly to VALIDATION_DIR (no 'namespaces/' subdirectory)
+    // Pipeline outputs namespace folders directly to VALIDATION_DIR (no 'namespaces/' subdirectory)
     const namespacesDir = VALIDATION_DIR;
 
     if (!fs.existsSync(namespacesDir)) {
@@ -251,7 +249,7 @@ function validateMetadataFiles() {
 async function main() {
     console.log('');
     console.log('================================================================');
-    console.log('tsbindgen - Single-Phase Architecture Validation (NEW PIPELINE)');
+    console.log('tsbindgen - Validation');
     console.log('================================================================');
     console.log('');
 
@@ -293,7 +291,7 @@ async function main() {
         // Print results
         console.log('');
         console.log('================================================================');
-        console.log('VALIDATION RESULTS (Single-Phase Architecture)');
+        console.log('VALIDATION RESULTS');
         console.log('================================================================');
         console.log('');
         console.log(`  Total errors: ${result.totalErrors}`);

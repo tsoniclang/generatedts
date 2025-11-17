@@ -1,20 +1,15 @@
 using System.CommandLine;
-using System.Reflection;
-using System.Text.Json;
-using tsbindgen.Config;
-using tsbindgen.Reflection;
-using tsbindgen.Snapshot;
 
 namespace tsbindgen.Cli;
 
 /// <summary>
-/// CLI command for the two-phase pipeline: generate snapshots + views.
+/// CLI command for generating TypeScript declarations from .NET assemblies.
 /// </summary>
 public static class GenerateCommand
 {
     public static Command Create()
     {
-        var command = new Command("generate", "Generate TypeScript declarations from .NET assemblies (two-phase pipeline)");
+        var command = new Command("generate", "Generate TypeScript declarations from .NET assemblies");
 
         // Assembly input options
         var assemblyOption = new Option<string[]>(
@@ -80,21 +75,6 @@ public static class GenerateCommand
             AllowMultipleArgumentsPerToken = true
         };
 
-        var debugSnapshotOption = new Option<bool>(
-            name: "--debug-snapshot",
-            getDefaultValue: () => false,
-            description: "Write snapshots to disk for debugging");
-
-        var debugTypeListOption = new Option<bool>(
-            name: "--debug-typelist",
-            getDefaultValue: () => false,
-            description: "Write TypeScript type lists for debugging/comparison");
-
-        var useNewPipelineOption = new Option<bool>(
-            name: "--use-new-pipeline",
-            getDefaultValue: () => false,
-            description: "Use Single-Phase Architecture pipeline (experimental)");
-
         command.AddOption(assemblyOption);
         command.AddOption(assemblyDirOption);
         command.AddOption(outDirOption);
@@ -107,9 +87,6 @@ public static class GenerateCommand
         command.AddOption(enumMemberNamesOption);
         command.AddOption(verboseOption);
         command.AddOption(logsOption);
-        command.AddOption(debugSnapshotOption);
-        command.AddOption(debugTypeListOption);
-        command.AddOption(useNewPipelineOption);
 
         command.SetHandler(async (context) =>
         {
@@ -125,9 +102,6 @@ public static class GenerateCommand
             var enumMemberNames = context.ParseResult.GetValueForOption(enumMemberNamesOption);
             var verbose = context.ParseResult.GetValueForOption(verboseOption);
             var logs = context.ParseResult.GetValueForOption(logsOption) ?? Array.Empty<string>();
-            var debugSnapshot = context.ParseResult.GetValueForOption(debugSnapshotOption);
-            var debugTypeList = context.ParseResult.GetValueForOption(debugTypeListOption);
-            var useNewPipeline = context.ParseResult.GetValueForOption(useNewPipelineOption);
 
             await ExecuteAsync(
                 assemblies,
@@ -141,10 +115,7 @@ public static class GenerateCommand
                 propertyNames,
                 enumMemberNames,
                 verbose,
-                logs,
-                debugSnapshot,
-                debugTypeList,
-                useNewPipeline);
+                logs);
         });
 
         return command;
@@ -162,10 +133,7 @@ public static class GenerateCommand
         string? propertyNames,
         string? enumMemberNames,
         bool verbose,
-        string[] logs,
-        bool debugSnapshot,
-        bool debugTypeList,
-        bool useNewPipeline)
+        string[] logs)
     {
         try
         {
@@ -190,181 +158,71 @@ public static class GenerateCommand
                 Environment.Exit(2);
             }
 
-            // Route to appropriate pipeline
-            if (useNewPipeline)
-            {
-                await ExecuteNewPipelineAsync(
-                    allAssemblies,
-                    outDir,
-                    namespaceFilter,
-                    namespaceNames,
-                    classNames,
-                    interfaceNames,
-                    methodNames,
-                    propertyNames,
-                    enumMemberNames,
-                    verbose,
-                    logs);
-                return;
-            }
+            // Build policy from CLI options
+            var policy = Core.Policy.PolicyDefaults.Create();
 
-            // Create configuration
-            var config = new GeneratorConfig
+            // Apply name transforms to policy if specified
+            if (!string.IsNullOrWhiteSpace(namespaceNames) ||
+                !string.IsNullOrWhiteSpace(classNames) ||
+                !string.IsNullOrWhiteSpace(interfaceNames) ||
+                !string.IsNullOrWhiteSpace(methodNames) ||
+                !string.IsNullOrWhiteSpace(propertyNames))
             {
-                NamespaceNames = ParseNameTransformOption(namespaceNames),
-                ClassNames = ParseNameTransformOption(classNames),
-                InterfaceNames = ParseNameTransformOption(interfaceNames),
-                MethodNames = ParseNameTransformOption(methodNames),
-                PropertyNames = ParseNameTransformOption(propertyNames),
-                EnumMemberNames = ParseNameTransformOption(enumMemberNames)
-            };
+                // Determine if CamelCase transform is requested
+                var transformValue = (namespaceNames ?? classNames ?? interfaceNames ?? methodNames ?? propertyNames)?.ToLowerInvariant();
+                var useCamelCase = transformValue == "camelcase" || transformValue == "camel-case" || transformValue == "camel";
 
-            // Phase 1: Generate snapshots
-            Console.WriteLine($"Phase 1: Generating snapshots for {allAssemblies.Count} assemblies...");
-            var snapshots = new List<AssemblySnapshot>();
-
-            string? assembliesDir = null;
-            if (debugSnapshot)
-            {
-                assembliesDir = Path.Combine(outDir, "assemblies");
-                Directory.CreateDirectory(assembliesDir);
-            }
-
-            foreach (var assemblyPath in allAssemblies)
-            {
-                if (verbose)
+                // Update emission policy
+                policy = policy with
                 {
-                    Console.WriteLine($"  Processing: {Path.GetFileName(assemblyPath)}");
-                }
-
-                try
-                {
-                    var snapshot = await GenerateSnapshotAsync(
-                        assemblyPath,
-                        config,
-                        namespaceFilter,
-                        verbose);
-
-                    snapshots.Add(snapshot);
-
-                    // Write snapshot to disk (debug only)
-                    if (debugSnapshot && assembliesDir != null)
+                    Emission = policy.Emission with
                     {
-                        var snapshotFileName = $"{snapshot.AssemblyName}.snapshot.json";
-                        var snapshotPath = Path.Combine(assembliesDir, snapshotFileName);
-                        await SnapshotIO.WriteAssemblySnapshot(snapshot, snapshotPath);
-
-                        if (verbose)
-                        {
-                            Console.WriteLine($"    → {snapshotFileName}");
-                        }
+                        MemberNameTransform = useCamelCase
+                            ? Core.Policy.NameTransformStrategy.CamelCase
+                            : Core.Policy.NameTransformStrategy.None
                     }
-                }
-                catch (Exception ex)
-                {
-                    Console.Error.WriteLine($"  Error processing {Path.GetFileName(assemblyPath)}: {ex.Message}");
-                    if (verbose)
-                    {
-                        Console.Error.WriteLine($"    {ex.StackTrace}");
-                    }
-                }
+                };
             }
 
-            // Write assemblies manifest (debug only)
-            if (debugSnapshot && assembliesDir != null)
+            // Create logger - only if verbose or specific log categories requested
+            Action<string>? logger = (verbose || logs.Length > 0) ? Console.WriteLine : null;
+
+            // Parse log categories
+            HashSet<string>? logCategories = logs.Length > 0 ? new HashSet<string>(logs) : null;
+
+            // Run pipeline
+            var result = Builder.Build(
+                allAssemblies,
+                outDir,
+                policy,
+                logger,
+                verbose,
+                logCategories);
+
+            // Report results
+            Console.WriteLine();
+            if (result.Success)
             {
-                var manifestEntries = snapshots.Select(s => new AssemblyManifestEntry(
-                    s.AssemblyName,
-                    $"{s.AssemblyName}.snapshot.json",
-                    s.Namespaces.Sum(ns => ns.Types.Count),
-                    s.Namespaces.Count)).ToList();
-
-                var manifest = new AssemblyManifest(manifestEntries);
-                var manifestPath = Path.Combine(assembliesDir, "assemblies-manifest.json");
-                var manifestJson = JsonSerializer.Serialize(manifest, new JsonSerializerOptions
-                {
-                    WriteIndented = true,
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                });
-                await File.WriteAllTextAsync(manifestPath, manifestJson);
+                Console.WriteLine("✓ Generation complete");
+                Console.WriteLine($"  Output directory: {Path.GetFullPath(outDir)}");
+                Console.WriteLine($"  Namespaces: {result.Statistics.NamespaceCount}");
+                Console.WriteLine($"  Types: {result.Statistics.TypeCount}");
+                Console.WriteLine($"  Members: {result.Statistics.TotalMembers}");
             }
-
-            Console.WriteLine($"  Generated {snapshots.Count} snapshots");
-            Console.WriteLine($"  Total types: {snapshots.Sum(s => s.Namespaces.Sum(ns => ns.Types.Count))}");
-            Console.WriteLine();
-
-            // Build GlobalInterfaceIndex for cross-assembly interface resolution
-            Console.WriteLine("Building global interface index...");
-            var globalInterfaceIndex = GlobalInterfaceIndex.Build(allAssemblies);
-            Console.WriteLine($"  Indexed {globalInterfaceIndex.Count} public interfaces");
-
-            // Phase 2: Aggregate by namespace
-            Console.WriteLine("Phase 2: Aggregating by namespace...");
-            var bundles = Aggregate.ByNamespace(snapshots);
-
-            // Write namespace snapshots to disk (debug only)
-            if (debugSnapshot)
+            else
             {
-                var namespacesDir = Path.Combine(outDir, "namespaces");
-                Directory.CreateDirectory(namespacesDir);
+                Console.Error.WriteLine("✗ Generation failed");
+                Console.Error.WriteLine($"  Errors: {result.Diagnostics.Count(d => d.Severity == Core.Diagnostics.DiagnosticSeverity.Error)}");
 
-                foreach (var (nsName, bundle) in bundles)
+                foreach (var diagnostic in result.Diagnostics.Where(d => d.Severity == Core.Diagnostics.DiagnosticSeverity.Error))
                 {
-                    var nsFileName = $"{nsName}.snapshot.json";
-                    var nsPath = Path.Combine(namespacesDir, nsFileName);
-
-                    // Convert NamespaceBundle to NamespaceSnapshot for persistence
-                    var nsSnapshot = new NamespaceSnapshot(
-                        bundle.ClrName,
-                        bundle.Types,
-                        bundle.Imports.SelectMany(kvp => kvp.Value.Select(ns => new DependencyRef(ns, kvp.Key))).ToList(),
-                        bundle.Diagnostics);
-
-                    await SnapshotIO.WriteNamespaceSnapshot(nsSnapshot, nsPath);
-
-                    if (verbose)
-                    {
-                        Console.WriteLine($"    → {nsFileName} ({bundle.Types.Count} types from {bundle.SourceAssemblies.Count} assemblies)");
-                    }
+                    Console.Error.WriteLine($"    {diagnostic.Code}: {diagnostic.Message}");
                 }
+
+                Environment.Exit(1);
             }
 
-            Console.WriteLine($"  Aggregated into {bundles.Count} namespace snapshots");
-            Console.WriteLine();
-
-            // Render TypeScript declarations
-            Render.Pipeline.NamespacePipeline.Run(outDir, bundles, config, globalInterfaceIndex, verbose, debugTypeList);
-
-            // TODO: Old view code moved to _old/Views
-            /*
-            // Phase 2: Generate views
-            Console.WriteLine("Phase 2: Generating views...");
-
-            // Aggregate by namespace
-            var aggregator = new NamespaceAggregator(snapshots);
-            var bundles = aggregator.AggregateByNamespace();
-
-            Console.WriteLine($"  Aggregated into {bundles.Count} namespaces");
-
-            // Render namespace bundles
-            var bundleRenderer = new NamespaceBundleRenderer(outDir, config);
-            await bundleRenderer.RenderAllAsync(bundles);
-            Console.WriteLine($"  Generated namespace bundles → namespaces/");
-
-            // Render ambient declarations
-            var ambientRenderer = new AmbientRenderer(outDir, config);
-            await ambientRenderer.RenderAsync(bundles);
-            Console.WriteLine($"  Generated ambient declarations → ambient/global.d.ts");
-
-            // Render module entry points
-            var moduleRenderer = new ModuleRenderer(outDir);
-            await moduleRenderer.RenderAllAsync(bundles);
-            Console.WriteLine($"  Generated module entry points → modules/");
-            */
-
-            Console.WriteLine();
-            Console.WriteLine("✓ Snapshot generation complete");
-            Console.WriteLine($"  Output directory: {Path.GetFullPath(outDir)}");
+            await Task.CompletedTask;
         }
         catch (Exception ex)
         {
@@ -375,147 +233,5 @@ public static class GenerateCommand
             }
             Environment.Exit(1);
         }
-    }
-
-    private static async Task<AssemblySnapshot> GenerateSnapshotAsync(
-        string assemblyPath,
-        GeneratorConfig config,
-        string[] namespaceFilter,
-        bool verbose)
-    {
-        // Validate assembly path
-        if (!File.Exists(assemblyPath))
-        {
-            throw new FileNotFoundException($"Assembly file not found: {assemblyPath}");
-        }
-
-        var assemblyFileName = Path.GetFileName(assemblyPath);
-        var isCoreLib = assemblyFileName.Equals("System.Private.CoreLib.dll", StringComparison.OrdinalIgnoreCase);
-
-        Assembly assembly;
-        MetadataContext? loader = null;
-
-        try
-        {
-            if (isCoreLib)
-            {
-                // Use MetadataLoadContext for core library
-                loader = new MetadataContext(assemblyPath);
-                assembly = loader.LoadFromAssemblyPath(assemblyPath);
-            }
-            else
-            {
-                // Use standard reflection
-                assembly = Assembly.LoadFrom(Path.GetFullPath(assemblyPath));
-            }
-
-            // Reflect over assembly to create pure CLR snapshot
-            return Reflect.Assembly(assembly, assemblyPath, config, namespaceFilter, verbose);
-        }
-        finally
-        {
-            loader?.Dispose();
-        }
-    }
-
-    private static NameTransformOption ParseNameTransformOption(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return NameTransformOption.None;
-        }
-
-        return value.ToLowerInvariant() switch
-        {
-            "camelcase" => NameTransformOption.CamelCase,
-            "camel-case" => NameTransformOption.CamelCase,
-            "camel" => NameTransformOption.CamelCase,
-            _ => throw new ArgumentException($"Unknown naming transform: '{value}'. Supported values: camelCase")
-        };
-    }
-
-    /// <summary>
-    /// Execute using Single-Phase Architecture pipeline (experimental).
-    /// </summary>
-    private static async Task ExecuteNewPipelineAsync(
-        List<string> allAssemblies,
-        string outDir,
-        string[] namespaceFilter,
-        string? namespaceNames,
-        string? classNames,
-        string? interfaceNames,
-        string? methodNames,
-        string? propertyNames,
-        string? enumMemberNames,
-        bool verbose,
-        string[] logs)
-    {
-        Console.WriteLine("=== Using Single-Phase Architecture Pipeline (Experimental) ===");
-        Console.WriteLine();
-
-        // Build policy from CLI options
-        var policy = Core.Policy.PolicyDefaults.Create();
-
-        // Apply name transforms to policy if specified
-        if (!string.IsNullOrWhiteSpace(namespaceNames) ||
-            !string.IsNullOrWhiteSpace(classNames) ||
-            !string.IsNullOrWhiteSpace(interfaceNames) ||
-            !string.IsNullOrWhiteSpace(methodNames) ||
-            !string.IsNullOrWhiteSpace(propertyNames))
-        {
-            // Parse name transform option
-            var transform = ParseNameTransformOption(namespaceNames ?? classNames ?? interfaceNames ?? methodNames ?? propertyNames);
-
-            // Update emission policy
-            policy = policy with
-            {
-                Emission = policy.Emission with
-                {
-                    MemberNameTransform = transform == NameTransformOption.CamelCase
-                        ? Core.Policy.NameTransformStrategy.CamelCase
-                        : Core.Policy.NameTransformStrategy.None
-                }
-            };
-        }
-
-        // Create logger - only if verbose or specific log categories requested
-        Action<string>? logger = (verbose || logs.Length > 0) ? Console.WriteLine : null;
-
-        // Parse log categories
-        HashSet<string>? logCategories = logs.Length > 0 ? new HashSet<string>(logs) : null;
-
-        // Run single-phase pipeline
-        var result = SinglePhase.SinglePhaseBuilder.Build(
-            allAssemblies,
-            outDir,
-            policy,
-            logger,
-            verbose,
-            logCategories);
-
-        // Report results
-        Console.WriteLine();
-        if (result.Success)
-        {
-            Console.WriteLine("✓ Single-phase generation complete");
-            Console.WriteLine($"  Output directory: {Path.GetFullPath(outDir)}");
-            Console.WriteLine($"  Namespaces: {result.Statistics.NamespaceCount}");
-            Console.WriteLine($"  Types: {result.Statistics.TypeCount}");
-            Console.WriteLine($"  Members: {result.Statistics.TotalMembers}");
-        }
-        else
-        {
-            Console.Error.WriteLine("✗ Single-phase generation failed");
-            Console.Error.WriteLine($"  Errors: {result.Diagnostics.Count(d => d.Severity == Core.Diagnostics.DiagnosticSeverity.Error)}");
-
-            foreach (var diagnostic in result.Diagnostics.Where(d => d.Severity == Core.Diagnostics.DiagnosticSeverity.Error))
-            {
-                Console.Error.WriteLine($"    {diagnostic.Code}: {diagnostic.Message}");
-            }
-
-            Environment.Exit(1);
-        }
-
-        await Task.CompletedTask;
     }
 }
