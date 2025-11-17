@@ -97,6 +97,9 @@ public static class FacadeEmitter
                 // Use ImportPlan so type-only imports can be referenced without qualification
                 var resolver = new TypeNameResolver(ctx, plan.Graph, importPlan: plan.Imports, currentNamespace: ns.Name, facadeMode: false);
 
+                // Track friendly aliases (arityless) to avoid duplicates
+                var friendlyAliases = new HashSet<string>();
+
                 foreach (var export in exports)
                 {
                     // Skip base Action to allow custom delegate alias below
@@ -140,6 +143,27 @@ public static class FacadeEmitter
                         resolver,
                         ctx,
                         withConstraints: true); // Facade preserves constraints
+
+                    // FRIENDLY GENERIC ALIAS: Provide arity-less name (List instead of List_1)
+                    if (export.SourceType.GenericParameters.Length > 0)
+                    {
+                        var suffix = $"_{export.SourceType.GenericParameters.Length}";
+                        if (export.ExportName.EndsWith(suffix, StringComparison.Ordinal))
+                        {
+                            var friendlyName = export.ExportName.Substring(0, export.ExportName.Length - suffix.Length);
+                            if (!string.IsNullOrWhiteSpace(friendlyName) && friendlyAliases.Add(friendlyName))
+                            {
+                                AliasEmit.EmitGenericAlias(
+                                    sb,
+                                    aliasName: friendlyName,
+                                    sourceType: export.SourceType,
+                                    rhsExpression: rhsBase,
+                                    resolver,
+                                    ctx,
+                                    withConstraints: true);
+                            }
+                        }
+                    }
                 }
             }
         }
