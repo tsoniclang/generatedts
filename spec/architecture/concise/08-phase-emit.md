@@ -84,14 +84,39 @@ Emits `<namespace>/index.d.ts` with public facade (re-exports from internal).
 
 **Contents:**
 - Re-exports from internal surface: `export * from "./internal";`
+- **Delegate aliases** (System namespace only): Lambda-compatible `Action<...>` and `Func<...>` convenience types
 - Keeps public API clean and simple
 
-**Example:**
+**Delegate Aliases (AppendDelegateAliases):**
+
+For System namespace only, generates lambda-compatible convenience aliases:
+
 ```typescript
-export * from "./internal";
+// Unspecified marker for conditional type routing
+declare const __unspecified: unique symbol;
+export type __ = typeof __unspecified;
+
+// Action<T1, T2, ...> with default parameters
+export type Action<T1 = __, T2 = __, ...> =
+  [T1] extends [__] ? ((() => void) | Internal.Action) :
+  [T2] extends [__] ? (((arg1: T1) => void) | Internal.Action_1<T1>) :
+  // ... routes to correct arity (0-16 params)
+
+// Func<T1, T2, ..., TResult> with default parameters
+export type Func<T1 = __, T2 = __, ...> =
+  [T2] extends [__] ? ((() => T1) | Internal.Func_1<T1>) :
+  [T3] extends [__] ? (((arg1: T1) => T2) | Internal.Func_2<T1, T2>) :
+  // ... routes to correct arity (0-16 input params + 1 result)
 ```
 
-**Files:** `Emit/FacadeEmitter.cs`
+**Why:** Internal delegates are classes (preserve CLR members), can't accept TS lambdas. Facade unions call signatures with delegate classes, enabling:
+
+```typescript
+✅ const f: Func<int, int> = x => x + 1;  // Works via facade
+❌ const f: Func_2<int, int> = x => x + 1;  // Fails (internal class)
+```
+
+**Files:** `Emit/FacadeEmitter.cs:188-293`
 
 ---
 

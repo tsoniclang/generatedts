@@ -95,6 +95,87 @@ private static string GetImportAlias(string namespaceName)
 **What it does:**
 - Converts dotted namespace to valid identifier: `"System.Collections.Generic"` → `"System_Collections_Generic"`
 
+### Method: AppendDelegateAliases
+```csharp
+private static void AppendDelegateAliases(StringBuilder sb, BuildContext ctx, SymbolGraph graph)
+```
+**Purpose:** Generates lambda-compatible convenience aliases for `Action` and `Func` delegates in the System namespace facade.
+
+**What it does:**
+1. **Finds all Action/Func delegates** - Discovers all Action_N and Func_N types from System namespace
+2. **Emits unspecified marker** - `declare const __unspecified: unique symbol; export type __ = typeof __unspecified;`
+3. **Generates conditional type aliases** - Creates `Action<T1, T2, ...>` and `Func<T1, T2, ...>` with default parameters
+4. **Unions call signatures with internal types** - Each arity branch: `((args) => result) | Internal.Func_N<...>`
+
+**Why this is needed:**
+- Internal delegate types are emitted as **classes** (to preserve all CLR members like BeginInvoke, EndInvoke, Clone)
+- TypeScript lambdas (`x => x + 1`) are **not assignable** to class types
+- Facade aliases union **call signatures** with class types, making lambdas assignable
+
+**Generated output example:**
+```typescript
+// Unspecified marker for default parameter detection
+declare const __unspecified: unique symbol;
+export type __ = typeof __unspecified;
+
+// Action convenience alias (0-16 parameters)
+export type Action<
+  T1 = __,
+  T2 = __,
+  // ... up to T16
+> =
+  [T1] extends [__] ? ((() => void) | Internal.Action) :
+  [T2] extends [__] ? (((arg1: T1) => void) | Internal.Action_1<T1>) :
+  [T3] extends [__] ? (((arg1: T1, arg2: T2) => void) | Internal.Action_2<T1, T2>) :
+  // ... conditional routing to correct arity
+  ((arg1: T1, ..., arg16: T16) => void) | Internal.Action_16<T1, ..., T16>;
+
+// Func convenience alias (1-17 type parameters, last is return type)
+export type Func<
+  T1 = __,
+  T2 = __,
+  // ... up to T17
+> =
+  [T2] extends [__] ? ((() => T1) | Internal.Func_1<T1>) :
+  [T3] extends [__] ? (((arg1: T1) => T2) | Internal.Func_2<T1, T2>) :
+  // ... conditional routing
+  ((arg1: T1, ..., arg16: T16) => T17) | Internal.Func_17<...>;
+```
+
+**How the conditional types work:**
+1. **Default parameters** - All type parameters default to `__` (the unspecified marker)
+2. **Conditional routing** - Check `[T_N] extends [__]` to detect which parameters are provided
+3. **Call signature** - Each branch includes `((args) => result)` making lambdas assignable
+4. **Union with internal** - Also includes `Internal.Func_N` for CLR delegate instances
+
+**Usage examples:**
+```typescript
+// ✅ Lambda assignment works!
+import { Func, Action } from "./System";
+import { int } from "./System/internal";
+
+const func: Func<int, int> = x => (x + 1) as int;
+const result: int = func(42 as int);
+
+const action: Action<int> = x => console.log(x);
+action(10 as int);
+```
+
+**Comparison with internal types:**
+```typescript
+// ❌ Internal delegate types DON'T accept lambdas
+import { Func_2 } from "./System/internal";
+
+const func: Func_2<int, int> = x => x + 1;  // Type error!
+// Error: Type '(x: int) => int' is not assignable to type 'Func_2<int, int>'
+```
+
+**Arity support:**
+- **Action**: 0 to 16 parameters (Action through Action_16)
+- **Func**: 1 to 17 type parameters (last is return type, so 0-16 input parameters)
+
+**Only emitted for System namespace** - Other namespaces don't get delegate aliases (they should import from System facade)
+
 ### Output Format Example
 
 ```typescript
