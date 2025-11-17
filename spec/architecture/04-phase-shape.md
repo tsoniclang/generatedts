@@ -1411,8 +1411,9 @@ class Derived : Base {
 **Algorithm:**
 1. Debug check: validate no duplicates exist before processing
 2. Filter classes with base types: `graph.Namespaces.SelectMany(ns => ns.Types).Where(t => t.Kind == Class && t.BaseType != null)`
-3. For each class: `(updatedGraph, added) = AddOverloadsForClass(ctx, updatedGraph, derivedClass)`
-4. Return updated graph
+3. **Sort types topologically** (base before derived) to ensure base class overloads are collected before processing derived classes
+4. For each class (in topological order): `(updatedGraph, added) = AddOverloadsForClass(ctx, updatedGraph, derivedClass)`
+5. Return updated graph
 
 **Called by:** Shape phase (after DiamondResolver)
 
@@ -1422,13 +1423,13 @@ class Derived : Base {
 **Returns:** `(SymbolGraph UpdatedGraph, int AddedCount)`
 
 **Algorithm:**
-1. Find base class: `FindBaseClass(graph, derivedClass)` → skip if external/System.Object
+1. **Walk full inheritance chain**: Collect base methods from ALL ancestors (base, grandparent, etc.) using transitive closure
 2. Group methods by name:
    - `derivedMethodsByName = derivedClass.Members.Methods.Where(m => !m.IsStatic).GroupBy(m => m.ClrName)`
-   - `baseMethodsByName = baseClass.Members.Methods.Where(m => !m.IsStatic).GroupBy(m => m.ClrName)`
+   - `allBaseMethodsByName = CollectAllBaseMethods(graph, derivedClass).GroupBy(m => m.ClrName)`
 3. For each base method name:
    - If derived doesn't override → skip (keeps base methods)
-   - For each base method:
+   - For each base method in hierarchy:
      - Build expected StableId for derived version
      - Check if derived has this exact signature
      - If missing → synthesize with `CreateBaseOverloadMethod(...)`
@@ -2049,34 +2050,543 @@ Close generic constraints for TypeScript. Computes final constraint sets by:
 
 ---
 
+## Pass 4.7: StaticHierarchyFlattener
+
+**File:** `StaticHierarchyFlattener.cs`
+
+### Purpose
+Flatten static-only inheritance hierarchies by removing `extends` clause and emitting inherited static members directly in the derived class. TypeScript doesn't support static-side inheritance (static members don't inherit through `extends`), causing TS2417 errors when derived classes try to reference base static members.
+
+**Why needed?** Many BCL types (especially SIMD intrinsics) are static-only types that form inheritance hierarchies. Without flattening, TypeScript reports errors like "Static property 'X' cannot be named on instance side".
+
+### Public API
+
+#### `StaticHierarchyFlattener.Build(BuildContext ctx, SymbolGraph graph)`
+**Signature:** `public static (SymbolGraph UpdatedGraph, StaticFlatteningPlan Plan) Build(BuildContext ctx, SymbolGraph graph)`
+
+**What it does:**
+- Identifies static-only types (types with ONLY static members, no instance members)
+- Walks inheritance hierarchies to collect inherited static members
+- Creates `StaticFlatteningPlan` with flattening metadata for emission phase
+- Does NOT modify SymbolGraph (planning only)
+
+**Algorithm:**
+1. Identify static-only types: `IdentifyStaticOnlyTypes(graph)`
+   - Filter types where ALL members are static (no instance constructors/methods/properties)
+   - Exclude types without base classes
+2. For each static-only type:
+   - Walk inheritance chain: `CollectInheritedStaticMembers(graph, type)`
+   - Collect ALL static members from base, grandparent, etc. (transitive closure)
+   - Store in plan: `(type.StableId, inheritedMembers)`
+3. Return `(graph, plan)`
+
+**Called by:** SinglePhaseBuilder Phase 4.7
+
+**Impact:** Affects ~50 SIMD intrinsic types (Vector64, Sse, Avx, etc.)
+
+### Private Methods
+
+#### `IdentifyStaticOnlyTypes(SymbolGraph graph)`
+**Returns:** `List<TypeSymbol>` - Types with only static members
+
+**Criteria:**
+- `type.IsStatic` OR (all members are static AND no instance constructors)
+- Has base type (inheritance)
+- Excludes System.Object, System.ValueType
+
+**Example static-only types:**
+- `System.Runtime.Intrinsics.X86.Sse2` : `Sse`
+- `System.Runtime.Intrinsics.Arm.AdvSimd` : `ArmBase`
+
+#### `CollectInheritedStaticMembers(SymbolGraph graph, TypeSymbol type)`
+**Returns:** `InheritedStaticMembers` - All static members from base hierarchy
+
+**Algorithm:**
+1. Initialize collections for methods, properties, fields
+2. Walk base chain recursively:
+   - Find base class in graph
+   - Collect ALL static members from base
+   - Recurse to grandparent
+3. Return `InheritedStaticMembers(methods, properties, fields)`
+
+**Deduplication:** Keeps all inherited members (deduplication handled during emission)
+
+### Data Structures
+
+#### `StaticFlatteningPlan` Class
+```csharp
+public sealed class StaticFlatteningPlan
+{
+    // Maps type StableId → inherited static members
+    public Dictionary<string, InheritedStaticMembers> FlattenedTypes { get; init; }
+}
+```
+
+#### `InheritedStaticMembers` Record
+```csharp
+public record InheritedStaticMembers(
+    List<MethodSymbol> Methods,
+    List<PropertySymbol> Properties,
+    List<FieldSymbol> Fields)
+{
+    public int TotalCount => Methods.Count + Properties.Count + Fields.Count;
+}
+```
+
+### Example Transformation
+
+**Before (with extends):**
+```typescript
+class Sse$instance extends X86Base$instance {
+    static Add(left: Vector128_1<float>, right: Vector128_1<float>): Vector128_1<float>;
+    // Missing base static members → TS2417 error!
+}
+```
+
+**After (flattened):**
+```typescript
+class Sse$instance {  // No extends!
+    // Own static members:
+    static Add(left: Vector128_1<float>, right: Vector128_1<float>): Vector128_1<float>;
+
+    // Inherited static members emitted directly:
+    static get IsSupported(): boolean;  // From X86Base
+}
+```
+
+**Result:** TS2417 errors eliminated for static-only types
+
+---
+
+## Pass 4.8: StaticConflictDetector
+
+**File:** `StaticConflictDetector.cs`
+
+### Purpose
+Detect and plan suppression for static member conflicts between base and derived classes. When a derived class has a static member with the same name as a base class static member, TypeScript reports TS2417 errors because the static sides conflict.
+
+**Difference from StaticHierarchyFlattener:** This handles HYBRID types (both static and instance members) where we KEEP `extends` for instance inheritance but must suppress conflicting static members.
+
+### Public API
+
+#### `StaticConflictDetector.Build(BuildContext ctx, SymbolGraph graph)`
+**Signature:** `public static StaticConflictPlan Build(BuildContext ctx, SymbolGraph graph)`
+
+**What it does:**
+- Identifies types with BOTH static and instance members
+- Detects static property/method/field name conflicts with base class
+- Compares signatures and types for compatibility
+- Creates `StaticConflictPlan` with suppression metadata
+
+**Algorithm:**
+1. Filter hybrid types: types with both static and instance members AND base class
+2. For each hybrid type:
+   - Find base class in graph
+   - Collect static members from derived and base
+   - For each derived static member:
+     - Check if base has static member with same name
+     - Compare types/signatures for compatibility
+     - If incompatible → mark for suppression
+3. Store suppressions in plan: `(type.StableId, member.StableId) → suppress`
+4. Return plan
+
+**Called by:** SinglePhaseBuilder Phase 4.8
+
+**Impact:** Affects 4 types (Task_1, CallSite_1, XmlQuery*)
+
+### Private Methods
+
+#### `DetectConflicts(BuildContext ctx, SymbolGraph graph, TypeSymbol derivedType, TypeSymbol baseType)`
+**Returns:** `List<MemberStableId>` - Static members to suppress
+
+**Checks for conflicts:**
+1. **Static properties**: Same name, different type
+2. **Static methods**: Same name (signature comparison for overloads)
+3. **Static fields**: Same name, different type
+
+**Suppression criteria:**
+- Derived static shadows base static with incompatible signature
+- Keep base member accessible through `extends`, suppress derived declaration
+
+#### `ComparePropertyTypes(PropertySymbol derived, PropertySymbol base)`
+**Returns:** `bool` - True if types compatible
+
+**Comparison:**
+- Compare `PropertyType` using TypeScript assignability rules
+- If types differ → conflict
+
+#### `CompareMethodSignatures(MethodSymbol derived, MethodSymbol base)`
+**Returns:** `bool` - True if signatures compatible
+
+**Comparison:**
+- Compare canonical signatures (parameters + return type)
+- If signatures differ → conflict
+
+### Data Structures
+
+#### `StaticConflictPlan` Class
+```csharp
+public sealed class StaticConflictPlan
+{
+    // Maps (type StableId, member StableId) → suppression info
+    public Dictionary<(string TypeStableId, string MemberStableId), StaticConflictSuppression> Suppressions { get; init; }
+}
+```
+
+#### `StaticConflictSuppression` Record
+```csharp
+public record StaticConflictSuppression(
+    MemberKind Kind,  // Property, Method, Field
+    string MemberName,
+    string Reason);
+```
+
+### Example Transformation
+
+**Before (conflict):**
+```typescript
+class Task_1<TResult> extends Task {
+    static get CompletedTask(): Task;  // Conflicts with base!
+}
+// Base class also has:
+// static get CompletedTask(): Task;
+// → TS2417 error: static property conflict
+```
+
+**After (suppressed):**
+```typescript
+class Task_1<TResult> extends Task {
+    // Derived static suppressed - base static inherited
+    // No TS2417 error!
+}
+```
+
+---
+
+## Pass 4.9: OverrideConflictDetector
+
+**File:** `OverrideConflictDetector.cs`
+
+### Purpose
+Detect and plan suppression for instance member override conflicts. When a derived class has an instance member that overrides a base member with an incompatible signature (different return type, parameters), TypeScript reports TS2416 errors.
+
+**C# vs TypeScript:** C# allows covariant return types and property type specialization; TypeScript requires exact signature matches.
+
+### Public API
+
+#### `OverrideConflictDetector.Build(BuildContext ctx, SymbolGraph graph)`
+**Signature:** `public static OverrideConflictPlan Build(BuildContext ctx, SymbolGraph graph)`
+
+**What it does:**
+- Identifies types with instance members that override base members
+- Detects property/method signature conflicts between base and derived
+- Creates `OverrideConflictPlan` with suppression metadata
+- **Limitation:** Only works within same SymbolGraph (same-assembly inheritance)
+
+**Algorithm:**
+1. Filter types with base classes
+2. For each type:
+   - Find base class in graph (skip if external)
+   - Collect instance methods and properties
+   - For each derived instance member:
+     - Find matching base member by name
+     - Compare return types and parameters
+     - If incompatible → mark for suppression
+3. Store suppressions in plan
+4. Return plan
+
+**Called by:** SinglePhaseBuilder Phase 4.9
+
+**Impact:** Reduced TS2416 errors by 44% in same-assembly cases
+
+**Known Limitation:** Cross-assembly conflicts (e.g., `HttpRequestCachePolicy.level` from different assembly) not detected. Would require base types in same SymbolGraph.
+
+### Private Methods
+
+#### `DetectPropertyConflicts(BuildContext ctx, TypeSymbol derivedType, TypeSymbol baseType)`
+**Returns:** `List<MemberStableId>` - Properties to suppress
+
+**Criteria for conflict:**
+1. Derived property name matches base property name
+2. Property types differ (not assignable)
+3. Both are instance properties (not static)
+
+**Example conflict:**
+```csharp
+// Base: WebHeaderCollection.Item : string
+// Derived: WebHeaderCollection.Item : string[]
+// → Conflict: different types
+```
+
+#### `DetectMethodConflicts(BuildContext ctx, TypeSymbol derivedType, TypeSymbol baseType)`
+**Returns:** `List<MemberStableId>` - Methods to suppress
+
+**Criteria for conflict:**
+1. Method names match
+2. Parameter counts differ OR parameter types differ OR return type differs
+3. Not a valid TypeScript override
+
+**Example conflict:**
+```csharp
+// Base: DataTableReader.GetData(int ordinal): IDataReader
+// Derived: DataTableReader.GetData(int ordinal): DbDataReader
+// → Conflict: covariant return type (C# allows, TS doesn't)
+```
+
+### Data Structures
+
+#### `OverrideConflictPlan` Class
+```csharp
+public sealed class OverrideConflictPlan
+{
+    // Maps (type StableId, member StableId) → suppression info
+    public Dictionary<(string TypeStableId, string MemberStableId), OverrideConflictSuppression> Suppressions { get; init; }
+}
+```
+
+#### `OverrideConflictSuppression` Record
+```csharp
+public record OverrideConflictSuppression(
+    MemberKind Kind,
+    string MemberName,
+    string BaseTypeName,
+    string Reason);
+```
+
+### Example Transformation
+
+**Before (conflict):**
+```typescript
+class WebHeaderCollection extends NameValueCollection {
+    get_Item(name: string): string[];  // TS2416 error!
+    set_Item(name: string, value: string[]): void;  // TS2416 error!
+}
+// Base expects: get_Item(name: string): string
+```
+
+**After (suppressed):**
+```typescript
+class WebHeaderCollection extends NameValueCollection {
+    // Conflicting members suppressed - base members inherited
+    // No TS2416 error!
+}
+```
+
+**Limitation Example (cross-assembly - NOT handled):**
+```typescript
+// System.Net.Cache.RequestCachePolicy (Assembly A)
+// System.Net.Cache.HttpRequestCachePolicy : RequestCachePolicy (Assembly B)
+// → Cross-assembly conflict NOT detected by this pass
+```
+
+---
+
+## Pass 4.10: PropertyOverrideUnifier
+
+**File:** `PropertyOverrideUnifier.cs`
+
+### Purpose
+Unify property types across inheritance hierarchies using union types. When a derived class has a property with a more specific type than the base class (property covariance), emit union types in BOTH base and derived to satisfy TypeScript's structural typing.
+
+**C# Property Covariance:** C# allows derived classes to have properties with more specific types. TypeScript requires exact type matches.
+
+**Solution:** Use union types (e.g., `HttpRequestCacheLevel | RequestCacheLevel`) in all classes in the inheritance chain.
+
+### Public API
+
+#### `PropertyOverrideUnifier.Build(SymbolGraph graph, BuildContext ctx)`
+**Signature:** `public static PropertyOverridePlan Build(SymbolGraph graph, BuildContext ctx)`
+
+**What it does:**
+- Walks inheritance hierarchies for all types with base classes
+- Groups properties by CLR name across inheritance chain
+- Computes TypeScript type strings for each property
+- Creates union types for properties with differing types
+- Filters out properties with generic type parameters (avoid TS2304 errors)
+- Returns `PropertyOverridePlan` with unified type mappings
+
+**Algorithm:**
+1. Find all types with base classes
+2. For each type:
+   - Walk hierarchy: `WalkHierarchy(type, graph)` → list of (type, depth)
+   - Group properties by CLR name across ALL types in hierarchy
+   - For each property group:
+     - Compute TS type string for each property: `TypeRefPrinter.Print(...)`
+     - If all types same → skip (no unification needed)
+     - If any type contains generic parameters (T, TKey, TValue) → skip (safety filter)
+     - Create union: `type1 | type2 | ...`
+     - Store in plan for ALL properties in group: `(type.StableId, prop.StableId) → unionType`
+3. Return plan
+
+**Called by:** SinglePhaseBuilder Phase 4.10
+
+**Impact:** Eliminated final TS2416 error, achieving zero TypeScript errors
+
+### Private Methods
+
+#### `WalkHierarchy(TypeSymbol type, SymbolGraph graph)`
+**Returns:** `List<(TypeSymbol Type, int Depth)>` - Inheritance chain from root to derived
+
+**Algorithm:**
+1. Recursively walk BaseType references
+2. Track depth (root = 0, immediate derived = 1, etc.)
+3. Return top-down list (root first, derived last)
+
+**Key Fix - Assembly Forwarding:**
+- Uses `ResolveBase` which lookups by `ClrFullName` instead of exact `StableId`
+- Handles .NET type forwarding (e.g., `System.Net.Primitives` → `System.Net.Requests`)
+
+```csharp
+var baseType = graph.TypeIndex.Values
+    .FirstOrDefault(t => t.ClrFullName == named.FullName);
+```
+
+#### `GroupPropertiesByName(List<(TypeSymbol Type, int Depth)> hierarchy, BuildContext ctx)`
+**Returns:** `Dictionary<string, List<(TypeSymbol, PropertySymbol)>>` - Properties grouped by CLR name
+
+**Grouping:**
+- Key: Property CLR name (e.g., `"level"`)
+- Value: All properties with that name across hierarchy
+
+#### `UnifyPropertyGroup(List<(TypeSymbol, PropertySymbol)> group, SymbolGraph graph, BuildContext ctx, PropertyOverridePlan plan)`
+**Purpose:** Create union type for property group
+
+**Algorithm:**
+1. Collect unique TS type strings:
+   - For each property: `TypeRefPrinter.Print(prop.PropertyType, resolver, ctx)`
+   - Build dictionary: `tsType → count`
+2. If only one unique type → skip (no variance)
+3. **Safety filter - Generic type parameters:**
+   ```csharp
+   if (Regex.IsMatch(tsType, @"\b(T|E|K|V|TKey|TValue|TResult|TSource|TElement|TItem)\b"))
+       return;  // Skip unification
+   ```
+   - Prevents invalid unions like `any | KeyValuePair_2<TKey, TValue> | T`
+   - Avoids TS2304 "Cannot find name 'T'" errors
+4. Create union: `string.Join(" | ", types.OrderBy(s => s))`
+5. Store for ALL properties in group:
+   ```csharp
+   plan.PropertyTypeOverrides[(type.StableId.ToString(), prop.StableId.ToString())] = unionType;
+   ```
+
+### Data Structures
+
+#### `PropertyOverridePlan` Class
+```csharp
+public sealed class PropertyOverridePlan
+{
+    // Maps (type StableId, property StableId) → unified union type string
+    public Dictionary<(string TypeStableId, string PropertyStableId), string> PropertyTypeOverrides { get; init; }
+}
+```
+
+### Example Transformation
+
+**Problem (before unification):**
+```csharp
+// C# allows this:
+class RequestCachePolicy {
+    public virtual RequestCacheLevel level { get; }
+}
+class HttpRequestCachePolicy : RequestCachePolicy {
+    public override HttpRequestCacheLevel level { get; }  // More specific type
+}
+```
+
+**TypeScript rejects:**
+```typescript
+class RequestCachePolicy$instance {
+    readonly level: RequestCacheLevel;
+}
+class HttpRequestCachePolicy$instance extends RequestCachePolicy$instance {
+    readonly level: HttpRequestCacheLevel;  // TS2416 ERROR!
+}
+```
+
+**Solution (with unification):**
+```typescript
+class RequestCachePolicy$instance {
+    readonly level: HttpRequestCacheLevel | RequestCacheLevel;  // Union
+}
+class HttpRequestCachePolicy$instance extends RequestCachePolicy$instance {
+    readonly level: HttpRequestCacheLevel | RequestCacheLevel;  // Same union ✅
+}
+```
+
+### Safety Filter - Generic Type Parameters
+
+**Problem without filter:**
+```typescript
+class Dictionary_2_Enumerator$instance<TKey, TValue> {
+    readonly current: any | KeyValuePair_2<TKey, TValue> | T;  // ERROR: T undefined!
+}
+```
+
+**Cause:** Union combined generic parameters from different scopes:
+- `T` from `IEnumerator<T>`
+- `KeyValuePair_2<TKey, TValue>` from `Dictionary<TKey, TValue>`
+
+**Solution - Skip unification for generic properties:**
+```csharp
+if (Regex.IsMatch(tsType, @"\b(T|E|K|V|TKey|TValue|TResult|TSource|TElement|TItem)\b"))
+    return;  // Keep original types, no unification
+```
+
+**Result:** Generic properties keep their original types, avoiding TS2304 errors
+
+### Statistics
+
+**Generation:**
+- Property chains unified: 222
+- Union entries created: 444 (base + derived for each chain)
+- Average chain length: 2 types
+
+**Performance:**
+- Phase 4.10 overhead: <100ms
+- Memory overhead: ~10KB for plan
+
+**Error Impact:**
+- TS2416 errors: 1 → 0 (-100%)
+- **Total errors: 1 → 0 (ZERO ERRORS ACHIEVED)**
+
+---
+
 ## Pass Order and Dependencies
 
 **Critical:** Shape passes MUST run in this exact order:
 
 1. **GlobalInterfaceIndex** - Build global interface index (required by all later passes)
 2. **InterfaceDeclIndex** - Build declared-only index (required by InterfaceResolver)
-3. **InterfaceInliner** - Flatten interface hierarchies BEFORE conformance checking
-4. **StructuralConformance** - Analyze conformance and synthesize ViewOnly members
-5. **ExplicitImplSynthesizer** - Synthesize missing EII members
-6. **InterfaceResolver** - Resolve declaring interfaces (used by synthesis passes)
-7. **DiamondResolver** - Detect/resolve diamond conflicts AFTER all synthesis
-8. **BaseOverloadAdder** - Add base overloads AFTER diamond resolution
-9. **OverloadReturnConflictResolver** - Detect return-type conflicts AFTER overload addition
-10. **MemberDeduplicator** - Remove duplicates BEFORE view planning
-11. **ViewPlanner** - Plan explicit views AFTER all ViewOnly members synthesized
-12. **ClassSurfaceDeduplicator** - Deduplicate by emitted name AFTER view planning
-13. **HiddenMemberPlanner** - Plan 'new' hidden members
-14. **IndexerPlanner** - Convert indexers to methods
-15. **FinalIndexersPass** - Final indexer policy enforcement
-16. **StaticSideAnalyzer** - Analyze static-side conflicts
-17. **ConstraintCloser** - Close generic constraints (final pass)
+3. **InternalInterfaceFilter** - Filter internal BCL interfaces BEFORE building conformance
+4. **InterfaceInliner** - Flatten interface hierarchies BEFORE conformance checking
+5. **StructuralConformance** - Analyze conformance and synthesize ViewOnly members
+6. **ExplicitImplSynthesizer** - Synthesize missing EII members
+7. **InterfaceResolver** - Resolve declaring interfaces (used by synthesis passes)
+8. **DiamondResolver** - Detect/resolve diamond conflicts AFTER all synthesis
+9. **BaseOverloadAdder** - Add base overloads AFTER diamond resolution (with full hierarchy walking)
+10. **OverloadReturnConflictResolver** - Detect return-type conflicts AFTER overload addition
+11. **MemberDeduplicator** - Remove duplicates BEFORE view planning
+12. **ViewPlanner** - Plan explicit views AFTER all ViewOnly members synthesized
+13. **ClassSurfaceDeduplicator** - Deduplicate by emitted name AFTER view planning
+14. **HiddenMemberPlanner** - Plan 'new' hidden members
+15. **IndexerPlanner** - Convert indexers to methods
+16. **FinalIndexersPass** - Final indexer policy enforcement
+17. **StaticSideAnalyzer** - Analyze static-side conflicts (legacy - superseded by 4.7-4.8)
+18. **ConstraintCloser** - Close generic constraints
+19. **StaticHierarchyFlattener** (4.7) - Flatten static-only hierarchies
+20. **StaticConflictDetector** (4.8) - Detect static member conflicts in hybrid types
+21. **OverrideConflictDetector** (4.9) - Detect instance override conflicts (same-assembly only)
+22. **PropertyOverrideUnifier** (4.10) - Unify property types across hierarchies with unions
 
 **Dependencies:**
-- Passes 4-5 (synthesis) depend on pass 3 (inlining) - must work with flattened interfaces
-- Pass 6 (resolver) depends on passes 1-2 (indexes) - needs global interface info
-- Pass 11 (view planner) depends on passes 4-5 (synthesis) - needs ViewOnly members
-- Pass 12 (surface dedup) depends on pass 11 (view planner) - can safely demote to ViewOnly
-- Pass 15 (final indexers) depends on pass 14 (indexer planner) - ensures no leaks
+- Passes 4-6 (synthesis) depend on pass 3 (inlining) - must work with flattened interfaces
+- Pass 7 (resolver) depends on passes 1-2 (indexes) - needs global interface info
+- Pass 12 (view planner) depends on passes 5-6 (synthesis) - needs ViewOnly members
+- Pass 13 (surface dedup) depends on pass 12 (view planner) - can safely demote to ViewOnly
+- Pass 16 (final indexers) depends on pass 15 (indexer planner) - ensures no leaks
+- **Passes 4.7-4.8** (static handling) run AFTER constraint closer - need final graph
+- **Pass 4.9** (override conflicts) runs AFTER 4.7-4.8 - suppresses instance-side conflicts
+- **Pass 4.10** (property unification) runs LAST - unifies remaining property variance with unions
 
 ---
 
@@ -2186,6 +2696,72 @@ class Enumerator_1<T> {
 }
 ```
 
+### Static Hierarchy Flattening
+**Before:**
+```typescript
+class Sse$instance extends X86Base$instance {
+    static Add(...): Vector128_1<float>;
+    // Missing base static 'IsSupported' → TS2417 error
+}
+```
+**After:**
+```typescript
+class Sse$instance {  // No extends!
+    static Add(...): Vector128_1<float>;      // Own member
+    static get IsSupported(): boolean;         // Inherited from base, emitted directly
+}
+```
+
+### Static Conflict Suppression
+**Before:**
+```typescript
+class Task_1<TResult> extends Task {
+    static get CompletedTask(): Task;  // TS2417: conflicts with base static
+}
+```
+**After:**
+```typescript
+class Task_1<TResult> extends Task {
+    // Conflicting static suppressed - base static inherited via extends
+}
+```
+
+### Override Conflict Suppression
+**Before:**
+```typescript
+class WebHeaderCollection extends NameValueCollection {
+    get_Item(name: string): string[];         // TS2416: incompatible override
+    set_Item(name: string, value: string[]): void;  // TS2416: incompatible override
+}
+// Base expects: get_Item(name: string): string
+```
+**After:**
+```typescript
+class WebHeaderCollection extends NameValueCollection {
+    // Conflicting instance members suppressed - base members inherited
+}
+```
+
+### Property Override Unification
+**Before:**
+```typescript
+class RequestCachePolicy$instance {
+    readonly level: RequestCacheLevel;
+}
+class HttpRequestCachePolicy$instance extends RequestCachePolicy$instance {
+    readonly level: HttpRequestCacheLevel;  // TS2416: property covariance error
+}
+```
+**After:**
+```typescript
+class RequestCachePolicy$instance {
+    readonly level: HttpRequestCacheLevel | RequestCacheLevel;  // Union type
+}
+class HttpRequestCachePolicy$instance extends RequestCachePolicy$instance {
+    readonly level: HttpRequestCacheLevel | RequestCacheLevel;  // Same union ✅
+}
+```
+
 ---
 
 ## Output
@@ -2194,12 +2770,21 @@ class Enumerator_1<T> {
 - Flattened interfaces (no `extends`)
 - ViewOnly members synthesized for all non-conforming interfaces
 - Explicit views planned (As_IInterface properties)
-- Base overloads added for TypeScript compatibility
+- Base overloads added for TypeScript compatibility (with full hierarchy walking)
 - Indexers converted to methods (policy-dependent)
 - Diamond conflicts detected
 - Return-type conflicts detected
-- Static-side issues analyzed/renamed
+- **Static hierarchy flattening plan** - Static-only types identified and flattening metadata created
+- **Static conflict plan** - Static member conflicts in hybrid types identified for suppression
+- **Override conflict plan** - Instance override conflicts identified for suppression (same-assembly)
+- **Property override plan** - Property type unions computed for inheritance hierarchies
 - Generic constraints resolved and validated
 - Clean graph ready for Renaming and Emit phases
+
+**Plans Created:**
+- `StaticFlatteningPlan` - Maps static-only types to inherited members to emit
+- `StaticConflictPlan` - Maps hybrid types to static members to suppress
+- `OverrideConflictPlan` - Maps derived types to instance members to suppress
+- `PropertyOverridePlan` - Maps properties to unified union type strings
 
 **Next Phase:** Renaming (reserve all member names, apply transformations)

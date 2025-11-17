@@ -100,17 +100,21 @@ The exact order of execution as implemented in `SinglePhaseBuilder.Build`:
 
 ---
 
-## Phase 3: SHAPE (14 Transformation Passes)
+## Phase 3: SHAPE (22 Transformation Passes)
 
-**Purpose**: Transform CLR semantics → TypeScript semantics
+**Purpose**: Transform CLR semantics → TypeScript semantics + create compatibility plans
 
 **Input**:
 - `SymbolGraph` (from Phase 2, with indices)
 
 **Output**:
 - `SymbolGraph` (TypeScript-ready, but still no `TsEmitName` assigned)
+- `StaticFlatteningPlan` (from pass 4.7)
+- `StaticConflictPlan` (from pass 4.8)
+- `OverrideConflictPlan` (from pass 4.9)
+- `PropertyOverridePlan` (from pass 4.10)
 
-**Mutability**: Pure function (each pass returns new immutable SymbolGraph)
+**Mutability**: Pure function (each pass returns new immutable SymbolGraph or plan)
 
 **Key Transformations**:
 - Interface flattening
@@ -119,8 +123,12 @@ The exact order of execution as implemented in `SinglePhaseBuilder.Build`:
 - Method overload handling
 - Member deduplication
 - EmitScope determination (ClassSurface vs ViewOnly)
+- **NEW:** Static hierarchy flattening planning (D1)
+- **NEW:** Static conflict detection (D2)
+- **NEW:** Override conflict detection (D3)
+- **NEW:** Property type unification (Step E)
 
-### 14 Shape Passes (Exact Order)
+### 22 Shape Passes (Exact Order)
 
 Each pass executes sequentially and returns a new immutable SymbolGraph:
 
@@ -222,10 +230,63 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 - **Output**: SymbolGraph (final deduplication)
 - **Files**: `src/tsbindgen/SinglePhase/Shape/MemberDeduplicator.cs`
 
+#### Pass 17: StaticSideAnalyzer.Analyze (Legacy)
+- **Purpose**: Analyze static-side conflicts (superseded by passes 4.7-4.8)
+- **Input**: SymbolGraph
+- **Output**: SymbolGraph (unchanged in current implementation)
+- **Files**: `src/tsbindgen/SinglePhase/Shape/StaticSideAnalyzer.cs`
+- **Note**: Kept for compatibility, actual static handling done by passes 4.7-4.8
+
+#### Pass 18: ConstraintCloser.Close
+- **Purpose**: Complete generic constraint closures
+- **Input**: SymbolGraph
+- **Output**: SymbolGraph (constraints closed)
+- **Files**: `src/tsbindgen/SinglePhase/Shape/ConstraintCloser.cs`
+
+#### Pass 4.7 (19): StaticHierarchyFlattener.Build
+- **Purpose**: Plan flattening for static-only inheritance hierarchies
+- **Input**: SymbolGraph
+- **Output**: `(SymbolGraph, StaticFlatteningPlan)`
+- **Files**: `src/tsbindgen/SinglePhase/Shape/StaticHierarchyFlattener.cs`
+- **Key**: Identifies static-only types, collects inherited static members, creates flattening metadata
+- **Impact**: Eliminates TS2417 errors for SIMD intrinsics (~50 types)
+
+#### Pass 4.8 (20): StaticConflictDetector.Build
+- **Purpose**: Detect static member conflicts in hybrid types (both static and instance members)
+- **Input**: SymbolGraph
+- **Output**: `StaticConflictPlan`
+- **Files**: `src/tsbindgen/SinglePhase/Shape/StaticConflictDetector.cs`
+- **Key**: Finds static properties/methods/fields that shadow base class statics
+- **Impact**: Eliminates TS2417 errors for Task<T> and similar hybrid types (~4 types)
+
+#### Pass 4.9 (21): OverrideConflictDetector.Build
+- **Purpose**: Detect instance member override conflicts (same-assembly only)
+- **Input**: SymbolGraph
+- **Output**: `OverrideConflictPlan`
+- **Files**: `src/tsbindgen/SinglePhase/Shape/OverrideConflictDetector.cs`
+- **Key**: Finds properties/methods with incompatible signatures vs base class
+- **Impact**: Reduced TS2416 errors by 44% in same-assembly cases
+- **Limitation**: Only detects conflicts when both base and derived are in same SymbolGraph
+
+#### Pass 4.10 (22): PropertyOverrideUnifier.Build
+- **Purpose**: Unify property types across inheritance hierarchies via union types
+- **Input**: SymbolGraph
+- **Output**: `PropertyOverridePlan`
+- **Files**: `src/tsbindgen/SinglePhase/Shape/PropertyOverrideUnifier.cs`
+- **Key**: Walks inheritance chains, groups properties by name, creates union types for differing types
+- **Safety**: Filters out properties with generic type parameters (T, TKey, TValue, etc.)
+- **Impact**: Eliminated final TS2416 error, achieving **zero TypeScript errors**
+- **Statistics**: 222 property chains unified, 444 union entries created
+
 **Output State After Shape**:
 - All members have `EmitScope` determined (ClassSurface or ViewOnly)
 - All transformations complete
 - `TsEmitName` still null (assigned in Phase 3.5)
+- **Plans Created:**
+  - `StaticFlatteningPlan`: Maps static-only types to inherited members
+  - `StaticConflictPlan`: Maps hybrid types to conflicting static members
+  - `OverrideConflictPlan`: Maps derived types to incompatible instance overrides
+  - `PropertyOverridePlan`: Maps properties to unified union type strings
 
 ---
 
@@ -273,32 +334,45 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 
 ## Phase 4: PLAN
 
-**Purpose**: Build import graph, plan emission order, prepare for validation
+**Purpose**: Build import graph, plan emission order, combine all plans for emission
 
 **Input**:
 - `SymbolGraph` (from Phase 3.5, fully named)
+- `StaticFlatteningPlan` (from Shape pass 4.7)
+- `StaticConflictPlan` (from Shape pass 4.8)
+- `OverrideConflictPlan` (from Shape pass 4.9)
+- `PropertyOverridePlan` (from Shape pass 4.10)
 
 **Output**:
 - `EmissionPlan` containing:
   - `SymbolGraph` (unchanged)
   - `ImportPlan` (imports, exports, aliases)
   - `EmitOrder` (deterministic emission order)
+  - **Shape plans** (passed through from Shape phase):
+    - `StaticFlatteningPlan` - For static hierarchy flattening during emission
+    - `StaticConflictPlan` - For static conflict suppression during emission
+    - `OverrideConflictPlan` - For override conflict suppression during emission
+    - `PropertyOverridePlan` - For property type unification during emission
 
 **Mutability**: Pure function (returns new immutable EmissionPlan)
 
 **Key Operations**:
-1. Build `ImportGraph` (cross-namespace dependencies)
+1. Build `ImportGraph` (cross-namespace dependencies with auto-aliasing)
 2. Plan imports and exports via `ImportPlanner.PlanImports`
+   - **Auto-alias detection**: Checks for local type collisions and cross-import collisions
+   - **Alias format**: `TypeName_NamespaceShortName` (e.g., `AssemblyHashAlgorithm_Assemblies`)
 3. Determine stable emission order via `EmitOrderPlanner.PlanOrder`
+4. Combine all plans into `EmissionPlan` structure
 
 **Files Involved**:
 - `src/tsbindgen/SinglePhase/Plan/ImportGraph.cs`
-- `src/tsbindgen/SinglePhase/Plan/ImportPlanner.cs`
+- `src/tsbindgen/SinglePhase/Plan/ImportPlanner.cs` (updated with DetermineAlias)
 - `src/tsbindgen/SinglePhase/Plan/EmitOrderPlanner.cs`
+- `src/tsbindgen/SinglePhase/SinglePhaseBuilder.cs` (EmissionPlan record)
 
 **Data Transformations**:
-- Input: SymbolGraph (fully named)
-- Output: EmissionPlan (SymbolGraph + ImportPlan + EmitOrder)
+- Input: SymbolGraph (fully named) + 4 Shape plans
+- Output: EmissionPlan (all input data + ImportPlan + EmitOrder)
 
 ---
 

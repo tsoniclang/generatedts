@@ -1307,7 +1307,17 @@ Prints TypeScript class declarations from TypeSymbol. Handles classes, structs, 
 
 ### Method: Print
 ```csharp
-public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, SymbolGraph graph)
+public static string Print(
+    TypeSymbol type,
+    TypeNameResolver resolver,
+    BuildContext ctx,
+    SymbolGraph graph,
+    HashSet<string> typesWithoutGenerics,
+    BindingsProvider bindingsProvider,
+    Shape.StaticFlatteningPlan staticFlattening,
+    Shape.StaticConflictPlan staticConflicts,
+    Shape.OverrideConflictPlan overrideConflicts,
+    Plan.PropertyOverridePlan? propertyOverrides = null)
 ```
 **What it does:**
 - **GUARD:** Never prints non-public types (logs rejection if attempted)
@@ -1321,34 +1331,222 @@ public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildCont
 
 **Parameters:**
 - `graph` - SymbolGraph for type lookups (needed for TS2693 same-namespace view fix)
+- `typesWithoutGenerics` - Set of types losing generics during emission (for alias filtering)
+- `bindingsProvider` - Provides member exposure information for emission
+- `staticFlattening` - Plan for flattening static-only inheritance hierarchies (D1)
+- `staticConflicts` - Plan for suppressing conflicting static members (D2)
+- `overrideConflicts` - Plan for suppressing incompatible instance overrides (D3)
+- `propertyOverrides` - Plan for property type unification via unions (Step E)
 
 ### Method: PrintInstance
 ```csharp
-public static string PrintInstance(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, SymbolGraph graph)
+public static string PrintInstance(
+    TypeSymbol type,
+    TypeNameResolver resolver,
+    BuildContext ctx,
+    SymbolGraph graph,
+    BindingsProvider bindingsProvider,
+    Shape.StaticFlatteningPlan staticFlattening,
+    Shape.StaticConflictPlan staticConflicts,
+    Shape.OverrideConflictPlan overrideConflicts,
+    Plan.PropertyOverridePlan? propertyOverrides = null)
 ```
 **What it does:**
 - Prints class/struct with `$instance` suffix (for companion views pattern)
 - Used when type has explicit interface views
 - Only classes and structs support this (other types fallback to normal Print)
+- Passes all plan parameters through to PrintClass/PrintStruct for member emission
 
 **Parameters:**
 - `graph` - SymbolGraph for type lookups (needed for TS2693 same-namespace view fix)
+- `bindingsProvider` - Provides member exposure information for emission
+- `staticFlattening` - Plan for flattening static-only inheritance hierarchies (D1)
+- `staticConflicts` - Plan for suppressing conflicting static members (D2)
+- `overrideConflicts` - Plan for suppressing incompatible instance overrides (D3)
+- `propertyOverrides` - Plan for property type unification via unions (Step E)
+
+### Plan-Based Emission
+
+ClassPrinter uses four plans from the Shape phase to handle TypeScript compatibility issues:
+
+#### 1. StaticFlatteningPlan (D1)
+
+**Purpose:** Flatten static-only inheritance hierarchies by removing `extends` and emitting inherited static members directly.
+
+**Usage in PrintClass:**
+```csharp
+// Check if type is in flattening plan
+if (staticFlattening.FlattenedTypes.TryGetValue(type.StableId.ToString(), out var inheritedStatics))
+{
+    // Skip emitting "extends" clause
+    // Emit inherited static members in addition to own members
+}
+```
+
+**Effect:**
+```typescript
+// Before (with extends):
+class Sse$instance extends X86Base$instance {
+    static Add(...): Vector128_1<float>;
+    // Missing base static 'IsSupported' → TS2417
+}
+
+// After (flattened):
+class Sse$instance {  // No extends!
+    static Add(...): Vector128_1<float>;              // Own
+    static get IsSupported(): boolean;                 // From base, emitted directly
+}
+```
+
+#### 2. StaticConflictPlan (D2)
+
+**Purpose:** Suppress static members that conflict with base class static members in hybrid types (types with both static and instance members).
+
+**Usage in EmitStaticMembers:**
+```csharp
+foreach (var method in type.Members.Methods.Where(m => m.IsStatic))
+{
+    var key = (type.StableId.ToString(), method.StableId.ToString());
+    if (staticConflicts.Suppressions.ContainsKey(key))
+    {
+        // Skip emitting this static member - base version inherited via extends
+        continue;
+    }
+    // Emit method normally
+}
+```
+
+**Effect:**
+```typescript
+// Before (conflict):
+class Task_1<TResult> extends Task {
+    static get CompletedTask(): Task;  // TS2417: conflicts with base!
+}
+
+// After (suppressed):
+class Task_1<TResult> extends Task {
+    // Static suppressed - base static inherited via extends ✓
+}
+```
+
+#### 3. OverrideConflictPlan (D3)
+
+**Purpose:** Suppress instance members with incompatible signatures (different return types, parameters) that override base members.
+
+**Usage in EmitMembers:**
+```csharp
+foreach (var property in type.Members.Properties.Where(p => !p.IsStatic))
+{
+    var key = (type.StableId.ToString(), property.StableId.ToString());
+    if (overrideConflicts.Suppressions.ContainsKey(key))
+    {
+        // Skip emitting - base property inherited with base signature
+        continue;
+    }
+    // Emit property
+}
+```
+
+**Effect:**
+```typescript
+// Before (conflict):
+class WebHeaderCollection extends NameValueCollection {
+    get_Item(name: string): string[];  // TS2416: incompatible with base!
+}
+
+// After (suppressed):
+class WebHeaderCollection extends NameValueCollection {
+    // Conflicting members suppressed - base members inherited ✓
+}
+```
+
+#### 4. PropertyOverridePlan (Step E)
+
+**Purpose:** Unify property types across inheritance chains using union types to handle property covariance.
+
+**Usage in EmitMembers (property emission):**
+```csharp
+// When emitting property type:
+var key = (type.StableId.ToString(), property.StableId.ToString());
+if (propertyOverrides?.PropertyTypeOverrides.TryGetValue(key, out var unifiedType) == true)
+{
+    sb.Append(unifiedType);  // Use union type (e.g., "TypeA | TypeB")
+}
+else
+{
+    sb.Append(TypeRefPrinter.Print(property.PropertyType, resolver, ctx));  // Normal type
+}
+```
+
+**Effect:**
+```typescript
+// Before (covariance error):
+class RequestCachePolicy$instance {
+    readonly level: RequestCacheLevel;
+}
+class HttpRequestCachePolicy$instance extends RequestCachePolicy$instance {
+    readonly level: HttpRequestCacheLevel;  // TS2416: property covariance!
+}
+
+// After (unified with unions):
+class RequestCachePolicy$instance {
+    readonly level: HttpRequestCacheLevel | RequestCacheLevel;  // Union
+}
+class HttpRequestCachePolicy$instance extends RequestCachePolicy$instance {
+    readonly level: HttpRequestCacheLevel | RequestCacheLevel;  // Same union ✓
+}
+```
+
+**Plan Flow Summary:**
+```
+Shape Phase (4.7-4.10)
+  ↓ Creates plans
+  ↓
+EmissionPlan (combines all plans)
+  ↓
+InternalIndexEmitter
+  ↓ Passes plans to ClassPrinter.Print/PrintInstance
+  ↓
+ClassPrinter.PrintClass/PrintStruct
+  ↓ Uses plans during member emission
+  ↓
+EmitMembers / EmitStaticMembers
+  ↓ Checks plans for each member
+  ↓ - StaticFlattening: emit inherited statics
+  ↓ - StaticConflicts: suppress conflicting statics
+  ↓ - OverrideConflicts: suppress incompatible overrides
+  ↓ - PropertyOverrides: use union types
+  ↓
+TypeScript with zero errors ✅
+```
 
 ### Method: PrintClass
 ```csharp
-private static string PrintClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, SymbolGraph graph, bool instanceSuffix = false)
+private static string PrintClass(
+    TypeSymbol type,
+    TypeNameResolver resolver,
+    BuildContext ctx,
+    SymbolGraph graph,
+    bool instanceSuffix = false,
+    BindingsProvider? bindingsProvider = null,
+    Shape.StaticFlatteningPlan? staticFlattening = null,
+    Shape.StaticConflictPlan? staticConflicts = null,
+    Shape.OverrideConflictPlan? overrideConflicts = null,
+    Plan.PropertyOverridePlan? propertyOverrides = null)
 ```
 **What it does:**
 1. Gets final TypeScript name from Renamer
 2. Adds `$instance` suffix if requested
 3. Emits class modifiers (`abstract` if abstract)
 4. Emits generic parameters with constraints
-5. **TS2693 FIX:** Applies same-namespace view handling to base class (see `ApplyInstanceSuffixForSameNamespaceViews`)
-6. **TS2863 FIX:** Filters `any`/`unknown` from extends clause (TypeScript rejects "extends any")
-7. Emits base class (`extends BaseClass`, skips Object/ValueType/any/unknown)
-8. **TS2693 FIX:** Applies same-namespace view handling to interface list
-9. Emits interfaces (`implements IFoo, IBar`)
-10. Calls `EmitMembers` to emit body
+5. **STATIC FLATTENING (D1):** Checks if type is in staticFlattening plan - if yes, skips extends clause
+6. **TS2693 FIX:** Applies same-namespace view handling to base class (see `ApplyInstanceSuffixForSameNamespaceViews`)
+7. **TS2863 FIX:** Filters `any`/`unknown` from extends clause (TypeScript rejects "extends any")
+8. Emits base class (`extends BaseClass`, skips Object/ValueType/any/unknown, skips if flattened)
+9. **TS2693 FIX:** Applies same-namespace view handling to interface list
+10. Emits interfaces (`implements IFoo, IBar`)
+11. Calls `EmitMembers` to emit instance and static members (with plan-based suppression/unification)
+12. **STATIC FLATTENING (D1):** If type in flattening plan, emits inherited static members from base hierarchy
 
 **Algorithm for base class emission:**
 ```csharp

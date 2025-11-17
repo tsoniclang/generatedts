@@ -98,6 +98,60 @@ Aliases are needed when:
 Alias format: `{TypeName}_{TargetNamespaceShortName}`
 - Example: `List_Generic` when importing `List` from `System.Collections.Generic`
 
+#### Method: DetermineAlias
+
+```csharp
+private static string? DetermineAlias(
+    BuildContext ctx,
+    NamespaceSymbol sourceNamespace,
+    string typeName,
+    string targetNamespace)
+```
+
+**Purpose:** Determine if an import needs an alias to avoid name collisions.
+
+**Collision Detection** (checked in order):
+
+1. **Local type collision**: Imported type name matches a local type in the source namespace
+   - Check if source namespace has a type with same TypeScript emit name
+   - Example: `System.Reflection` imports `AssemblyHashAlgorithm` from `System.Configuration.Assemblies`
+   - Collision: `System.Reflection` also declares local enum `AssemblyHashAlgorithm`
+   - Action: Generate alias using target namespace suffix
+
+2. **Cross-import collision**: Type name already imported from a different namespace
+   - Check `ImportAliases` dictionary for existing imports with same name
+   - If existing import is from different namespace → collision
+   - Action: Generate alias for new import
+
+**Alias Generation:**
+
+```csharp
+// Extract last segment of target namespace
+var targetShortName = targetNamespace.Contains('.')
+    ? targetNamespace.Substring(targetNamespace.LastIndexOf('.') + 1)
+    : targetNamespace;
+
+// Create alias: TypeName_NamespaceShortName
+var alias = $"{typeName}_{targetShortName}";
+```
+
+**Examples:**
+
+```typescript
+// Local collision example:
+namespace System.Reflection {
+    // Local type:
+    export enum AssemblyHashAlgorithm { MD5, SHA1, ... }
+
+    // Import collision - needs alias:
+    import type {
+        AssemblyHashAlgorithm as AssemblyHashAlgorithm_Assemblies
+    } from "../System.Configuration.Assemblies/internal/index";
+}
+```
+
+**Result:** Returns alias string if needed, or `null` if no collision detected.
+
 #### Method: PlanNamespaceExports
 
 ```csharp
@@ -1957,6 +2011,95 @@ Import specifiers:
 - Could track `class` constraint for runtime checks
 - Could track `struct` constraint for boxing/unboxing decisions
 - Currently only `new` is critical for binding
+
+---
+
+## EmissionPlan - Final Output
+
+The Plan phase (along with Shape phase) produces an `EmissionPlan` record that contains all information needed for emission:
+
+```csharp
+public sealed record EmissionPlan
+{
+    public required SymbolGraph Graph { get; init; }
+    public required ImportPlan Imports { get; init; }
+    public required EmitOrder EmissionOrder { get; init; }
+
+    // Shape phase plans (passed through from Shape):
+    public required StaticFlatteningPlan StaticFlattening { get; init; }
+    public required StaticConflictPlan StaticConflicts { get; init; }
+    public required OverrideConflictPlan OverrideConflicts { get; init; }
+    public required PropertyOverridePlan PropertyOverrides { get; init; }
+}
+```
+
+**Components:**
+
+1. **Graph** - Final validated `SymbolGraph` from Shape/Normalize phases
+   - All types have `TsEmitName` set
+   - All members have `EmitScope` assigned
+   - Views planned, overloads added, constraints closed
+
+2. **Imports** - `ImportPlan` from ImportPlanner
+   - Namespace-level import statements with aliases
+   - Namespace-level export statements
+   - Import alias mappings for collision resolution
+
+3. **EmissionOrder** - `EmitOrder` from EmitOrderPlanner
+   - Deterministic namespace ordering
+   - Per-namespace type ordering
+
+4. **StaticFlattening** - `StaticFlatteningPlan` from Shape phase
+   - Maps static-only types to inherited static members
+   - Used during emission to flatten static hierarchies
+   - Eliminates `extends` for static-only types
+
+5. **StaticConflicts** - `StaticConflictPlan` from Shape phase
+   - Maps hybrid types to conflicting static members
+   - Used during emission to suppress static members
+   - Keeps base static accessible via `extends`
+
+6. **OverrideConflicts** - `OverrideConflictPlan` from Shape phase
+   - Maps derived types to incompatible instance overrides
+   - Used during emission to suppress instance members
+   - Keeps base instance members accessible via `extends`
+
+7. **PropertyOverrides** - `PropertyOverridePlan` from Shape phase
+   - Maps properties to unified union type strings
+   - Used during emission to emit union types for property covariance
+   - Ensures TypeScript structural compatibility
+
+**Plan Flow:**
+
+```
+Shape Phase (4.7-4.10)
+  ↓
+  Creates: StaticFlatteningPlan
+           StaticConflictPlan
+           OverrideConflictPlan
+           PropertyOverridePlan
+  ↓
+Plan Phase (6)
+  ↓
+  Creates: ImportPlan
+           EmitOrder
+  ↓
+  Combines all plans into EmissionPlan
+  ↓
+Emit Phase (8)
+  ↓
+  Uses all plans to generate correct TypeScript
+```
+
+**Why multiple plans?**
+
+Each plan addresses a specific TypeScript compatibility issue:
+- **Static flattening**: TypeScript doesn't support static inheritance
+- **Static conflicts**: TypeScript reports TS2417 for static name collisions
+- **Override conflicts**: TypeScript reports TS2416 for incompatible overrides
+- **Property overrides**: TypeScript reports TS2416 for property covariance
+- **Imports**: TypeScript needs explicit imports between modules
+- **EmitOrder**: Deterministic output for version control
 
 ---
 

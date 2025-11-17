@@ -519,11 +519,171 @@ graph = MemberDeduplicator.Deduplicate(ctx, graph)
   ↓
   Returns: New SymbolGraph with all duplicates removed
   Purpose: Final cleanup of any remaining duplicates
+  ↓
+┌──────────────────────────────────────────────────┐
+│ Pass 15: Static-Side Analysis (Legacy)          │
+└──────────────────────────────────────────────────┘
+  ↓
+StaticSideAnalyzer.Analyze(ctx, graph)
+  Location: src/tsbindgen/SinglePhase/Shape/StaticSideAnalyzer.cs
+  ↓
+  For each type:
+    └─→ Check for static/instance name collisions
+        Emit PG_NAME_002 diagnostic if collision found
+  ↓
+  Mutates: ctx.Diagnostics (adds diagnostics)
+  Returns: void (analysis only)
+  Note: Superseded by passes 4.7-4.8 for actual static handling
+  ↓
+┌──────────────────────────────────────────────────┐
+│ Pass 16: Generic Constraint Closure              │
+└──────────────────────────────────────────────────┘
+  ↓
+graph = ConstraintCloser.Close(ctx, graph)
+  Location: src/tsbindgen/SinglePhase/Shape/ConstraintCloser.cs
+  ↓
+  For each type's generic parameters:
+    └─→ Close constraint relationships
+        Resolve constraint type references
+  ↓
+  Returns: New SymbolGraph with constraints closed
+  Purpose: Finalize generic constraints before emission planning
+  ↓
+┌──────────────────────────────────────────────────────┐
+│ Pass 4.7 (17): Static Hierarchy Flattening (D1)     │
+└──────────────────────────────────────────────────────┘
+  ↓
+(graph, staticFlattening) = StaticHierarchyFlattener.Build(ctx, graph)
+  Location: src/tsbindgen/SinglePhase/Shape/StaticHierarchyFlattener.cs
+  ↓
+  IdentifyStaticOnlyTypes(graph)
+    For each type:
+      └─→ Check if ALL members are static (no instance members)
+          Check if has base type (inheritance)
+          Exclude System.Object, System.ValueType
+          ↓
+          If static-only:
+            └─→ CollectInheritedStaticMembers(graph, type)
+                Walk base chain recursively:
+                  ├─→ Find base class in graph.TypeIndex
+                  ├─→ Collect ALL static members (methods, properties, fields)
+                  └─→ Recurse to grandparent
+                ↓
+                Store in plan:
+                  staticFlattening.FlattenedTypes[type.StableId] = InheritedStaticMembers
+  ↓
+  Returns: (graph unchanged, StaticFlatteningPlan with flattening metadata)
+  Purpose: Plan removal of extends clause and direct emission of inherited statics
+  Impact: ~50 SIMD intrinsic types (Sse, Avx, etc.)
+  ↓
+┌──────────────────────────────────────────────────────┐
+│ Pass 4.8 (18): Static Conflict Detection (D2)       │
+└──────────────────────────────────────────────────────┘
+  ↓
+staticConflicts = StaticConflictDetector.Build(ctx, graph)
+  Location: src/tsbindgen/SinglePhase/Shape/StaticConflictDetector.cs
+  ↓
+  Filter hybrid types (both static AND instance members):
+    For each hybrid type with base class:
+      └─→ Find base class in graph
+          Collect static members from derived and base
+          ↓
+          For each derived static member:
+            └─→ Check if base has static with same name
+                Compare types/signatures
+                ↓
+                If incompatible:
+                  └─→ Mark for suppression
+                      Store in plan:
+                        staticConflicts.Suppressions[(type.StableId, member.StableId)]
+                          = StaticConflictSuppression
+  ↓
+  Returns: StaticConflictPlan with suppression metadata
+  Purpose: Plan suppression of conflicting static members (keep base via extends)
+  Impact: ~4 types (Task_1, CallSite_1, etc.)
+  ↓
+┌──────────────────────────────────────────────────────┐
+│ Pass 4.9 (19): Override Conflict Detection (D3)     │
+└──────────────────────────────────────────────────────┘
+  ↓
+overrideConflicts = OverrideConflictDetector.Build(ctx, graph)
+  Location: src/tsbindgen/SinglePhase/Shape/OverrideConflictDetector.cs
+  ↓
+  Filter types with base classes:
+    For each type:
+      └─→ Find base class in graph (skip if external)
+          Collect instance methods and properties
+          ↓
+          For each derived instance member:
+            └─→ Find matching base member by name
+                Compare return types and parameters
+                ↓
+                If incompatible (different return type, parameters):
+                  └─→ Mark for suppression
+                      Store in plan:
+                        overrideConflicts.Suppressions[(type.StableId, member.StableId)]
+                          = OverrideConflictSuppression
+  ↓
+  Returns: OverrideConflictPlan with suppression metadata
+  Purpose: Plan suppression of incompatible instance overrides
+  Impact: Reduced TS2416 errors by 44% in same-assembly cases
+  Limitation: Only detects conflicts within same SymbolGraph (same assembly)
+  ↓
+┌──────────────────────────────────────────────────────────┐
+│ Pass 4.10 (20): Property Override Unification (Step E)  │
+└──────────────────────────────────────────────────────────┘
+  ↓
+propertyOverrides = PropertyOverrideUnifier.Build(graph, ctx)
+  Location: src/tsbindgen/SinglePhase/Shape/PropertyOverrideUnifier.cs
+  ↓
+  Find all types with base classes:
+    For each type:
+      └─→ WalkHierarchy(type, graph)
+          Recursively walk BaseType references:
+            ├─→ ResolveBase(type, graph)
+            │   Lookup by ClrFullName (handles assembly forwarding):
+            │     graph.TypeIndex.Values
+            │       .FirstOrDefault(t => t.ClrFullName == named.FullName)
+            │
+            ├─→ Track depth (root = 0, derived = 1, etc.)
+            └─→ Return top-down list (root first, derived last)
+          ↓
+          GroupPropertiesByName(hierarchy, ctx)
+            For each type in hierarchy:
+              Collect all properties
+              Group by CLR name
+            ↓
+            Returns: Dictionary<string, List<(Type, Property)>>
+          ↓
+          For each property group:
+            └─→ UnifyPropertyGroup(group, graph, ctx, plan)
+                Collect unique TS type strings:
+                  ├─→ For each property:
+                  │     TypeRefPrinter.Print(prop.PropertyType, resolver, ctx)
+                  │
+                  ├─→ If all types same → skip (no variance)
+                  │
+                  ├─→ SAFETY FILTER - Generic type parameters:
+                  │     if (Regex.IsMatch(tsType, @"\b(T|E|K|V|TKey|TValue|...)\b"))
+                  │       return;  // Skip unification
+                  │     Prevents invalid unions like "any | T"
+                  │
+                  └─→ Create union: "type1 | type2 | ..."
+                      Store for ALL properties in group:
+                        plan.PropertyTypeOverrides[(type.StableId, prop.StableId)]
+                          = unionType
+  ↓
+  Returns: PropertyOverridePlan with union type mappings
+  Purpose: Plan union types for property covariance across hierarchies
+  Impact: Eliminated final TS2416 error → ZERO TypeScript errors achieved
+  Statistics: 222 property chains unified, 444 union entries created
 ```
 
-**Key Observation:**
-- Shape passes are PURE - each returns a new SymbolGraph
+**Key Observations:**
+- Shape passes 1-16 are PURE - each returns a new SymbolGraph
+- Shape passes 4.7-4.10 return PLANS (planning data, not graph transformations)
 - Members flow through passes accumulating EmitScope, Provenance, SourceInterface
+- Plans created in Shape are passed through to Emit phase for use during emission
 - Renamer is mutated (not pure) - accumulates rename decisions
 
 ## 6. Phase 3.5: Name Reservation Call Graph

@@ -337,21 +337,39 @@ ViewOnly members use different scopes than class members. The audit must check t
 
 Utility functions for name computation and sanitization. Ensures consistent name transformation across reservation and application.
 
-### Method: `ComputeTypeRequestedBase(string clrName) -> string`
+### Method: `ComputeTypeRequestedBase(TypeSymbol type) -> string`
 
 **What it does**: Compute the requested base name for a type before reservation.
 
-**Transformations**:
+**Special Cases**:
+1. **System.Array** → `"Array_"` (prevents shadowing built-in Array<T>)
+   - Applied BEFORE generic arity and reserved word sanitization
+   - Ensures `System.Array` (non-generic CLR type) doesn't conflict with TypeScript's built-in `Array<T>`
+   - Follows naming pattern of `String_`, `Boolean_` for other CLR built-ins
+
+**Standard Transformations** (after special cases):
 1. Replace `+` with `_` (nested types: `Outer+Inner` → `Outer_Inner`)
 2. Replace `` ` `` with `_` (generic arity: `List`1` → `List_1`)
 3. Replace invalid TS characters: `<`, `>`, `[`, `]` → `_`
 4. Apply reserved word sanitization: `TypeScriptReservedWords.Sanitize`
 
-**Example**:
+**Examples**:
 ```csharp
-ComputeTypeRequestedBase("List`1")  // → "List_1"
-ComputeTypeRequestedBase("Outer+Inner")  // → "Outer_Inner"
+ComputeTypeRequestedBase(System.Array type)  // → "Array_" (special case)
+ComputeTypeRequestedBase("List`1")           // → "List_1"
+ComputeTypeRequestedBase("Outer+Inner")      // → "Outer_Inner"
 ComputeTypeRequestedBase("Dictionary`2+KeyCollection")  // → "Dictionary_2_KeyCollection"
+```
+
+**Why Array_ is needed**:
+```typescript
+// Problem without renaming:
+import type { Array } from "../../System/internal/index";  // CLR System.Array (non-generic)
+static GetAllSettings(...): Array<Array<string>>;  // ERROR: Imported Array is not generic
+
+// Solution with renaming:
+import type { Array_ } from "../../System/internal/index";  // CLR System.Array
+static GetAllSettings(...): Array<Array<string>>;  // ✅ Uses built-in Array<T>
 ```
 
 ### Method: `ComputeMethodBase(MethodSymbol method) -> string`
