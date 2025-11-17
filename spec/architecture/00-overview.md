@@ -1,4 +1,4 @@
-# SinglePhase Pipeline Architecture
+# tsbindgen Pipeline Architecture
 
 ## 1. System Overview
 
@@ -218,8 +218,8 @@ Scopes enable:
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    SinglePhaseBuilder.Build                   │
-│          (src/tsbindgen/SinglePhase/SinglePhaseBuilder.cs)      │
+│                    Builder.Build                   │
+│          (src/tsbindgen/Builder.cs)      │
 └────────────────────────────┬────────────────────────────────────┘
                              │
                              ▼
@@ -637,7 +637,7 @@ class Array {
 
 **Integration**:
 ```csharp
-// In SinglePhaseBuilder.Build
+// In Builder.Build
 PhaseGate.Validate(ctx, graph, imports, constraintFindings);
 if (ctx.Diagnostics.HasErrors)
 {
@@ -649,11 +649,11 @@ if (ctx.Diagnostics.HasErrors)
 
 ## 5. Directory Structure
 
-The `src/tsbindgen/SinglePhase/` directory is organized by pipeline phase:
+The `src/tsbindgen/` directory is organized by pipeline phase:
 
 ```
-SinglePhase/
-├── SinglePhaseBuilder.cs        # Main orchestrator
+src/tsbindgen/
+├── Builder.cs        # Main orchestrator
 ├── BuildContext.cs              # Shared services container
 │
 ├── Load/                        # Phase 1: Reflection
@@ -963,7 +963,7 @@ These errors are **documented as acceptable impedance** and do not block emissio
 
 ## Summary
 
-The SinglePhase pipeline is a **deterministic, pure functional transformation** from .NET assemblies to TypeScript declarations:
+The tsbindgen pipeline is a **deterministic, pure functional transformation** from .NET assemblies to TypeScript declarations:
 
 1. **Load**: System.Reflection → SymbolGraph (pure CLR data)
 2. **Normalize**: Build indices for fast lookup

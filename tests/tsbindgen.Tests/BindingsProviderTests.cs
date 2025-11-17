@@ -1,7 +1,7 @@
 using System.Linq;
-using tsbindgen.SinglePhase;
-using tsbindgen.SinglePhase.Emit;
-using tsbindgen.SinglePhase.Model;
+using tsbindgen;
+using tsbindgen.Emit;
+using tsbindgen.Model;
 using Xunit;
 
 namespace tsbindgen.Tests;

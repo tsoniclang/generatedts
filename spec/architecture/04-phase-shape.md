@@ -2080,7 +2080,7 @@ Flatten static-only inheritance hierarchies by removing `extends` clause and emi
    - Store in plan: `(type.StableId, inheritedMembers)`
 3. Return `(graph, plan)`
 
-**Called by:** SinglePhaseBuilder Phase 4.7
+**Called by:** Builder Phase 4.7
 
 **Impact:** Affects ~50 SIMD intrinsic types (Vector64, Sse, Avx, etc.)
 
@@ -2190,7 +2190,7 @@ Detect and plan suppression for static member conflicts between base and derived
 3. Store suppressions in plan: `(type.StableId, member.StableId) → suppress`
 4. Return plan
 
-**Called by:** SinglePhaseBuilder Phase 4.8
+**Called by:** Builder Phase 4.8
 
 **Impact:** Affects 4 types (Task_1, CallSite_1, XmlQuery*)
 
@@ -2295,7 +2295,7 @@ Detect and plan suppression for instance member override conflicts. When a deriv
 3. Store suppressions in plan
 4. Return plan
 
-**Called by:** SinglePhaseBuilder Phase 4.9
+**Called by:** Builder Phase 4.9
 
 **Impact:** Reduced TS2416 errors by 44% in same-assembly cases
 
@@ -2418,7 +2418,7 @@ Unify property types across inheritance hierarchies using union types. When a de
      - Store in plan for ALL properties in group: `(type.StableId, prop.StableId) → unionType`
 3. Return plan
 
-**Called by:** SinglePhaseBuilder Phase 4.10
+**Called by:** Builder Phase 4.10
 
 **Impact:** Eliminated final TS2416 error, achieving zero TypeScript errors
 

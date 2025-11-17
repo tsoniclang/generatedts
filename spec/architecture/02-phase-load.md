@@ -2159,7 +2159,7 @@ Batch resolves multiple CLR keys to their declaring assemblies. Only returns suc
 - Dictionary mapping CLR key → assembly name (only successful resolutions)
 
 **Called by:**
-- SinglePhaseBuilder.PlanPhase after ImportGraph collects unresolved keys
+- Builder.PlanPhase after ImportGraph collects unresolved keys
 
 **How it works:**
 1. Create empty results dictionary
@@ -2197,7 +2197,7 @@ Groups resolved types by their declaring assembly name. Useful for diagnostic ou
 - Dictionary mapping assembly name → list of CLR keys declared in that assembly
 
 **Called by:**
-- SinglePhaseBuilder.PlanPhase for diagnostic logging
+- Builder.PlanPhase for diagnostic logging
 
 **How it works:**
 1. Group resolved types by assembly name using LINQ GroupBy
@@ -2230,7 +2230,7 @@ Resolved 15 types across 3 assemblies:
 
 ### Integration Point
 
-**Used in:** SinglePhaseBuilder.PlanPhase
+**Used in:** Builder.PlanPhase
 
 ```csharp
 // After ImportGraph.Build

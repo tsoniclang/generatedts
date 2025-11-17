@@ -4,11 +4,11 @@
 
 The tsbindgen pipeline executes in **strict sequential order** through 5 main phases, with sub-phases executing in deterministic order within each main phase. Each phase is **pure** (returns new immutable data) except for Phase 5 (Emit) which has file I/O side effects.
 
-**Entry Point**: `SinglePhaseBuilder.Build` in `src/tsbindgen/SinglePhase/SinglePhaseBuilder.cs`
+**Entry Point**: `Builder.Build` in `src/tsbindgen/Builder.cs`
 
 ## Sequential Phase Execution
 
-The exact order of execution as implemented in `SinglePhaseBuilder.Build`:
+The exact order of execution as implemented in `Builder.Build`:
 
 ```
 1. BuildContext.Create
@@ -58,9 +58,9 @@ The exact order of execution as implemented in `SinglePhaseBuilder.Build`:
    - Type references (base types, interfaces, generic arguments)
 
 **Files Involved**:
-- `src/tsbindgen/SinglePhase/Load/AssemblyLoader.cs`
-- `src/tsbindgen/SinglePhase/Load/ReflectionReader.cs`
-- `src/tsbindgen/SinglePhase/Load/InterfaceMemberSubstitution.cs`
+- `src/tsbindgen/Load/AssemblyLoader.cs`
+- `src/tsbindgen/Load/ReflectionReader.cs`
+- `src/tsbindgen/Load/InterfaceMemberSubstitution.cs`
 
 **Data Characteristics**:
 - Pure CLR metadata (no TypeScript names yet)
@@ -90,9 +90,9 @@ The exact order of execution as implemented in `SinglePhaseBuilder.Build`:
 3. Build `InterfaceDeclIndex` (interface member declarations)
 
 **Files Involved**:
-- `src/tsbindgen/SinglePhase/Model/SymbolGraph.cs` (`WithIndices` method)
-- `src/tsbindgen/SinglePhase/Shape/GlobalInterfaceIndex.cs`
-- `src/tsbindgen/SinglePhase/Shape/InterfaceDeclIndex.cs`
+- `src/tsbindgen/Model/SymbolGraph.cs` (`WithIndices` method)
+- `src/tsbindgen/Shape/GlobalInterfaceIndex.cs`
+- `src/tsbindgen/Shape/InterfaceDeclIndex.cs`
 
 **Data Transformations**:
 - Input: SymbolGraph with empty indices
@@ -136,118 +136,118 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 - **Purpose**: Build global interface inheritance lookup
 - **Input**: SymbolGraph (original hierarchy)
 - **Output**: Side effect in BuildContext (populates GlobalInterfaceIndex)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/GlobalInterfaceIndex.cs`
+- **Files**: `src/tsbindgen/Shape/GlobalInterfaceIndex.cs`
 
 #### Pass 2: InterfaceDeclIndex.Build
 - **Purpose**: Build interface member declaration lookup
 - **Input**: SymbolGraph (original hierarchy)
 - **Output**: Side effect in BuildContext (populates InterfaceDeclIndex)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/InterfaceDeclIndex.cs`
+- **Files**: `src/tsbindgen/Shape/InterfaceDeclIndex.cs`
 
 #### Pass 3: StructuralConformance.Analyze
 - **Purpose**: Synthesize ViewOnly members for structural interface conformance
 - **Input**: SymbolGraph (original hierarchy)
 - **Output**: SymbolGraph (with synthesized ViewOnly members)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/StructuralConformance.cs`
+- **Files**: `src/tsbindgen/Shape/StructuralConformance.cs`
 - **Key**: Must run BEFORE interface flattening so `FindDeclaringInterface` can walk hierarchy
 
 #### Pass 4: InterfaceInliner.Inline
 - **Purpose**: Flatten interface hierarchies (copy inherited members into each interface)
 - **Input**: SymbolGraph (original hierarchy)
 - **Output**: SymbolGraph (flattened interfaces)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/InterfaceInliner.cs`
+- **Files**: `src/tsbindgen/Shape/InterfaceInliner.cs`
 - **Key**: Must run AFTER indices and conformance
 
 #### Pass 5: ExplicitImplSynthesizer.Synthesize
 - **Purpose**: Synthesize ViewOnly members for explicit interface implementations
 - **Input**: SymbolGraph (flattened interfaces)
 - **Output**: SymbolGraph (with explicit impl ViewOnly members)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/ExplicitImplSynthesizer.cs`
+- **Files**: `src/tsbindgen/Shape/ExplicitImplSynthesizer.cs`
 
 #### Pass 6: DiamondResolver.Resolve
 - **Purpose**: Resolve diamond inheritance (same member from multiple interfaces)
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (diamond conflicts resolved)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/DiamondResolver.cs`
+- **Files**: `src/tsbindgen/Shape/DiamondResolver.cs`
 
 #### Pass 7: BaseOverloadAdder.AddOverloads
 - **Purpose**: Add base class method overloads for interface compatibility
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (with base overloads)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/BaseOverloadAdder.cs`
+- **Files**: `src/tsbindgen/Shape/BaseOverloadAdder.cs`
 
 #### Pass 8: StaticSideAnalyzer.Analyze
 - **Purpose**: Analyze static members and constructors
 - **Input**: SymbolGraph
 - **Output**: Side effect only (updates BuildContext)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/StaticSideAnalyzer.cs`
+- **Files**: `src/tsbindgen/Shape/StaticSideAnalyzer.cs`
 
 #### Pass 9: IndexerPlanner.Plan
 - **Purpose**: Mark indexers for omission (TypeScript limitation)
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (indexers marked for omission)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/IndexerPlanner.cs`
+- **Files**: `src/tsbindgen/Shape/IndexerPlanner.cs`
 
 #### Pass 10: HiddenMemberPlanner.Plan
 - **Purpose**: Handle C# 'new' keyword hiding (rename hidden members)
 - **Input**: SymbolGraph
 - **Output**: Side effect only (creates rename decisions in Renamer)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/HiddenMemberPlanner.cs`
+- **Files**: `src/tsbindgen/Shape/HiddenMemberPlanner.cs`
 
 #### Pass 11: FinalIndexersPass.Run
 - **Purpose**: Remove any indexer properties that leaked through
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (indexer properties removed)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/FinalIndexersPass.cs`
+- **Files**: `src/tsbindgen/Shape/FinalIndexersPass.cs`
 
 #### Pass 12: ClassSurfaceDeduplicator.Deduplicate
 - **Purpose**: Resolve name collisions on class surface (pick winner, demote rest to ViewOnly)
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (duplicates demoted)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/ClassSurfaceDeduplicator.cs`
+- **Files**: `src/tsbindgen/Shape/ClassSurfaceDeduplicator.cs`
 
 #### Pass 13: ConstraintCloser.Close
 - **Purpose**: Complete generic constraint closures
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (constraints closed)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/ConstraintCloser.cs`
+- **Files**: `src/tsbindgen/Shape/ConstraintCloser.cs`
 
 #### Pass 14: OverloadReturnConflictResolver.Resolve
 - **Purpose**: Resolve method overloads with conflicting return types
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (return conflicts resolved)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/OverloadReturnConflictResolver.cs`
+- **Files**: `src/tsbindgen/Shape/OverloadReturnConflictResolver.cs`
 
 #### Pass 15: ViewPlanner.Plan
 - **Purpose**: Plan explicit interface views (one interface per view)
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (views planned)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/ViewPlanner.cs`
+- **Files**: `src/tsbindgen/Shape/ViewPlanner.cs`
 
 #### Pass 16: MemberDeduplicator.Deduplicate
 - **Purpose**: Remove any duplicate members introduced by Shape passes
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (final deduplication)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/MemberDeduplicator.cs`
+- **Files**: `src/tsbindgen/Shape/MemberDeduplicator.cs`
 
 #### Pass 17: StaticSideAnalyzer.Analyze (Legacy)
 - **Purpose**: Analyze static-side conflicts (superseded by passes 4.7-4.8)
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (unchanged in current implementation)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/StaticSideAnalyzer.cs`
+- **Files**: `src/tsbindgen/Shape/StaticSideAnalyzer.cs`
 - **Note**: Kept for compatibility, actual static handling done by passes 4.7-4.8
 
 #### Pass 18: ConstraintCloser.Close
 - **Purpose**: Complete generic constraint closures
 - **Input**: SymbolGraph
 - **Output**: SymbolGraph (constraints closed)
-- **Files**: `src/tsbindgen/SinglePhase/Shape/ConstraintCloser.cs`
+- **Files**: `src/tsbindgen/Shape/ConstraintCloser.cs`
 
 #### Pass 4.7 (19): StaticHierarchyFlattener.Build
 - **Purpose**: Plan flattening for static-only inheritance hierarchies
 - **Input**: SymbolGraph
 - **Output**: `(SymbolGraph, StaticFlatteningPlan)`
-- **Files**: `src/tsbindgen/SinglePhase/Shape/StaticHierarchyFlattener.cs`
+- **Files**: `src/tsbindgen/Shape/StaticHierarchyFlattener.cs`
 - **Key**: Identifies static-only types, collects inherited static members, creates flattening metadata
 - **Impact**: Eliminates TS2417 errors for SIMD intrinsics (~50 types)
 
@@ -255,7 +255,7 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 - **Purpose**: Detect static member conflicts in hybrid types (both static and instance members)
 - **Input**: SymbolGraph
 - **Output**: `StaticConflictPlan`
-- **Files**: `src/tsbindgen/SinglePhase/Shape/StaticConflictDetector.cs`
+- **Files**: `src/tsbindgen/Shape/StaticConflictDetector.cs`
 - **Key**: Finds static properties/methods/fields that shadow base class statics
 - **Impact**: Eliminates TS2417 errors for Task<T> and similar hybrid types (~4 types)
 
@@ -263,7 +263,7 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 - **Purpose**: Detect instance member override conflicts (same-assembly only)
 - **Input**: SymbolGraph
 - **Output**: `OverrideConflictPlan`
-- **Files**: `src/tsbindgen/SinglePhase/Shape/OverrideConflictDetector.cs`
+- **Files**: `src/tsbindgen/Shape/OverrideConflictDetector.cs`
 - **Key**: Finds properties/methods with incompatible signatures vs base class
 - **Impact**: Reduced TS2416 errors by 44% in same-assembly cases
 - **Limitation**: Only detects conflicts when both base and derived are in same SymbolGraph
@@ -272,7 +272,7 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 - **Purpose**: Unify property types across inheritance hierarchies via union types
 - **Input**: SymbolGraph
 - **Output**: `PropertyOverridePlan`
-- **Files**: `src/tsbindgen/SinglePhase/Shape/PropertyOverrideUnifier.cs`
+- **Files**: `src/tsbindgen/Shape/PropertyOverrideUnifier.cs`
 - **Key**: Walks inheritance chains, groups properties by name, creates union types for differing types
 - **Safety**: Filters out properties with generic type parameters (T, TKey, TValue, etc.)
 - **Impact**: Eliminated final TS2416 error, achieving **zero TypeScript errors**
@@ -315,10 +315,10 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 4. Apply names to SymbolGraph (`Application.ApplyNamesToGraph`)
 
 **Files Involved**:
-- `src/tsbindgen/SinglePhase/Normalize/NameReservation.cs`
-- `src/tsbindgen/SinglePhase/Normalize/Naming/Reservation.cs`
-- `src/tsbindgen/SinglePhase/Normalize/Naming/Application.cs`
-- `src/tsbindgen/SinglePhase/Normalize/Naming/Shared.cs`
+- `src/tsbindgen/Normalize/NameReservation.cs`
+- `src/tsbindgen/Normalize/Naming/Reservation.cs`
+- `src/tsbindgen/Normalize/Naming/Application.cs`
+- `src/tsbindgen/Normalize/Naming/Shared.cs`
 
 **Scopes Used**:
 - Type names: `ScopeFactory.Namespace(namespaceName, NamespaceArea.Internal)`
@@ -365,10 +365,10 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 4. Combine all plans into `EmissionPlan` structure
 
 **Files Involved**:
-- `src/tsbindgen/SinglePhase/Plan/ImportGraph.cs`
-- `src/tsbindgen/SinglePhase/Plan/ImportPlanner.cs` (updated with DetermineAlias)
-- `src/tsbindgen/SinglePhase/Plan/EmitOrderPlanner.cs`
-- `src/tsbindgen/SinglePhase/SinglePhaseBuilder.cs` (EmissionPlan record)
+- `src/tsbindgen/Plan/ImportGraph.cs`
+- `src/tsbindgen/Plan/ImportPlanner.cs` (updated with DetermineAlias)
+- `src/tsbindgen/Plan/EmitOrderPlanner.cs`
+- `src/tsbindgen/Builder.cs` (EmissionPlan record)
 
 **Data Transformations**:
 - Input: SymbolGraph (fully named) + 4 Shape plans
@@ -394,7 +394,7 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 - Preserve distinct overloads for different return types
 
 **Files Involved**:
-- `src/tsbindgen/SinglePhase/Plan/OverloadUnifier.cs`
+- `src/tsbindgen/Plan/OverloadUnifier.cs`
 
 ---
 
@@ -415,7 +415,7 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 - Record findings for PhaseGate validation
 
 **Files Involved**:
-- `src/tsbindgen/SinglePhase/Plan/InterfaceConstraintAuditor.cs`
+- `src/tsbindgen/Plan/InterfaceConstraintAuditor.cs`
 
 ---
 
@@ -439,8 +439,8 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 - Fail fast if any ERROR-level diagnostics found
 
 **Files Involved**:
-- `src/tsbindgen/SinglePhase/Plan/PhaseGate.cs`
-- `src/tsbindgen/SinglePhase/Plan/Validation/*.cs` (26 validators)
+- `src/tsbindgen/Plan/PhaseGate.cs`
+- `src/tsbindgen/Plan/Validation/*.cs` (26 validators)
 
 **Critical Rule**:
 - Any ERROR-level diagnostic blocks Phase 5 (Emit)
@@ -470,12 +470,12 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
    - Emit `<namespace>/index.js` (ES module stub)
 
 **Files Involved**:
-- `src/tsbindgen/SinglePhase/Emit/SupportTypesEmit.cs`
-- `src/tsbindgen/SinglePhase/Emit/InternalIndexEmitter.cs`
-- `src/tsbindgen/SinglePhase/Emit/FacadeEmitter.cs`
-- `src/tsbindgen/SinglePhase/Emit/MetadataEmitter.cs`
-- `src/tsbindgen/SinglePhase/Emit/BindingEmitter.cs`
-- `src/tsbindgen/SinglePhase/Emit/ModuleStubEmitter.cs`
+- `src/tsbindgen/Emit/SupportTypesEmit.cs`
+- `src/tsbindgen/Emit/InternalIndexEmitter.cs`
+- `src/tsbindgen/Emit/FacadeEmitter.cs`
+- `src/tsbindgen/Emit/MetadataEmitter.cs`
+- `src/tsbindgen/Emit/BindingEmitter.cs`
+- `src/tsbindgen/Emit/ModuleStubEmitter.cs`
 
 **Critical Rule**:
 - Only executes if `ctx.Diagnostics.HasErrors == false`

@@ -33,8 +33,8 @@ GenerateCommand.ExecuteAsync(...)
 GenerateCommand.ExecuteNewPipelineAsync(...)
   Location: GenerateCommand.cs:440
   ↓
-SinglePhaseBuilder.Build(assemblyPaths, outDir, policy, logger, verbose, logCategories)
-  Location: src/tsbindgen/SinglePhase/SinglePhaseBuilder.cs:27
+Builder.Build(assemblyPaths, outDir, policy, logger, verbose, logCategories)
+  Location: src/tsbindgen/Builder.cs:27
   ↓
 [Five-Phase Pipeline Starts]
   [Phase 1: Load]
@@ -53,13 +53,13 @@ SinglePhaseBuilder.Build(assemblyPaths, outDir, policy, logger, verbose, logCate
 Complete chain for assembly loading and reflection:
 
 ```
-SinglePhaseBuilder.Build
+Builder.Build
   ↓
 LoadPhase(ctx, assemblyPaths)
-  Location: SinglePhaseBuilder.cs:118
+  Location: Builder.cs:118
   ↓
 AssemblyLoader.LoadClosure(seedPaths, refPaths, strictVersions)
-  Location: src/tsbindgen/SinglePhase/Load/AssemblyLoader.cs:113
+  Location: src/tsbindgen/Load/AssemblyLoader.cs:113
   ↓
   ├─→ BuildCandidateMap(refPaths)
   │   Location: AssemblyLoader.cs:167
@@ -84,7 +84,7 @@ AssemblyLoader.LoadClosure(seedPaths, refPaths, strictVersions)
       Returns: MetadataLoadContext with all assemblies loaded
   ↓
 ReflectionReader.ReadAssemblies(loadContext, allAssemblyPaths)
-  Location: src/tsbindgen/SinglePhase/Load/ReflectionReader.cs:28
+  Location: src/tsbindgen/Load/ReflectionReader.cs:28
   ↓
   For each type in assembly.GetTypes:
     └─→ ReadType(type)
@@ -131,7 +131,7 @@ Returns: SymbolGraph with Namespaces → Types → Members
   All members have EmitScope = EmitScope.ClassSurface (initial state)
   ↓
 InterfaceMemberSubstitution.SubstituteClosedInterfaces(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Load/InterfaceMemberSubstitutor.cs:20
+  Location: src/tsbindgen/Load/InterfaceMemberSubstitutor.cs:20
   ↓
   For each closed generic interface (e.g., IComparable<int>):
     └─→ BuildSubstitutionMap(ifaceSymbol, closedInterfaceRef)
@@ -151,10 +151,10 @@ InterfaceMemberSubstitution.SubstituteClosedInterfaces(ctx, graph)
 Index building for O(1) lookups:
 
 ```
-SinglePhaseBuilder.Build
+Builder.Build
   ↓
 graph = graph.WithIndices
-  Location: src/tsbindgen/SinglePhase/Model/SymbolGraph.cs
+  Location: src/tsbindgen/Model/SymbolGraph.cs
   ↓
   Builds TypeIndex: CLR full name → TypeSymbol
   Builds NamespaceIndex: namespace name → NamespaceSymbol
@@ -169,17 +169,17 @@ graph = graph.WithIndices
 14 transformation passes:
 
 ```
-SinglePhaseBuilder.Build
+Builder.Build
   ↓
 ShapePhase(ctx, graph)
-  Location: SinglePhaseBuilder.cs:165
+  Location: Builder.cs:165
   ↓
 ┌─────────────────────────────────────────────────────┐
 │ Pass 1: Build Interface Indices (BEFORE flattening) │
 └─────────────────────────────────────────────────────┘
   ↓
 GlobalInterfaceIndex.Build(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Shape/GlobalInterfaceIndex.cs:22
+  Location: src/tsbindgen/Shape/GlobalInterfaceIndex.cs:22
   ↓
   For each interface:
     └─→ ComputeMethodSignatures(ctx, iface)
@@ -200,7 +200,7 @@ InterfaceDeclIndex.Build(ctx, graph)
 └──────────────────────────────────────────────────────────┘
   ↓
 graph = StructuralConformance.Analyze(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Shape/StructuralConformance.cs
+  Location: src/tsbindgen/Shape/StructuralConformance.cs
   ↓
   For each class implementing interfaces:
     If class method doesn't match interface signature:
@@ -213,7 +213,7 @@ graph = StructuralConformance.Analyze(ctx, graph)
 └────────────────────────────────────────────────────┘
   ↓
 graph = InterfaceInliner.Inline(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Shape/InterfaceInliner.cs
+  Location: src/tsbindgen/Shape/InterfaceInliner.cs
   ↓
   For each class implementing interfaces:
     For each interface method not on class:
@@ -226,7 +226,7 @@ graph = InterfaceInliner.Inline(ctx, graph)
 └────────────────────────────────────────────────────────────┘
   ↓
 graph = ExplicitImplSynthesizer.Synthesize(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Shape/ExplicitImplSynthesizer.cs
+  Location: src/tsbindgen/Shape/ExplicitImplSynthesizer.cs
   ↓
   For each method/property with '.' in name:
     └─→ Parse qualified name (e.g., "System.IDisposable.Dispose")
@@ -237,7 +237,7 @@ graph = ExplicitImplSynthesizer.Synthesize(ctx, graph)
 └──────────────────────────────────────────────────┘
   ↓
 graph = DiamondResolver.Resolve(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Shape/DiamondResolver.cs
+  Location: src/tsbindgen/Shape/DiamondResolver.cs
   ↓
   Pick single implementation for ambiguous members
   Emit PG_INT_005 diagnostic if conflict
@@ -247,7 +247,7 @@ graph = DiamondResolver.Resolve(ctx, graph)
 └──────────────────────────────────────────────────┘
   ↓
 graph = BaseOverloadAdder.AddOverloads(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Shape/BaseOverloadAdder.cs
+  Location: src/tsbindgen/Shape/BaseOverloadAdder.cs
   ↓
   Walk inheritance chain, add base overloads if needed for TypeScript
   ↓
@@ -256,7 +256,7 @@ graph = BaseOverloadAdder.AddOverloads(ctx, graph)
 └──────────────────────────────────────────────────┘
   ↓
 StaticSideAnalyzer.Analyze(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Shape/StaticSideAnalyzer.cs
+  Location: src/tsbindgen/Shape/StaticSideAnalyzer.cs
   ↓
   Check for static/instance name collisions
   Emit PG_NAME_002 if collision
@@ -266,7 +266,7 @@ StaticSideAnalyzer.Analyze(ctx, graph)
 └──────────────────────────────────────────────────┘
   ↓
 graph = IndexerPlanner.Plan(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Shape/IndexerPlanner.cs
+  Location: src/tsbindgen/Shape/IndexerPlanner.cs
   ↓
   For each property with IndexParameters.Count > 0:
     └─→ Set EmitScope = Omit
@@ -278,7 +278,7 @@ graph = IndexerPlanner.Plan(ctx, graph)
 └──────────────────────────────────────────────────┘
   ↓
 HiddenMemberPlanner.Plan(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Shape/HiddenMemberPlanner.cs
+  Location: src/tsbindgen/Shape/HiddenMemberPlanner.cs
   ↓
   For each member hiding base member:
     └─→ Reserve renamed name with disambiguation suffix
@@ -288,7 +288,7 @@ HiddenMemberPlanner.Plan(ctx, graph)
 └──────────────────────────────────────────────────┘
   ↓
 graph = FinalIndexersPass.Run(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Shape/FinalIndexersPass.cs
+  Location: src/tsbindgen/Shape/FinalIndexersPass.cs
   ↓
   Verify no indexer has EmitScope = ClassSurface
   Emit PG_EMIT_001 if leak found
@@ -298,7 +298,7 @@ graph = FinalIndexersPass.Run(ctx, graph)
 └──────────────────────────────────────────────────────────┘
   ↓
 graph = ClassSurfaceDeduplicator.Deduplicate(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Shape/ClassSurfaceDeduplicator.cs
+  Location: src/tsbindgen/Shape/ClassSurfaceDeduplicator.cs
   ↓
   Group ClassSurface members by TsEmitName:
     If duplicates: pick winner (prefer Original)
@@ -310,7 +310,7 @@ graph = ClassSurfaceDeduplicator.Deduplicate(ctx, graph)
 └──────────────────────────────────────────────────┘
   ↓
 graph = ConstraintCloser.Close(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Shape/ConstraintCloser.cs
+  Location: src/tsbindgen/Shape/ConstraintCloser.cs
   ↓
   Compute transitive closure of constraints
   Example: T : IComparable<U>, U : IList<V> → T : IList<V>
@@ -320,7 +320,7 @@ graph = ConstraintCloser.Close(ctx, graph)
 └──────────────────────────────────────────────────┘
   ↓
 graph = OverloadReturnConflictResolver.Resolve(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Shape/OverloadReturnConflictResolver.cs
+  Location: src/tsbindgen/Shape/OverloadReturnConflictResolver.cs
   ↓
   For method groups with different return types:
     └─→ Add disambiguation suffix
@@ -331,7 +331,7 @@ graph = OverloadReturnConflictResolver.Resolve(ctx, graph)
 └──────────────────────────────────────────────────┘
   ↓
 graph = ViewPlanner.Plan(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Shape/ViewPlanner.cs
+  Location: src/tsbindgen/Shape/ViewPlanner.cs
   ↓
   For each ViewOnly member:
     Verify SourceInterface is set
@@ -342,7 +342,7 @@ graph = ViewPlanner.Plan(ctx, graph)
 └──────────────────────────────────────────────────┘
   ↓
 graph = MemberDeduplicator.Deduplicate(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Shape/MemberDeduplicator.cs
+  Location: src/tsbindgen/Shape/MemberDeduplicator.cs
   ↓
   Group members by StableId, remove duplicates
   Emit PG_DEDUP_002
@@ -359,10 +359,10 @@ graph = MemberDeduplicator.Deduplicate(ctx, graph)
 Central naming phase:
 
 ```
-SinglePhaseBuilder.Build
+Builder.Build
   ↓
 graph = NameReservation.ReserveAllNames(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Normalize/NameReservation.cs:32
+  Location: src/tsbindgen/Normalize/NameReservation.cs:32
   ↓
 ┌────────────────────────────────────────────────┐
 │ Step 1: Reserve Type Names                    │
@@ -370,7 +370,7 @@ graph = NameReservation.ReserveAllNames(ctx, graph)
   ↓
   For each type:
     └─→ Shared.ComputeTypeRequestedBase(type.ClrName)
-        Location: src/tsbindgen/SinglePhase/Normalize/Naming/Shared.cs
+        Location: src/tsbindgen/Normalize/Naming/Shared.cs
         ↓
         Transforms:
           - Remove backtick and arity (List`1 → List)
@@ -378,7 +378,7 @@ graph = NameReservation.ReserveAllNames(ctx, graph)
           - Sanitize reserved words
         ↓
         ctx.Renamer.ReserveTypeName(stableId, requested, scope, context, source)
-        Location: src/tsbindgen/SinglePhase/Renaming/SymbolRenamer.cs
+        Location: src/tsbindgen/Renaming/SymbolRenamer.cs
         ↓
         Check if name available, add suffix if conflict
         Store in _typeDecisions[stableId][scope] = RenameDecision
@@ -388,7 +388,7 @@ graph = NameReservation.ReserveAllNames(ctx, graph)
 └────────────────────────────────────────────────┘
   ↓
   Reservation.ReserveMemberNamesOnly(ctx, type)
-  Location: src/tsbindgen/SinglePhase/Normalize/Naming/Reservation.cs
+  Location: src/tsbindgen/Normalize/Naming/Reservation.cs
   ↓
   For each member where EmitScope == ClassSurface:
     ↓
@@ -399,7 +399,7 @@ graph = NameReservation.ReserveAllNames(ctx, graph)
       │   Sanitize reserved words, apply camelCase if enabled
       │
       ├─→ ScopeFactory.ClassSurface(type, member.IsStatic)
-      │   Location: src/tsbindgen/SinglePhase/Normalize/Naming/ScopeFactory.cs
+      │   Location: src/tsbindgen/Normalize/Naming/ScopeFactory.cs
       │   Creates: namespace/internal/TypeName/instance or static
       │
       └─→ ctx.Renamer.ReserveMemberName(stableId, requested, scope, context, source)
@@ -445,7 +445,7 @@ graph = NameReservation.ReserveAllNames(ctx, graph)
 └────────────────────────────────────────────────┘
   ↓
   Audit.AuditReservationCompleteness(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Normalize/Naming/Audit.cs
+  Location: src/tsbindgen/Normalize/Naming/Audit.cs
   ↓
   For each member where EmitScope != Omit:
     └─→ ctx.Renamer.TryGetDecision(stableId, expectedScope, out _)
@@ -456,7 +456,7 @@ graph = NameReservation.ReserveAllNames(ctx, graph)
 └────────────────────────────────────────────────┘
   ↓
   updatedGraph = Application.ApplyNamesToGraph(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Normalize/Naming/Application.cs
+  Location: src/tsbindgen/Normalize/Naming/Application.cs
   ↓
   For each type:
     ctx.Renamer.GetFinalTypeName(stableId, namespaceScope)
@@ -482,17 +482,17 @@ graph = NameReservation.ReserveAllNames(ctx, graph)
 Import planning, ordering, unification, validation:
 
 ```
-SinglePhaseBuilder.Build
+Builder.Build
   ↓
 plan = PlanPhase(ctx, graph)
-  Location: SinglePhaseBuilder.cs:250
+  Location: Builder.cs:250
   ↓
 ┌────────────────────────────────────────────────┐
 │ Step 1: Build Import Graph                    │
 └────────────────────────────────────────────────┘
   ↓
 importGraph = ImportGraph.Build(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Plan/ImportGraph.cs
+  Location: src/tsbindgen/Plan/ImportGraph.cs
   ↓
   For each type signature:
     └─→ Extract foreign type references (from different namespaces)
@@ -503,7 +503,7 @@ importGraph = ImportGraph.Build(ctx, graph)
 └────────────────────────────────────────────────┘
   ↓
 imports = ImportPlanner.PlanImports(ctx, graph, importGraph)
-  Location: src/tsbindgen/SinglePhase/Plan/ImportPlanner.cs
+  Location: src/tsbindgen/Plan/ImportPlanner.cs
   ↓
   For each namespace:
     ├─→ Collect foreign types needed
@@ -517,7 +517,7 @@ imports = ImportPlanner.PlanImports(ctx, graph, importGraph)
 └────────────────────────────────────────────────┘
   ↓
 order = EmitOrderPlanner.PlanOrder(graph)
-  Location: src/tsbindgen/SinglePhase/Plan/EmitOrderPlanner.cs
+  Location: src/tsbindgen/Plan/EmitOrderPlanner.cs
   ↓
   ├─→ Build dependency graph between namespaces
   ├─→ Topological sort (dependencies before dependents)
@@ -528,7 +528,7 @@ order = EmitOrderPlanner.PlanOrder(graph)
 └────────────────────────────────────────────────┘
   ↓
 graph = OverloadUnifier.UnifyOverloads(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Normalize/OverloadUnifier.cs
+  Location: src/tsbindgen/Normalize/OverloadUnifier.cs
   ↓
   For method groups with multiple overloads:
     ├─→ Sort by parameter count
@@ -540,7 +540,7 @@ graph = OverloadUnifier.UnifyOverloads(ctx, graph)
 └────────────────────────────────────────────────────────┘
   ↓
 constraintFindings = InterfaceConstraintAuditor.Audit(ctx, graph)
-  Location: src/tsbindgen/SinglePhase/Plan/InterfaceConstraintAuditor.cs
+  Location: src/tsbindgen/Plan/InterfaceConstraintAuditor.cs
   ↓
   For each (Type, Interface) pair:
     └─→ Check constructor constraints (PG_CONSTRAINT_001)
@@ -551,7 +551,7 @@ constraintFindings = InterfaceConstraintAuditor.Audit(ctx, graph)
 └────────────────────────────────────────────────┘
   ↓
 PhaseGate.Validate(ctx, graph, imports, constraintFindings)
-  Location: src/tsbindgen/SinglePhase/Plan/PhaseGate.cs:24
+  Location: src/tsbindgen/Plan/PhaseGate.cs:24
   ↓
   [See next section for complete PhaseGate call graph]
   ↓
@@ -575,7 +575,7 @@ validationContext = new ValidationContext
 └────────────────────────────────────────────────┘
   ↓
 ValidationCore.ValidateTypeNames(ctx, graph, validationContext)
-  Location: src/tsbindgen/SinglePhase/Plan/Validation/Core.cs
+  Location: src/tsbindgen/Plan/Validation/Core.cs
   ↓
   For each type:
     └─→ Check type.TsEmitName is set (PG_NAME_001)
@@ -618,7 +618,7 @@ ValidationCore.ValidatePolicyCompliance(ctx, graph, validationContext)
 └────────────────────────────────────────────────┘
   ↓
 Names.ValidateIdentifiers(ctx, graph, validationContext)
-  Location: src/tsbindgen/SinglePhase/Plan/Validation/Names.cs
+  Location: src/tsbindgen/Plan/Validation/Names.cs
   ↓
   Check TsEmitName doesn't contain reserved words or special chars (PG_IDENT_002)
   ↓
@@ -635,7 +635,7 @@ Names.ValidateOverloadCollisions(ctx, graph, validationContext)
 └────────────────────────────────────────────────┘
   ↓
 Views.ValidateIntegrity(ctx, graph, validationContext)
-  Location: src/tsbindgen/SinglePhase/Plan/Validation/Views.cs
+  Location: src/tsbindgen/Plan/Validation/Views.cs
   ↓
   Rule 1: ViewOnly members MUST have SourceInterface (PG_VIEW_001 - FATAL)
   Rule 2: ViewOnly members MUST have ClassSurface twin (PG_VIEW_002 - FATAL)
@@ -646,7 +646,7 @@ Views.ValidateIntegrity(ctx, graph, validationContext)
 └────────────────────────────────────────────────┘
   ↓
 Constraints.EmitDiagnostics(ctx, constraintFindings, validationContext)
-  Location: src/tsbindgen/SinglePhase/Plan/Validation/Constraints.cs
+  Location: src/tsbindgen/Plan/Validation/Constraints.cs
   ↓
   Emit PG_CONSTRAINT_001 (missing constructor)
   Emit PG_CONSTRAINT_002 (missing base type)
@@ -672,7 +672,7 @@ Views.ValidateMemberScoping(ctx, graph, validationContext)
 └────────────────────────────────────────────────────────┘
   ↓
 Scopes.ValidateEmitScopeInvariants(ctx, graph, validationContext)
-  Location: src/tsbindgen/SinglePhase/Plan/Validation/Scopes.cs
+  Location: src/tsbindgen/Plan/Validation/Scopes.cs
   ↓
   For each member:
     ├─→ Check EmitScope ∈ {ClassSurface, ViewOnly, Omit} (PG_SCOPE_001)
@@ -707,7 +707,7 @@ Names.ValidateClassSurfaceUniqueness(ctx, graph, validationContext)
 └────────────────────────────────────────────────────────┘
   ↓
 Finalization.Validate(ctx, graph, validationContext)
-  Location: src/tsbindgen/SinglePhase/Plan/Validation/Finalization.cs
+  Location: src/tsbindgen/Plan/Validation/Finalization.cs
   ↓
   For each type:
     ├─→ Check TsEmitName is set (PG_FIN_001)
@@ -726,7 +726,7 @@ Finalization.Validate(ctx, graph, validationContext)
 └────────────────────────────────────────────────────────┘
   ↓
 Types.ValidatePrinterNameConsistency(ctx, graph, validationContext)
-  Location: src/tsbindgen/SinglePhase/Plan/Validation/Types.cs
+  Location: src/tsbindgen/Plan/Validation/Types.cs
   ↓
   For each TypeReference in signatures:
     └─→ Simulate TypeRefPrinter.Print(typeRef, scope)
@@ -760,7 +760,7 @@ Types.ValidateExternalTypeResolution(ctx, graph, validationContext)
 └────────────────────────────────────────────────────────────┘
   ↓
 ImportExport.ValidatePublicApiSurface(ctx, graph, imports, validationContext)
-  Location: src/tsbindgen/SinglePhase/Plan/Validation/ImportExport.cs
+  Location: src/tsbindgen/Plan/Validation/ImportExport.cs
   ↓
   For each public member signature:
     └─→ Check referenced type is emitted
@@ -820,17 +820,17 @@ ImportExport.ValidateExportCompleteness(ctx, graph, imports, validationContext)
 File generation:
 
 ```
-SinglePhaseBuilder.Build
+Builder.Build
   ↓
 EmitPhase(ctx, plan, outputDirectory)
-  Location: SinglePhaseBuilder.cs:285
+  Location: Builder.cs:285
   ↓
 ┌────────────────────────────────────────────────────────┐
 │ Step 1: Emit Support Types (once per build)           │
 └────────────────────────────────────────────────────────┘
   ↓
 SupportTypesEmit.Emit(ctx, outputDirectory)
-  Location: src/tsbindgen/SinglePhase/Emit/SupportTypesEmitter.cs
+  Location: src/tsbindgen/Emit/SupportTypesEmitter.cs
   ↓
   Generate: _support/types.d.ts
     Branded numeric types (int, uint, byte, decimal, etc.)
@@ -841,7 +841,7 @@ SupportTypesEmit.Emit(ctx, outputDirectory)
 └────────────────────────────────────────────────────────┘
   ↓
 InternalIndexEmitter.Emit(ctx, plan, outputDirectory)
-  Location: src/tsbindgen/SinglePhase/Emit/InternalIndexEmitter.cs
+  Location: src/tsbindgen/Emit/InternalIndexEmitter.cs
   ↓
   For each namespace in plan.EmissionOrder:
     ↓
@@ -858,7 +858,7 @@ InternalIndexEmitter.Emit(ctx, plan, outputDirectory)
     │   └─→ Switch on type.Kind:
     │       ├─→ Class/Struct:
     │       │   └─→ ClassPrinter.PrintClassDeclaration(builder, type, ctx)
-    │       │       Location: src/tsbindgen/SinglePhase/Emit/Printers/ClassPrinter.cs
+    │       │       Location: src/tsbindgen/Emit/Printers/ClassPrinter.cs
     │       │       ↓
     │       │       ├─→ Write class keyword and generic parameters
     │       │       ├─→ Print extends clause
@@ -910,7 +910,7 @@ InternalIndexEmitter.Emit(ctx, plan, outputDirectory)
 └────────────────────────────────────────────────────────┘
   ↓
 FacadeEmitter.Emit(ctx, plan, outputDirectory)
-  Location: src/tsbindgen/SinglePhase/Emit/FacadeEmitter.cs
+  Location: src/tsbindgen/Emit/FacadeEmitter.cs
   ↓
   For each namespace:
     Generate: namespace/index.d.ts (public facade)
@@ -921,7 +921,7 @@ FacadeEmitter.Emit(ctx, plan, outputDirectory)
 └────────────────────────────────────────────────────────┘
   ↓
 MetadataEmitter.Emit(ctx, plan, outputDirectory)
-  Location: src/tsbindgen/SinglePhase/Emit/MetadataEmitter.cs
+  Location: src/tsbindgen/Emit/MetadataEmitter.cs
   ↓
   For each namespace:
     Build JSON:
@@ -933,7 +933,7 @@ MetadataEmitter.Emit(ctx, plan, outputDirectory)
 └────────────────────────────────────────────────────────┘
   ↓
 BindingEmitter.Emit(ctx, plan, outputDirectory)
-  Location: src/tsbindgen/SinglePhase/Emit/BindingEmitter.cs
+  Location: src/tsbindgen/Emit/BindingEmitter.cs
   ↓
   For each namespace:
     Build JSON (CLR → TypeScript name mappings)
@@ -944,7 +944,7 @@ BindingEmitter.Emit(ctx, plan, outputDirectory)
 └────────────────────────────────────────────────────────┘
   ↓
 ModuleStubEmitter.Emit(ctx, plan, outputDirectory)
-  Location: src/tsbindgen/SinglePhase/Emit/ModuleStubEmitter.cs
+  Location: src/tsbindgen/Emit/ModuleStubEmitter.cs
   ↓
   For each namespace:
     Generate: namespace/index.js (stub)
@@ -1047,7 +1047,7 @@ Error tracking:
 ┌────────────────────────────────────────────┐
 │ HasErrors - Called By:                   │
 └────────────────────────────────────────────┘
-  1. SinglePhaseBuilder.Build (End of pipeline)
+  1. Builder.Build (End of pipeline)
   2. PhaseGate.Validate (Phase 4.7)
 ```
 
@@ -1093,7 +1093,7 @@ Condensed trace from CLI to file write:
 ```
 User: dotnet run -- generate --use-new-pipeline -a System.Collections.dll -o out
 
-Main → GenerateCommand.ExecuteNewPipelineAsync → SinglePhaseBuilder.Build
+Main → GenerateCommand.ExecuteNewPipelineAsync → Builder.Build
 
 Phase 1: Load
   AssemblyLoader.LoadClosure(["System.Collections.dll"], ...)
@@ -1207,9 +1207,9 @@ Process exits with code 0
 
 ## Summary
 
-Complete call chains through SinglePhase pipeline:
+Complete call chains through tsbindgen pipeline:
 
-1. **Entry Point** - CLI → GenerateCommand → SinglePhaseBuilder
+1. **Entry Point** - CLI → GenerateCommand → Builder
 2. **Phase 1: Load** - Assembly loading, reflection, member reading
 3. **Phase 2: Normalize** - Index building
 4. **Phase 3: Shape** - 14 transformation passes

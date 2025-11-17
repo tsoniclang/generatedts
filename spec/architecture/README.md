@@ -1,6 +1,6 @@
-# SinglePhase Pipeline Architecture Documentation
+# tsbindgen Pipeline Architecture Documentation
 
-**Complete architectural documentation for the tsbindgen SinglePhase pipeline.**
+**Complete architectural documentation for the tsbindgen tsbindgen pipeline.**
 
 ## Documentation Index
 
@@ -141,7 +141,7 @@ Final validation before emission:
 
 ## Statistics
 
-- **76 source files** in SinglePhase/ directory
+- **76 source files** in src/tsbindgen/ directory
 - **11 architecture documents** (this collection)
 - **50+ validation rules** in PhaseGate
 - **43 diagnostic codes** (TBG001-TBG883)
@@ -168,7 +168,7 @@ Final validation before emission:
 ## Coverage
 
 This documentation covers:
-- ✅ Every file in SinglePhase/ (76 files)
+- ✅ Every file in src/tsbindgen/ (76 files)
 - ✅ Every public method with full signatures
 - ✅ Every private method with algorithms
 - ✅ Every validation rule (50+)
@@ -197,4 +197,4 @@ This documentation covers:
 
 ---
 
-**Note**: This documentation describes the **SinglePhase pipeline** only. The old two-phase pipeline (snapshot → render) is deprecated and not documented here.
+**Note**: This documentation describes the **tsbindgen pipeline** only. The old two-phase pipeline (snapshot → render) is deprecated and not documented here.

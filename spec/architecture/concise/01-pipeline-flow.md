@@ -4,7 +4,7 @@
 
 Pipeline executes in **strict sequential order** through 5 main phases. Each phase is **pure** (immutable data) except Phase 5 (Emit) with file I/O side effects.
 
-**Entry Point**: `SinglePhaseBuilder.Build` in `src/tsbindgen/SinglePhase/SinglePhaseBuilder.cs`
+**Entry Point**: `Builder.Build` in `src/tsbindgen/Builder.cs`
 
 ## Phase Sequence
 

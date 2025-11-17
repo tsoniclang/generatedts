@@ -1,6 +1,6 @@
 # PhaseGate - Comprehensive Validation
 
-**Location**: `src/tsbindgen/SinglePhase/Plan/PhaseGate.cs`
+**Location**: `src/tsbindgen/Plan/PhaseGate.cs`
 
 **Purpose**: Final validation gatekeeper before emission. Quality gate between Shape/Plan and Emit phases.
 

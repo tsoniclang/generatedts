@@ -1,4 +1,4 @@
-# SinglePhase Pipeline Architecture
+# tsbindgen Pipeline Architecture
 
 ## 1. System Overview
 
@@ -266,8 +266,8 @@ Validates 50+ invariants after transformations, before emission:
 ## 5. Directory Structure
 
 ```
-SinglePhase/
-├── SinglePhaseBuilder.cs        # Main orchestrator
+src/tsbindgen/
+├── Builder.cs        # Main orchestrator
 ├── BuildContext.cs              # Shared services
 ├── Load/                        # Phase 1: Reflection
 ├── Model/                       # Immutable data structures
@@ -350,7 +350,7 @@ Full BCL generation (4,047 types, 130 namespaces, 50,720 members):
 
 ## Summary
 
-**SinglePhase pipeline** is a deterministic, pure functional transformation:
+**tsbindgen pipeline** is a deterministic, pure functional transformation:
 
 1. **Load**: Reflection → SymbolGraph
 2. **Normalize**: Build indices

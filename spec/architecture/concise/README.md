@@ -1,6 +1,6 @@
-# SinglePhase Pipeline Architecture Documentation (Concise)
+# tsbindgen Pipeline Architecture Documentation (Concise)
 
-**Condensed architectural documentation for the tsbindgen SinglePhase pipeline** (~35% size of full docs).
+**Condensed architectural documentation for the tsbindgen tsbindgen pipeline** (~35% size of full docs).
 
 ## Documentation Index
 
@@ -43,7 +43,7 @@
 
 ## Coverage
 
-- ✅ All 76 files in SinglePhase/
+- ✅ All 76 files in src/tsbindgen/
 - ✅ All public methods with signatures
 - ✅ All validation rules and diagnostic codes
 - ✅ All transformation passes

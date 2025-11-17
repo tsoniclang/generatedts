@@ -1,6 +1,6 @@
 # Phase: PhaseGate - Comprehensive Validation
 
-**Location:** `src/tsbindgen/SinglePhase/Plan/PhaseGate.cs`
+**Location:** `src/tsbindgen/Plan/PhaseGate.cs`
 
 **Purpose:** Final validation gatekeeper before emission. Performs comprehensive validation checks and policy enforcement. Acts as quality gate between Shape/Plan phases and Emit phase.
 
@@ -56,7 +56,7 @@ PhaseGate is the **FINAL validation checkpoint** before the Emit phase. It valid
 
 ### PhaseGate.Validate Orchestration
 
-**File:** `src/tsbindgen/SinglePhase/Plan/PhaseGate.cs`
+**File:** `src/tsbindgen/Plan/PhaseGate.cs`
 
 ```csharp
 public static void Validate(
@@ -119,7 +119,7 @@ PhaseGate runs **20+ validation modules** in strict order:
 
 ### ValidationContext: Diagnostic Recording
 
-**File:** `src/tsbindgen/SinglePhase/Plan/Validation/Context.cs`
+**File:** `src/tsbindgen/Plan/Validation/Context.cs`
 
 ```csharp
 internal sealed class ValidationContext
@@ -266,7 +266,7 @@ Creates new ValidationContext with zeroed counters.
 
 **Purpose:** Core validation functions (types, members, generics, interfaces, inheritance, scopes, imports, policy).
 
-**File:** `src/tsbindgen/SinglePhase/Plan/Validation/Core.cs`
+**File:** `src/tsbindgen/Plan/Validation/Core.cs`
 
 **Functions:**
 
@@ -496,7 +496,7 @@ namespace C { imports A; }  // WARNING: TBG201 (A → B → C → A)
 
 **Purpose:** View validation functions (orphan detection, integrity, member scoping).
 
-**File:** `src/tsbindgen/SinglePhase/Plan/Validation/Views.cs`
+**File:** `src/tsbindgen/Plan/Validation/Views.cs`
 
 **Functions:**
 
@@ -635,7 +635,7 @@ class Foo : IBar {
 
 **Purpose:** Name-related validation (final names, aliases, identifiers, overloads, class surface uniqueness).
 
-**File:** `src/tsbindgen/SinglePhase/Plan/Validation/Names.cs`
+**File:** `src/tsbindgen/Plan/Validation/Names.cs`
 
 **Functions:**
 
@@ -990,7 +990,7 @@ To re-enable, validator needs to:
 
 **Purpose:** Scope-related validation (EmitScope invariants, scope mismatches, scope key formatting).
 
-**File:** `src/tsbindgen/SinglePhase/Plan/Validation/Scopes.cs`
+**File:** `src/tsbindgen/Plan/Validation/Scopes.cs`
 
 **Functions:**
 
@@ -1093,7 +1093,7 @@ method Bar {
 
 **Purpose:** Comprehensive finalization sweep - validates every symbol has proper placement and naming. This is the FINAL check before emission.
 
-**File:** `src/tsbindgen/SinglePhase/Plan/Validation/Finalization.cs`
+**File:** `src/tsbindgen/Plan/Validation/Finalization.cs`
 
 **Function:**
 
@@ -1223,7 +1223,7 @@ class Foo {
 
 **Purpose:** Constraint validation (generic parameter constraints, constraint losses).
 
-**File:** `src/tsbindgen/SinglePhase/Plan/Validation/Constraints.cs`
+**File:** `src/tsbindgen/Plan/Validation/Constraints.cs`
 
 **Function:**
 
@@ -1274,7 +1274,7 @@ class Foo<T> : IFoo<T> {
 
 **Purpose:** Type system validation (printer name consistency, TypeMap compliance, external type resolution).
 
-**File:** `src/tsbindgen/SinglePhase/Plan/Validation/Types.cs`
+**File:** `src/tsbindgen/Plan/Validation/Types.cs`
 
 **Functions:**
 
@@ -1465,7 +1465,7 @@ export type CLROf<T> =
 
 **Purpose:** Import/export validation (public API surface, import completeness, export completeness).
 
-**File:** `src/tsbindgen/SinglePhase/Plan/Validation/ImportExport.cs`
+**File:** `src/tsbindgen/Plan/Validation/ImportExport.cs`
 
 **Functions:**
 
@@ -1581,7 +1581,7 @@ namespace A {
 
 **Purpose:** Shared utility functions for validation.
 
-**File:** `src/tsbindgen/SinglePhase/Plan/Validation/Shared.cs`
+**File:** `src/tsbindgen/Plan/Validation/Shared.cs`
 
 **Functions:**
 
