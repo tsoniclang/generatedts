@@ -69,7 +69,21 @@ public sealed class TypeNameResolver
             return builtinType;
         }
 
-        // 2. Check if this type needs qualification with namespace alias
+        // 2. TS2416 FIX: For TYPE positions, check TypeImportAliasNames first
+        //    This enables alias-centric type references to avoid cross-namespace signature mismatches
+        //    Example: GenericIdentity.clone() returns "ClaimsIdentity" (alias) not "System_Security_Claims_Internal.System.Security.Claims.ClaimsIdentity$instance"
+        if (!forValuePosition && _importPlan != null && _currentNamespace != null)
+        {
+            var clrFullName = named.FullName;
+            if (_importPlan.TypeImportAliasNames.TryGetValue((_currentNamespace, clrFullName), out var aliasName))
+            {
+                // Use simple alias from `import type { Alias }` statement
+                // This matches the base class signature exactly
+                return aliasName;
+            }
+        }
+
+        // 3. Check if this type needs qualification with namespace alias
         //    This happens when the type is used as a value (base class/interface)
         if (_importPlan != null && _currentNamespace != null)
         {
@@ -93,7 +107,7 @@ public sealed class TypeNameResolver
             }
         }
 
-        // 3. Look up TypeSymbol in graph using StableId
+        // 4. Look up TypeSymbol in graph using StableId
         var stableId = $"{named.AssemblyName}:{named.FullName}";
 
         if (!_graph.TypeIndex.TryGetValue(stableId, out var typeSymbol))
@@ -148,7 +162,7 @@ public sealed class TypeNameResolver
             return finalExternalName;
         }
 
-        // 4. Get final TypeScript name from Renamer (single source of truth)
+        // 5. Get final TypeScript name from Renamer (single source of truth)
         // TS2416 FIX: Type positions use ALIAS (e.g., Module_ = Module_$instance | __Module_$views)
         //             Value positions use INSTANCE (e.g., Module_$instance)
         // This ensures signatures match across inheritance hierarchy.

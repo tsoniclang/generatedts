@@ -184,6 +184,30 @@ public static class ImportPlanner
                 }
             }
 
+            // TS2416 FIX: Build alias name mapping for ALL cross-namespace types
+            // Even types used as value imports (extends/implements) may also appear in type positions (return types, parameters)
+            // This enables `import type { Alias }` for cross-namespace type positions
+            // Example: ClaimsIdentity used in BOTH "extends ClaimsIdentity$instance" AND "clone(): ClaimsIdentity"
+            foreach (var ti in typeImports)
+            {
+                // Get the CLR name for this type (need to map back from TS name)
+                var clrName = referencedTypeClrNames.FirstOrDefault(c =>
+                {
+                    var tsNameForClr = graph.TryGetType(c, out var ts) && ts != null
+                        ? ctx.Renamer.GetFinalTypeName(ts)
+                        : GetTypeScriptNameForExternalType(c);
+                    return tsNameForClr == ti.TypeName;
+                });
+
+                if (!string.IsNullOrEmpty(clrName))
+                {
+                    // Use the simple alias name (or type name if no alias)
+                    // This is what will appear in `import type { Alias }` statements
+                    var aliasName = ti.Alias ?? ti.TypeName;
+                    plan.TypeImportAliasNames[(ns.Name, clrName)] = aliasName;
+                }
+            }
+
             ctx.Log("ImportPlanner", $"{ns.Name} imports {typeImports.Count} types from {targetNamespace}");
         }
 
@@ -380,6 +404,14 @@ public sealed class ImportPlan
     /// Example: ("Microsoft.CSharp.RuntimeBinder", "System.Exception") → "System_Internal.Exception"
     /// </summary>
     public Dictionary<(string SourceNamespace, string TargetTypeCLRName), string> ValueImportQualifiedNames { get; init; } = new();
+
+    /// <summary>
+    /// TS2416 FIX: Maps (source namespace, target type CLR name) → simple alias name for type positions.
+    /// Used for cross-namespace types in type positions (return types, property types, parameters).
+    /// Enables `import type { Alias }` statements for alias-centric type references.
+    /// Example: ("System.Security.Principal", "System.Security.Claims.ClaimsIdentity") → "ClaimsIdentity"
+    /// </summary>
+    public Dictionary<(string SourceNamespace, string TargetTypeCLRName), string> TypeImportAliasNames { get; init; } = new();
 
     /// <summary>
     /// Gets import statements for a specific namespace.

@@ -25,7 +25,7 @@ public static class ClassPrinter
     /// <param name="bindingsProvider">Optional bindings provider for V2 inherited member exposure (if null, falls back to V1 behavior)</param>
     /// <param name="staticFlattening">D1: Plan for flattening static-only type hierarchies (if null, no flattening)</param>
     /// <param name="staticConflicts">D2: Plan for suppressing conflicting static members (if null, no suppression)</param>
-    public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, HashSet<string>? typesWithoutGenerics = null, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null)
+    public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, HashSet<string>? typesWithoutGenerics = null, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null, Plan.PropertyOverridePlan? propertyOverrides = null)
     {
         // GUARD: Never print non-public types
         if (type.Accessibility != Accessibility.Public)
@@ -43,8 +43,8 @@ public static class ClassPrinter
 
         return type.Kind switch
         {
-            TypeKind.Class => PrintClass(type, resolver, ctx, graph, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts),
-            TypeKind.Struct => PrintStruct(type, resolver, ctx, graph, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts),
+            TypeKind.Class => PrintClass(type, resolver, ctx, graph, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, propertyOverrides: propertyOverrides),
+            TypeKind.Struct => PrintStruct(type, resolver, ctx, graph, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, propertyOverrides: propertyOverrides),
             TypeKind.Enum => PrintEnum(type, ctx),
             TypeKind.Delegate => PrintDelegate(type, resolver, ctx),
             TypeKind.Interface => PrintInterface(type, resolver, ctx),
@@ -57,7 +57,7 @@ public static class ClassPrinter
     /// Used when type has explicit interface views that will be in separate companion interface.
     /// GUARD: Only prints public types - internal types are rejected.
     /// </summary>
-    public static string PrintInstance(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null)
+    public static string PrintInstance(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null, Plan.PropertyOverridePlan? propertyOverrides = null)
     {
         // GUARD: Never print non-public types
         if (type.Accessibility != Accessibility.Public)
@@ -68,13 +68,13 @@ public static class ClassPrinter
 
         return type.Kind switch
         {
-            TypeKind.Class => PrintClass(type, resolver, ctx, graph, instanceSuffix: true, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, overrideConflicts: overrideConflicts),
-            TypeKind.Struct => PrintStruct(type, resolver, ctx, graph, instanceSuffix: true, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, overrideConflicts: overrideConflicts),
-            _ => Print(type, resolver, ctx, graph, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, overrideConflicts: overrideConflicts) // Fallback (guard already checked above)
+            TypeKind.Class => PrintClass(type, resolver, ctx, graph, instanceSuffix: true, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, overrideConflicts: overrideConflicts, propertyOverrides: propertyOverrides),
+            TypeKind.Struct => PrintStruct(type, resolver, ctx, graph, instanceSuffix: true, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, overrideConflicts: overrideConflicts, propertyOverrides: propertyOverrides),
+            _ => Print(type, resolver, ctx, graph, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, overrideConflicts: overrideConflicts, propertyOverrides: propertyOverrides) // Fallback (guard already checked above)
         };
     }
 
-    private static string PrintClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, bool instanceSuffix = false, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null)
+    private static string PrintClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, bool instanceSuffix = false, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null, Plan.PropertyOverridePlan? propertyOverrides = null)
     {
         var sb = new StringBuilder();
 
@@ -147,7 +147,7 @@ public static class ClassPrinter
         sb.AppendLine(" {");
 
         // Emit members
-        EmitMembers(sb, type, resolver, ctx, graph, bindingsProvider, staticConflicts, overrideConflicts);
+        EmitMembers(sb, type, resolver, ctx, graph, bindingsProvider, staticConflicts, overrideConflicts, propertyOverrides);
 
         // D1 FIX: Emit inherited static members for flattened types
         if (shouldFlatten && staticFlattening != null)
@@ -205,7 +205,7 @@ public static class ClassPrinter
         return sb.ToString();
     }
 
-    private static string PrintStruct(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, bool instanceSuffix = false, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null)
+    private static string PrintStruct(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, bool instanceSuffix = false, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null, Plan.PropertyOverridePlan? propertyOverrides = null)
     {
         // Structs emit as classes in TypeScript (with metadata noting value semantics)
         var sb = new StringBuilder();
@@ -240,7 +240,7 @@ public static class ClassPrinter
         sb.AppendLine(" {");
 
         // Emit members
-        EmitMembers(sb, type, resolver, ctx, graph, bindingsProvider, staticConflicts, overrideConflicts);
+        EmitMembers(sb, type, resolver, ctx, graph, bindingsProvider, staticConflicts, overrideConflicts, propertyOverrides);
 
         sb.AppendLine("}");
 
@@ -394,7 +394,7 @@ public static class ClassPrinter
         return sb.ToString();
     }
 
-    private static void EmitMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, BindingsProvider? bindingsProvider = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null)
+    private static void EmitMembers(StringBuilder sb, TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, BindingsProvider? bindingsProvider = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null, Plan.PropertyOverridePlan? propertyOverrides = null)
     {
         var members = type.Members;
 
@@ -480,7 +480,18 @@ public static class ClassPrinter
                     sb.Append("readonly ");
                 sb.Append(tsName);  // V2: Use TsName from BindingsProvider
                 sb.Append(": ");
-                sb.Append(TypeRefPrinter.Print(propToEmit.PropertyType, resolver, ctx));
+
+                // E: Check for property override unification
+                var key = (type.StableId.ToString(), ownProperty.Property.StableId.ToString());
+                if (propertyOverrides?.PropertyTypeOverrides.TryGetValue(key, out var overrideType) == true)
+                {
+                    sb.Append(overrideType);  // Use unified union type
+                }
+                else
+                {
+                    sb.Append(TypeRefPrinter.Print(propToEmit.PropertyType, resolver, ctx));
+                }
+
                 sb.AppendLine(";");
             }
         }
@@ -505,7 +516,18 @@ public static class ClassPrinter
                     sb.Append("readonly ");
                 sb.Append(emitName);
                 sb.Append(": ");
-                sb.Append(TypeRefPrinter.Print(propToEmit.PropertyType, resolver, ctx));
+
+                // E: Check for property override unification
+                var key = (type.StableId.ToString(), prop.StableId.ToString());
+                if (propertyOverrides?.PropertyTypeOverrides.TryGetValue(key, out var overrideType) == true)
+                {
+                    sb.Append(overrideType);  // Use unified union type
+                }
+                else
+                {
+                    sb.Append(TypeRefPrinter.Print(propToEmit.PropertyType, resolver, ctx));
+                }
+
                 sb.AppendLine(";");
             }
         }

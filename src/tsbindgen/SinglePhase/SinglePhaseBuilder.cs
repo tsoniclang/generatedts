@@ -311,6 +311,10 @@ public static class SinglePhaseBuilder
         ctx.Log("Build", "\n--- Phase 4.9: Override Conflict Detection ---");
         var overrideConflicts = Shape.OverrideConflictDetector.Plan(ctx, graph);
 
+        // E: Unify property override types to eliminate property covariance errors
+        ctx.Log("Build", "\n--- Phase 4.10: Property Override Unification ---");
+        var propertyOverrides = Shape.PropertyOverrideUnifier.Build(graph, ctx);
+
         return new EmissionPlan
         {
             Graph = graph,
@@ -318,7 +322,8 @@ public static class SinglePhaseBuilder
             EmissionOrder = order,
             StaticFlattening = staticFlattening,
             StaticConflicts = staticConflicts,
-            OverrideConflicts = overrideConflicts
+            OverrideConflicts = overrideConflicts,
+            PropertyOverrides = propertyOverrides
         };
     }
 
@@ -437,6 +442,11 @@ public sealed record EmissionPlan
     /// D3: Plan for suppressing conflicting instance member overrides to eliminate TS2416 errors.
     /// </summary>
     public required Shape.OverrideConflictPlan OverrideConflicts { get; init; }
+
+    /// <summary>
+    /// E: Plan for unifying property override types to eliminate property covariance TS2416 errors.
+    /// </summary>
+    public required Plan.PropertyOverridePlan PropertyOverrides { get; init; }
 
     public int NamespaceCount => Graph.Namespaces.Length;
 }
