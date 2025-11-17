@@ -8,7 +8,7 @@ namespace tsbindgen.Renaming;
 /// </summary>
 public static class TypeScriptReservedWords
 {
-    private static readonly HashSet<string> ReservedWords = new(System.StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> ReservedWords = new(System.StringComparer.Ordinal)
     {
         "break", "case", "catch", "class", "const", "continue", "debugger", "default",
         "delete", "do", "else", "enum", "export", "extends", "false", "finally",

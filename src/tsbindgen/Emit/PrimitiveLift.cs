@@ -42,8 +42,8 @@ internal static class PrimitiveLift
 
         // Other
         ("char",    "System.Char",    "Char"),
-        ("boolean", "System.Boolean", "Boolean_"),  // Note: emits as Boolean_ (reserved keyword)
-        ("string",  "System.String",  "String_"),   // Note: emits as String_ (conflicts with TS String)
+        ("boolean", "System.Boolean", "Boolean"),
+        ("string",  "System.String",  "String"),
     };
 
     /// <summary>

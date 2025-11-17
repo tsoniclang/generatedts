@@ -97,11 +97,6 @@ public static class TypeMap
                 tsType = "string";
                 return true;
 
-            // Array base type
-            case "System.Array":
-                tsType = "any[]";
-                return true;
-
             // Value type base
             case "System.ValueType":
                 tsType = "any";
