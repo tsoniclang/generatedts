@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -54,7 +55,8 @@ public static class FacadeEmitter
         // Import from internal/index.d.ts (or _root/index.d.ts for empty namespace)
         sb.AppendLine("// Import internal declarations");
         var subdirName = ns.IsRoot ? "_root" : "internal";
-        sb.AppendLine($"import * as Internal from './{subdirName}/index';");
+        var internalImportPath = $"./{subdirName}/index.js";
+        sb.AppendLine($"import * as Internal from '{internalImportPath}';");
         sb.AppendLine();
 
         if (plan.Imports.NamespaceExports.TryGetValue(ns.Name, out var exports) && exports.Count > 0)
@@ -113,19 +115,23 @@ public static class FacadeEmitter
                             return emit;
                         }));
 
-                    var facadePath = import.ImportPath switch
+                    var facadePath = import.ImportPath;
+
+                    // Facade files sit one level above internal/index.d.ts
+                    // Only collapse paths that start two levels up (../../) → drop one level
+                    if (facadePath.StartsWith("../../", StringComparison.Ordinal))
                     {
-                        // internal files are one level deeper than facades (../)
-                        var p when p.StartsWith("../../") => "../" + p.Substring(6),
-                        _ => import.ImportPath
-                    };
+                        facadePath = "../" + facadePath.Substring(6);
+                    }
+
                     sb.AppendLine($"import type {{ {typeList} }} from '{facadePath}';");
                 }
                 sb.AppendLine();
             }
 
             // Flattened ESM: re-export everything from internal
-            sb.AppendLine($"export * from './{subdirName}/index';");
+            var reexportPath = $"./{subdirName}/index.js";
+            sb.AppendLine($"export * from '{reexportPath}';");
             sb.AppendLine();
 
             sb.AppendLine("// Individual type exports for convenience");

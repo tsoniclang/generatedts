@@ -77,7 +77,7 @@ private static string GenerateFacade(BuildContext ctx, EmissionPlan plan, Model.
 ```
 **What it does:**
 1. **File header** - Comments with namespace name and purpose
-2. **Internal import** - `import * as Internal from './internal/index';`
+2. **Internal import** - `import * as Internal from './internal/index.js';`
 3. **Dependency imports** - Cross-namespace references with aliases
 4. **Namespace re-export** - `export import System = Internal.System;` (non-dotted only)
 5. **Individual type exports** - `export type List_1 = Internal.System.Collections.Generic.List_1;`
@@ -184,10 +184,10 @@ const func: Func_2<int, int> = x => x + 1;  // Type error!
 // Facade - Public API Surface
 
 // Import internal declarations
-import * as Internal from './internal/index';
+import * as Internal from './internal/index.js';
 
 // Import dependencies
-import * as System from '../System/index';
+import * as System from '../System/index.js';
 
 // Re-export namespace
 export import Generic = Internal.System.Collections.Generic;
@@ -478,10 +478,10 @@ export type int = number & { __brand: "int" };
 // ... all primitives ...
 
 // Import support types for unsafe CLR constructs
-import type { TSUnsafePointer, TSByRef } from "../_support/types";
+import type { TSUnsafePointer, TSByRef } from "../_support/types.js";
 
 // Import types from other namespaces
-import type { Object, ValueType } from "../System/internal/index";
+import type { Object, ValueType } from "../System/internal/index.js";
 
 export namespace System.Collections.Generic {
     // With companion views:
@@ -1834,7 +1834,7 @@ namespace System.Runtime.InteropServices {
 Cross-namespace references use qualified imports at module level:
 ```typescript
 // System.Runtime.InteropServices/internal/index.d.ts
-import * as System from '../../System/internal/index';
+import * as System from '../../System/internal/index.js';
 
 export namespace System.Runtime.InteropServices {
     class Foo extends System.Object { }
@@ -2883,7 +2883,7 @@ internal static string? GetClrSimpleName(string tsName)
    ```csharp
    foreach (var (tsName, _, clrSimpleName) in PrimitiveLift.Rules)
    {
-       sb.AppendLine($"    T extends {tsName} ? import(\"../../System/internal/index\").{clrSimpleName} :");
+       sb.AppendLine($"    T extends {tsName} ? import(\"../../System/internal/index.js\").{clrSimpleName} :");
    }
    ```
 
@@ -3057,10 +3057,10 @@ export type Bar<T> = Namespace.Bar<T>;  // ✓
 // Facade - Public API Surface
 
 // Import internal declarations
-import * as Internal from './internal/index';
+import * as Internal from './internal/index.js';
 
 // Import dependencies
-import * as System from '../System/index';
+import * as System from '../System/index.js';
 
 // Re-export namespace
 export import Generic = Internal.System.Collections.Generic;
@@ -3085,10 +3085,10 @@ export type int = number & { __brand: "int" };
 // ... all primitives ...
 
 // Import support types for unsafe CLR constructs
-import type { TSUnsafePointer, TSByRef } from "../_support/types";
+import type { TSUnsafePointer, TSByRef } from "../_support/types.js";
 
 // Import types from other namespaces
-import type { Object, ValueType } from "../System/internal/index";
+import type { Object, ValueType } from "../System/internal/index.js";
 
 export namespace System.Collections.Generic {
     export class List_1$instance<T> {

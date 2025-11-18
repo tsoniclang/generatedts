@@ -77,7 +77,7 @@ private static void PlanNamespaceImports(
 
 3. **Determine import path:**
    - Call `PathPlanner.GetSpecifier(sourceNamespace, targetNamespace)`
-   - Returns relative path like `"../System.Collections/internal/index"`
+   - Returns relative path like `"../System.Collections/internal/index.js"`
 
 4. **Check for name collisions:**
    - For each referenced type, get TypeScript emit name from Renamer
@@ -146,7 +146,7 @@ namespace System.Reflection {
     // Import collision - needs alias:
     import type {
         AssemblyHashAlgorithm as AssemblyHashAlgorithm_Assemblies
-    } from "../System.Configuration.Assemblies/internal/index";
+    } from "../System.Configuration.Assemblies/internal/index.js";
 }
 ```
 
@@ -286,7 +286,7 @@ Data structure containing all import/export information.
 **ImportStatement:**
 ```csharp
 record ImportStatement(
-    string ImportPath,         // "../System/internal/index"
+    string ImportPath,         // "../System/internal/index.js"
     string TargetNamespace,    // "System"
     List<TypeImport> TypeImports // [List, Dictionary, ...]
 )
@@ -1058,29 +1058,29 @@ public static string GetSpecifier(string sourceNamespace, string targetNamespace
 
 2. **Compute target path:**
    - If target is root: `targetDir = "_root"`, `targetFile = "index"`
-   - If target is named: `targetDir = targetNamespace`, `targetFile = "internal/index"`
+   - If target is named: `targetDir = targetNamespace`, `targetFile = "internal/index.js"`
 
 3. **Compute relative path:**
 
    **Source is root:**
-   - Root → Root: `./_root/index`
-   - Root → Non-root: `./{targetNamespace}/internal/index`
+   - Root → Root: `./_root/index.js`
+   - Root → Non-root: `./{targetNamespace}/internal/index.js`
 
    **Source is non-root:**
-   - Non-root → Root: `../_root/index`
-   - Non-root → Non-root: `../{targetNamespace}/internal/index`
+   - Non-root → Root: `../_root/index.js`
+   - Non-root → Non-root: `../{targetNamespace}/internal/index.js`
 
 **Examples:**
 
 | Source NS | Target NS | Import Specifier |
 |-----------|-----------|------------------|
-| (root) | (root) | `./_root/index` |
-| (root) | `System` | `./System/internal/index` |
-| `System.Collections` | (root) | `../_root/index` |
-| `System.Collections` | `System` | `../System/internal/index` |
-| `System.Collections` | `System.Text` | `../System.Text/internal/index` |
+| (root) | (root) | `./_root/index.js` |
+| (root) | `System` | `./System/internal/index.js` |
+| `System.Collections` | (root) | `../_root/index.js` |
+| `System.Collections` | `System` | `../System/internal/index.js` |
+| `System.Collections` | `System.Text` | `../System.Text/internal/index.js` |
 
-**Why always `internal/index`:**
+**Why always `internal/index.js`:**
 - Public API uses `index.d.ts` at namespace root
 - Internal declarations use `internal/index.d.ts` subdirectory
 - Import statements always target internal (full type definitions)
@@ -1920,15 +1920,15 @@ PhaseGate delegates to specialized validation modules in `Validation/` directory
 2. **Compute relative path:**
    - Same directory level: Use `./` prefix
    - Different directory level: Use `../` prefix
-   - Always target `internal/index` (full type definitions)
+   - Always target `internal/index.js` (full type definitions)
 
 3. **Special cases:**
-   - Root → Root: `./_root/index` (no internal subdirectory)
-   - Root → Named: `./System/internal/index`
-   - Named → Root: `../_root/index`
-   - Named → Named: `../System.Text/internal/index`
+   - Root → Root: `./_root/index.js` (no internal subdirectory)
+   - Root → Named: `./System/internal/index.js`
+   - Named → Root: `../_root/index.js`
+   - Named → Named: `../System.Text/internal/index.js`
 
-**Why always `internal/index`:**
+**Why always `internal/index.js`:**
 - Public API (`index.d.ts`) re-exports from internal
 - Imports need full type definitions, not just public surface
 - Consistent import paths across all namespaces
@@ -1953,12 +1953,12 @@ output/
 
 Import specifiers:
 - From `System.Collections.Generic` to `System.Collections`:
-  - Path: `../System.Collections/internal/index`
-  - Imports: `import { ... } from "../System.Collections/internal/index"`
+  - Path: `../System.Collections/internal/index.js`
+  - Imports: `import { ... } from "../System.Collections/internal/index.js"`
 
 - From `System` to `_root`:
-  - Path: `../_root/index`
-  - Imports: `import { ... } from "../_root/index"`
+  - Path: `../_root/index.js`
+  - Imports: `import { ... } from "../_root/index.js"`
 
 ### Constraint Loss Detection
 

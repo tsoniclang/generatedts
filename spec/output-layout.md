@@ -44,7 +44,7 @@ export type TSByRef<T> = { value: T } & { readonly __tsbindgenByRef?: unique sym
 
 **Imports**: Namespaces import on-demand:
 ```typescript
-import type { TSUnsafePointer, TSByRef } from "../_support/types";
+import type { TSUnsafePointer, TSByRef } from "../_support/types.js";
 ```
 
 ### `<Namespace>/internal/index.d.ts`
@@ -59,10 +59,10 @@ import type { TSUnsafePointer, TSByRef } from "../_support/types";
 **Example**:
 ```typescript
 // Import external dependencies
-import type { IEnumerable_1 } from "../../System.Collections.Generic/internal/index";
+import type { IEnumerable_1 } from "../../System.Collections.Generic/internal/index.js";
 
 // Import support types (if namespace uses pointers/byrefs)
-import type { TSUnsafePointer, TSByRef } from "../../_support/types";
+import type { TSUnsafePointer, TSByRef } from "../../_support/types.js";
 
 export namespace System.Linq {
   export class Enumerable {
@@ -77,11 +77,11 @@ export namespace System.Linq {
 ### `<Namespace>/index.d.ts`
 **Purpose**: Facade that re-exports everything from `internal/index.d.ts`.
 
-**Pattern**: ALWAYS imports from `./internal/index` (relative, not `../internal/index`).
+**Pattern**: ALWAYS imports from `./internal/index.js` (relative, not `../internal/index.js`).
 
 **Example**:
 ```typescript
-export * from "./internal/index";
+export * from "./internal/index.js";
 ```
 
 **Rationale**: Provides clean public API while keeping internal declarations separate.
@@ -133,32 +133,32 @@ export * from "./internal/index";
 ## Import Path Conventions
 
 ### Internal → Internal (Same Assembly)
-**Pattern**: Relative path to sibling namespace's `internal/index`
+**Pattern**: Relative path to sibling namespace's `internal/index.js`
 
 **Example**: From `System.Linq/internal/index.d.ts` to `System.Collections.Generic/internal/index.d.ts`:
 ```typescript
-import type { IEnumerable_1 } from "../../System.Collections.Generic/internal/index";
+import type { IEnumerable_1 } from "../../System.Collections.Generic/internal/index.js";
 ```
 
 ### Internal → _support
-**Pattern**: Relative path to `_support/types`
+**Pattern**: Relative path to `_support/types.js`
 
 **Example**: From `System/internal/index.d.ts`:
 ```typescript
-import type { TSUnsafePointer, TSByRef } from "../../_support/types";
+import type { TSUnsafePointer, TSByRef } from "../../_support/types.js";
 ```
 
 ### Facade → Internal (Same Namespace)
-**Pattern**: ALWAYS `./internal/index` (NOT `../internal/index`)
+**Pattern**: ALWAYS `./internal/index.js` (NOT `../internal/index.js`)
 
 **Example**: From `System.Linq/index.d.ts`:
 ```typescript
-export * from "./internal/index";  // ✅ CORRECT
+export * from "./internal/index.js";  // ✅ CORRECT
 ```
 
 **Wrong**:
 ```typescript
-export * from "../System.Linq/internal/index";  // ❌ WRONG
+export * from "../System.Linq/internal/index.js";  // ❌ WRONG
 ```
 
 ### External Packages (Planned)
@@ -166,7 +166,7 @@ export * from "../System.Linq/internal/index";  // ❌ WRONG
 
 **Example**: From user assembly to BCL package:
 ```typescript
-import type { String, int } from "@dotnet/bcl/System/internal/index";
+import type { String, int } from "@dotnet/bcl/System/internal/index.js";
 ```
 
 ## Directory Naming
@@ -296,10 +296,10 @@ bcl-types/
 **Example**:
 ```typescript
 // ✅ CORRECT (works on Windows, Linux, macOS)
-import type { IEnumerable_1 } from "../../System.Collections.Generic/internal/index";
+import type { IEnumerable_1 } from "../../System.Collections.Generic/internal/index.js";
 
 // ❌ WRONG (breaks on Linux/macOS)
-import type { IEnumerable_1 } from "..\\..\\System.Collections.Generic\\internal\\index";
+import type { IEnumerable_1 } from "..\\..\\System.Collections.Generic\\internal\\index.js";
 ```
 
 ### Case Sensitivity

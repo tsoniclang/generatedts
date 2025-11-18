@@ -364,11 +364,11 @@ ComputeTypeRequestedBase("Dictionary`2+KeyCollection")  // → "Dictionary_2_Key
 **Why Array_ is needed**:
 ```typescript
 // Problem without renaming:
-import type { Array } from "../../System/internal/index";  // CLR System.Array (non-generic)
+import type { Array } from "../../System/internal/index.js";  // CLR System.Array (non-generic)
 static GetAllSettings(...): Array<Array<string>>;  // ERROR: Imported Array is not generic
 
 // Solution with renaming:
-import type { Array_ } from "../../System/internal/index";  // CLR System.Array
+import type { Array_ } from "../../System/internal/index.js";  // CLR System.Array
 static GetAllSettings(...): Array<Array<string>>;  // ✅ Uses built-in Array<T>
 ```
 
