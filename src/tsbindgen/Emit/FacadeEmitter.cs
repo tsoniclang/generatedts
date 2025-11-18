@@ -57,14 +57,6 @@ public static class FacadeEmitter
         sb.AppendLine($"import * as Internal from './{subdirName}/index';");
         sb.AppendLine();
 
-        // Convenience cross-namespace imports for common runtime types (Task/ValueTask)
-        if (ns.Name == "System")
-        {
-            sb.AppendLine("// Convenience aliases from System.Threading.Tasks");
-            sb.AppendLine("import type { Task as TaskNonGeneric, Task_1 as TaskGeneric, ValueTask as ValueTaskNonGeneric, ValueTask_1 as ValueTaskGeneric } from '../System.Threading.Tasks/internal/index';");
-            sb.AppendLine();
-        }
-
         if (plan.Imports.NamespaceExports.TryGetValue(ns.Name, out var exports) && exports.Count > 0)
         {
             // Precompute stem info
@@ -135,17 +127,6 @@ public static class FacadeEmitter
             // Flattened ESM: re-export everything from internal
             sb.AppendLine($"export * from './{subdirName}/index';");
             sb.AppendLine();
-
-            // Publish Task/ValueTask convenience aliases on System facade
-            if (ns.Name == "System")
-            {
-                sb.AppendLine("// Friendly aliases for Task/ValueTask");
-                sb.AppendLine("export type Task_0 = TaskNonGeneric;");
-                sb.AppendLine("export type Task<T> = TaskGeneric<T>;");
-                sb.AppendLine("export type ValueTask_0 = ValueTaskNonGeneric;");
-                sb.AppendLine("export type ValueTask<T> = ValueTaskGeneric<T>;");
-                sb.AppendLine();
-            }
 
             sb.AppendLine("// Individual type exports for convenience");
 

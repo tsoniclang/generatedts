@@ -200,6 +200,21 @@ function runTypeScriptCompiler() {
     };
 }
 
+
+function installTsonicTypes() {
+    log('Installing @tsonic/types into validation directory...');
+    try {
+        execSync('npm install --no-save @tsonic/types', {
+            cwd: VALIDATION_DIR,
+            stdio: 'inherit'
+        });
+        log('✓ Installed @tsonic/types');
+    } catch (err) {
+        error('Failed to install @tsonic/types (network?)');
+        throw err;
+    }
+}
+
 function validateMetadataFiles() {
     log('Validating metadata files...');
 
@@ -286,6 +301,7 @@ async function main() {
         }
 
         console.log('');
+        installTsonicTypes();
         const result = runTypeScriptCompiler();
 
         // Print results

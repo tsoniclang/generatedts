@@ -75,9 +75,8 @@ public static class InternalIndexEmitter
         sb.AppendLine($"// Assembly: {string.Join(", ", nsOrder.Namespace.ContributingAssemblies)}");
         sb.AppendLine();
 
-        // Branded primitive types (emitted in all namespaces for cross-namespace type references)
-        // Every namespace needs these to reference System types (Int32 → int, etc.)
-        EmitBrandedPrimitives(sb);
+        // Branded primitive types are sourced from @tsonic/types
+        EmitBrandedPrimitiveImports(sb);
 
         // Check if namespace uses unsafe markers (pointers/byrefs) and emit support import if needed
         var needsSupportTypes = NamespaceUsesSupportTypes(nsOrder.Namespace);
@@ -313,45 +312,10 @@ public static class InternalIndexEmitter
         return false;
     }
 
-    private static void EmitBrandedPrimitives(StringBuilder sb)
+    private static void EmitBrandedPrimitiveImports(StringBuilder sb)
     {
-        sb.AppendLine("// Branded primitive types for CLR numeric types");
-
-        sb.AppendLine("// Primitives implement IEquatable and IComparable to satisfy generic constraints");
-        sb.AppendLine("// Note: Using 'any' in interface type parameters to avoid circular reference (TS2456)");
-
-        // Use inline type imports to reference interfaces from System namespace
-        // Format: import("relative-path").InterfaceName
-        // IMPORTANT: Use 'any' as type parameter to avoid circular references
-        // TypeScript limitation: `type byte = ... & IEquatable_1<byte>` causes TS2456
-        const string IEq = "import(\"../../System/internal/index\").IEquatable_1<any>";
-        const string ICmp = "import(\"../../System/internal/index\").IComparable_1<any>";
-
-        // Integer types
-        sb.AppendLine($"export type sbyte = number & {{ __brand: \"sbyte\" }} & {IEq} & {ICmp};");
-        sb.AppendLine($"export type byte = number & {{ __brand: \"byte\" }} & {IEq} & {ICmp};");
-        sb.AppendLine($"export type short = number & {{ __brand: \"short\" }} & {IEq} & {ICmp};");
-        sb.AppendLine($"export type ushort = number & {{ __brand: \"ushort\" }} & {IEq} & {ICmp};");
-        sb.AppendLine($"export type int = number & {{ __brand: \"int\" }} & {IEq} & {ICmp};");
-        sb.AppendLine($"export type uint = number & {{ __brand: \"uint\" }} & {IEq} & {ICmp};");
-        sb.AppendLine($"export type long = number & {{ __brand: \"long\" }} & {IEq} & {ICmp};");
-        sb.AppendLine($"export type ulong = number & {{ __brand: \"ulong\" }} & {IEq} & {ICmp};");
-        sb.AppendLine($"export type int128 = number & {{ __brand: \"int128\" }} & {IEq} & {ICmp};");
-        sb.AppendLine($"export type uint128 = number & {{ __brand: \"uint128\" }} & {IEq} & {ICmp};");
-
-        // Floating-point types
-        sb.AppendLine($"export type half = number & {{ __brand: \"half\" }} & {IEq} & {ICmp};");
-        sb.AppendLine($"export type float = number & {{ __brand: \"float\" }} & {IEq} & {ICmp};");
-        sb.AppendLine($"export type double = number & {{ __brand: \"double\" }} & {IEq} & {ICmp};");
-        sb.AppendLine($"export type decimal = number & {{ __brand: \"decimal\" }} & {IEq} & {ICmp};");
-
-        // Native-sized integers
-        sb.AppendLine($"export type nint = number & {{ __brand: \"nint\" }} & {IEq} & {ICmp};");
-        sb.AppendLine($"export type nuint = number & {{ __brand: \"nuint\" }} & {IEq} & {ICmp};");
-
-        // Character type
-        sb.AppendLine($"export type char = string & {{ __brand: \"char\" }} & {IEq} & {ICmp};");
-
+        sb.AppendLine("// Branded primitive types are sourced from @tsonic/types");
+        sb.AppendLine("import type { sbyte, byte, short, ushort, int, uint, long, ulong, int128, uint128, half, float, double, decimal, nint, nuint, char } from '@tsonic/types';");
         sb.AppendLine();
 
         // CLROf<T> - Primitive Lifting Utility
