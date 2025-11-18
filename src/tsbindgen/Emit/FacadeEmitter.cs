@@ -57,66 +57,129 @@ public static class FacadeEmitter
         sb.AppendLine($"import * as Internal from './{subdirName}/index';");
         sb.AppendLine();
 
-        // Flat ESM: import cross-namespace types for facade constraints (type-only)
-        if (plan.Imports.NamespaceImports.TryGetValue(ns.Name, out var imports) && imports.Count > 0)
+        // Convenience cross-namespace imports for common runtime types (Task/ValueTask)
+        if (ns.Name == "System")
         {
-            sb.AppendLine("// Cross-namespace type imports for constraints");
-            foreach (var import in imports.OrderBy(i => i.ImportPath))
-            {
-                var typeImports = import.TypeImports;
-                if (typeImports.Count == 0)
-                    continue;
-
-                var typeList = string.Join(", ", typeImports
-                    .OrderBy(ti => ti.TypeName)
-                    .Select(ti => ti.Alias != null ? $"{ti.TypeName} as {ti.Alias}" : ti.TypeName));
-                var facadePath = import.ImportPath switch
-                {
-                    // internal files are one level deeper than facades (../)
-                    var p when p.StartsWith("../../") => "../" + p.Substring(6),
-                    _ => import.ImportPath
-                };
-                sb.AppendLine($"import type {{ {typeList} }} from '{facadePath}';");
-            }
+            sb.AppendLine("// Convenience aliases from System.Threading.Tasks");
+            sb.AppendLine("import type { Task as TaskNonGeneric, Task_1 as TaskGeneric, ValueTask as ValueTaskNonGeneric, ValueTask_1 as ValueTaskGeneric } from '../System.Threading.Tasks/internal/index';");
             sb.AppendLine();
         }
 
-        // Flattened ESM: re-export everything from internal
-        sb.AppendLine($"export * from './{subdirName}/index';");
-        sb.AppendLine();
-
-        // Export individual types (for convenience)
-        if (plan.Imports.NamespaceExports.TryGetValue(ns.Name, out var exports))
+        if (plan.Imports.NamespaceExports.TryGetValue(ns.Name, out var exports) && exports.Count > 0)
         {
-            if (exports.Count > 0)
+            // Precompute stem info
+            var stemGroups = exports
+                .GroupBy(e => GetStem(e.ExportName))
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var nonGenericRenames = new Dictionary<string, string>(StringComparer.Ordinal); // original export name -> renamed alias
+            var stemsWithGeneric = new HashSet<string>(StringComparer.Ordinal);
+            var reservedStems = new HashSet<string>(StringComparer.Ordinal) { "Action", "Func" };
+            var potentialFriendlyStems = new HashSet<string>(exports
+                .Where(e => e.SourceType.GenericParameters.Length > 0)
+                .Select(e => GetStem(e.ExportName)), StringComparer.Ordinal);
+
+            foreach (var kvp in stemGroups)
             {
-                sb.AppendLine("// Individual type exports for convenience");
-
-                // TS2304 FIX: Create TypeNameResolver in facade mode to qualify cross-namespace types
-                // This ensures constraints like "T extends IEquatable_1<T>" become "T extends System.IEquatable_1<T>"
-                // Use ImportPlan so type-only imports can be referenced without qualification
-                var resolver = new TypeNameResolver(ctx, plan.Graph, importPlan: plan.Imports, currentNamespace: ns.Name, facadeMode: false);
-
-                // Track friendly aliases (arityless) to avoid duplicates
-                var friendlyAliases = new HashSet<string>();
-
-                foreach (var export in exports)
+                var stem = kvp.Key;
+                var group = kvp.Value;
+                var hasNonGeneric = group.Any(e => e.Arity == 0);
+                var hasGeneric = group.Any(e => e.Arity > 0);
+                if (hasNonGeneric && hasGeneric)
                 {
-                    // Skip base Action to allow custom delegate alias below
-                    if (ns.Name == "System" && export.ExportName == "Action")
+                    stemsWithGeneric.Add(stem);
+                    if (!reservedStems.Contains(stem))
                     {
-                        continue;
+                        // Rename the non-generic export to <Stem>_0
+                        var nonGenericExport = group.First(e => e.Arity == 0);
+                        nonGenericRenames[nonGenericExport.ExportName] = stem + "_0";
                     }
+                }
+            }
 
-                    var exportKind = export.ExportKind switch
+            // Flat ESM: import cross-namespace types for constraints (type-only)
+            var importedTypeNames = new HashSet<string>(StringComparer.Ordinal);
+
+            if (plan.Imports.NamespaceImports.TryGetValue(ns.Name, out var imports) && imports.Count > 0)
+            {
+                sb.AppendLine("// Cross-namespace type imports for constraints");
+                foreach (var import in imports.OrderBy(i => i.ImportPath))
+                {
+                    var typeImports = import.TypeImports;
+                    if (typeImports.Count == 0)
+                        continue;
+
+                    var typeList = string.Join(", ", typeImports
+                        .OrderBy(ti => ti.TypeName)
+                        .Select(ti =>
+                        {
+                            var name = ti.TypeName;
+                            var needsAlias = potentialFriendlyStems.Contains(GetStem(name)) && string.IsNullOrEmpty(ti.Alias);
+                            var alias = needsAlias ? name + "_Imported" : ti.Alias;
+                            var emit = alias != null ? $"{name} as {alias}" : name;
+                            importedTypeNames.Add(alias ?? name);
+                            return emit;
+                        }));
+
+                    var facadePath = import.ImportPath switch
                     {
-                        ExportKind.Class => "class",
-                        ExportKind.Interface => "interface",
-                        ExportKind.Enum => "enum",
-                        ExportKind.Type => "type",
-                        ExportKind.Const => "const",
-                        _ => "type"
+                        // internal files are one level deeper than facades (../)
+                        var p when p.StartsWith("../../") => "../" + p.Substring(6),
+                        _ => import.ImportPath
                     };
+                    sb.AppendLine($"import type {{ {typeList} }} from '{facadePath}';");
+                }
+                sb.AppendLine();
+            }
+
+            // Flattened ESM: re-export everything from internal
+            sb.AppendLine($"export * from './{subdirName}/index';");
+            sb.AppendLine();
+
+            // Publish Task/ValueTask convenience aliases on System facade
+            if (ns.Name == "System")
+            {
+                sb.AppendLine("// Friendly aliases for Task/ValueTask");
+                sb.AppendLine("export type Task_0 = TaskNonGeneric;");
+                sb.AppendLine("export type Task<T> = TaskGeneric<T>;");
+                sb.AppendLine("export type ValueTask_0 = ValueTaskNonGeneric;");
+                sb.AppendLine("export type ValueTask<T> = ValueTaskGeneric<T>;");
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("// Individual type exports for convenience");
+
+            // TS2304 FIX: Create TypeNameResolver in facade mode to qualify cross-namespace types
+            // This ensures constraints like "T extends IEquatable_1<T>" become "T extends System.IEquatable_1<T>"
+            // Use ImportPlan so type-only imports can be referenced without qualification
+            var resolver = new TypeNameResolver(ctx, plan.Graph, importPlan: plan.Imports, currentNamespace: ns.Name, facadeMode: false);
+
+            // Track friendly aliases (arityless) to avoid duplicates
+            var friendlyAliases = new HashSet<string>();
+            var existingNames = new HashSet<string>(exports.Select(e => e.ExportName));
+            var skipFriendlyNames = new HashSet<string>(importedTypeNames, StringComparer.Ordinal);
+            foreach (var reserved in reservedStems)
+            {
+                skipFriendlyNames.Add(reserved);
+            }
+
+            foreach (var export in exports)
+            {
+                // Skip base Action to allow custom delegate alias below
+                if (ns.Name == "System" && export.ExportName == "Action")
+                {
+                    continue;
+                }
+
+                var exportKind = export.ExportKind switch
+                {
+                    ExportKind.Class => "class",
+                    ExportKind.Interface => "interface",
+                    ExportKind.Enum => "enum",
+                    ExportKind.Type => "type",
+                    ExportKind.Const => "const",
+                    _ => "type"
+                };
 
                     // TS2315 FIX: Skip facade exports for types that lose their generics during emission
                     // Static classes with generic static members are emitted as non-generic classes
@@ -135,9 +198,14 @@ public static class FacadeEmitter
                     // This follows Option A from architect spec: facade points through top-level aliases
                     var rhsBase = $"Internal.{export.ExportName}";
 
+                    // Apply rename for non-generic when sharing stem with generic
+                    var aliasName = nonGenericRenames.TryGetValue(export.ExportName, out var renamed)
+                        ? renamed
+                        : export.ExportName;
+
                     AliasEmit.EmitGenericAlias(
                         sb,
-                        aliasName: export.ExportName,
+                        aliasName: aliasName,
                         sourceType: export.SourceType,
                         rhsExpression: rhsBase,
                         resolver,
@@ -151,7 +219,10 @@ public static class FacadeEmitter
                         if (export.ExportName.EndsWith(suffix, StringComparison.Ordinal))
                         {
                             var friendlyName = export.ExportName.Substring(0, export.ExportName.Length - suffix.Length);
-                            if (!string.IsNullOrWhiteSpace(friendlyName) && friendlyAliases.Add(friendlyName))
+                            // Skip if we've already emitted or name collides with imports/reserved helpers
+                            if (!string.IsNullOrWhiteSpace(friendlyName) &&
+                                !skipFriendlyNames.Contains(friendlyName) &&
+                                friendlyAliases.Add(friendlyName))
                             {
                                 AliasEmit.EmitGenericAlias(
                                     sb,
@@ -165,8 +236,9 @@ public static class FacadeEmitter
                         }
                     }
                 }
+
             }
-        }
+
 
         // Delegate convenience aliases (Action/Func) with callable compatibility
         // Only for System namespace which defines the standard delegates
@@ -384,5 +456,26 @@ public static class FacadeEmitter
         // For arity > 1, use T1, T2, T3, ...
         var typeParams = string.Join(", ", Enumerable.Range(1, arity).Select(i => $"T{i}"));
         return $"<{typeParams}>";
+    }
+
+    /// <summary>
+    /// Get the stem name by stripping generic arity suffix (_1, _2, ...).
+    /// </summary>
+    private static string GetStem(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return name;
+
+        var lastUnderscore = name.LastIndexOf('_');
+        if (lastUnderscore >= 0 && lastUnderscore < name.Length - 1)
+        {
+            var suffix = name.Substring(lastUnderscore + 1);
+            if (int.TryParse(suffix, out _))
+            {
+                return name.Substring(0, lastUnderscore);
+            }
+        }
+
+        return name;
     }
 }
