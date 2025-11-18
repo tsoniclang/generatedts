@@ -69,7 +69,7 @@ Each external tsbindgen package MUST follow this structure:
       "tsName": "String",
       "kind": "class",
       "arity": 0,
-      "module": "@dotnet/bcl/System/internal/index"
+      "module": "@dotnet/bcl/System/internal/index.js"
     },
     {
       "assembly": "System.Private.CoreLib",
@@ -77,7 +77,7 @@ Each external tsbindgen package MUST follow this structure:
       "tsName": "List_1",
       "kind": "class",
       "arity": 1,
-      "module": "@dotnet/bcl/System.Collections.Generic/internal/index"
+      "module": "@dotnet/bcl/System.Collections.Generic/internal/index.js"
     },
     {
       "assembly": "System.Runtime",
@@ -85,7 +85,7 @@ Each external tsbindgen package MUST follow this structure:
       "tsName": "IDisposable",
       "kind": "interface",
       "arity": 0,
-      "module": "@dotnet/bcl/System/internal/index"
+      "module": "@dotnet/bcl/System/internal/index.js"
     }
   ]
 }
@@ -106,7 +106,7 @@ Each external tsbindgen package MUST follow this structure:
 | `tsName` | string | Exact TypeScript identifier as exported (e.g., `"List_1"`) |
 | `kind` | string | Type classification: `"class"`, `"interface"`, `"enum"`, `"delegate"` |
 | `arity` | number | Generic type parameter count (0 for non-generic) |
-| `module` | string | Full module specifier for importing (e.g., `"@dotnet/bcl/System.Collections.Generic/internal/index"`) |
+| `module` | string | Full module specifier for importing (e.g., `"@dotnet/bcl/System.Collections.Generic/internal/index.js"`) |
 
 **Notes**:
 - `fullName` uses CLR conventions: backtick for generics (`` `1 ``), plus sign for nested types (`Outer+Inner`)
@@ -131,7 +131,7 @@ Each external tsbindgen package MUST follow this structure:
     "tsName": "String",
     "kind": "class",
     "arity": 0,
-    "module": "@dotnet/bcl/System/internal/index"
+    "module": "@dotnet/bcl/System/internal/index.js"
   },
   "System.Private.CoreLib:System.Collections.Generic.List`1": {
     "package": "@dotnet/bcl",
@@ -140,7 +140,7 @@ Each external tsbindgen package MUST follow this structure:
     "tsName": "List_1",
     "kind": "class",
     "arity": 1,
-    "module": "@dotnet/bcl/System.Collections.Generic/internal/index"
+    "module": "@dotnet/bcl/System.Collections.Generic/internal/index.js"
   }
 }
 ```
@@ -165,11 +165,11 @@ Track imported external types per output file to avoid duplicates:
 
 ```typescript
 // ✅ CORRECT (deduplicated)
-import type { IEnumerable_1, CancellationToken } from "@dotnet/bcl/System.Collections.Generic/internal/index";
+import type { IEnumerable_1, CancellationToken } from "@dotnet/bcl/System.Collections.Generic/internal/index.js";
 
 // ❌ WRONG (duplicate imports)
-import type { IEnumerable_1 } from "@dotnet/bcl/System.Collections.Generic/internal/index";
-import type { IEnumerable_1 } from "@dotnet/bcl/System.Collections.Generic/internal/index";
+import type { IEnumerable_1 } from "@dotnet/bcl/System.Collections.Generic/internal/index.js";
+import type { IEnumerable_1 } from "@dotnet/bcl/System.Collections.Generic/internal/index.js";
 ```
 
 ## PhaseGate Guards
@@ -224,11 +224,11 @@ tsbindgen generate -a MyCompany.Feature.dll \
 **Generated `MyCompany.Feature/internal/index.d.ts`**:
 ```typescript
 // External type imports (from @dotnet/bcl package)
-import type { IEnumerable_1 } from "@dotnet/bcl/System.Collections.Generic/internal/index";
-import type { CancellationToken } from "@dotnet/bcl/System.Threading/internal/index";
+import type { IEnumerable_1 } from "@dotnet/bcl/System.Collections.Generic/internal/index.js";
+import type { CancellationToken } from "@dotnet/bcl/System.Threading/internal/index.js";
 
 // Support type imports (from local _support)
-import type { TSByRef } from "../../_support/types";
+import type { TSByRef } from "../../_support/types.js";
 
 export namespace MyCompany.Feature {
   export class Uploader {

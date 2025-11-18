@@ -62,9 +62,9 @@ Uses EmissionPlan.StaticFlatteningPlan, StaticConflictPlan, OverrideConflictPlan
 
 **Example:**
 ```typescript
-/// <reference path="../../_support/types.d.ts" />
-import { Stream } from "../System.IO/internal";
-import { IDisposable } from "../System/internal";
+import type { TSUnsafePointer, TSByRef } from "../../_support/types.js";
+import { Stream } from "../System.IO/internal/index.js";
+import { IDisposable } from "../System/internal/index.js";
 
 export class FileStream extends Stream implements IDisposable {
     // ... members
