@@ -90,9 +90,23 @@ public static class InternalIndexEmitter
 
         // Emit import statements for cross-namespace type references
         var imports = importPlan.GetImportsFor(nsOrder.Namespace.Name);
-        if (imports.Count > 0)
+
+        // CLROf utility requires System_Internal namespace import
+        // Check if we need to add it (for non-System namespaces)
+        var systemImport = imports.FirstOrDefault(i => i.TargetNamespace == "System");
+        var needsSystemInternalForCLROf = nsOrder.Namespace.Name != "System"
+            && (systemImport == null || systemImport.TypeImports.All(ti => !ti.IsValueImport));
+
+        if (imports.Count > 0 || needsSystemInternalForCLROf)
         {
             sb.AppendLine("// Import types from other namespaces");
+
+            // Add System_Internal namespace import for CLROf if not already present
+            if (needsSystemInternalForCLROf)
+            {
+                var systemPath = Plan.PathPlanner.GetSpecifier(nsOrder.Namespace.Name, "System");
+                sb.AppendLine($"import * as System_Internal from \"{systemPath}\";");
+            }
 
             // Sort imports by module specifier for stable output
             foreach (var import in imports.OrderBy(i => i.ImportPath))
@@ -150,6 +164,9 @@ public static class InternalIndexEmitter
 
             sb.AppendLine(); // Blank line after imports
         }
+
+        // Emit CLROf utility after cross-namespace imports (so System_Internal is available)
+        EmitCLROfUtility(sb, nsOrder.Namespace.Name);
 
         var indent = string.Empty;
 
@@ -317,7 +334,10 @@ public static class InternalIndexEmitter
         sb.AppendLine("// Branded primitive types are sourced from @tsonic/types");
         sb.AppendLine("import type { sbyte, byte, short, ushort, int, uint, long, ulong, int128, uint128, half, float, double, decimal, nint, nuint, char } from '@tsonic/types';");
         sb.AppendLine();
+    }
 
+    private static void EmitCLROfUtility(StringBuilder sb, string currentNamespace)
+    {
         // CLROf<T> - Primitive Lifting Utility
         // CRITICAL: Uses PrimitiveLift.Rules as single source of truth (PG_GENERIC_PRIM_LIFT_001)
         sb.AppendLine("// CLROf<T> - Maps ergonomic primitives to their CLR types for generic constraints");
@@ -326,9 +346,13 @@ public static class InternalIndexEmitter
         sb.AppendLine("export type CLROf<T> =");
 
         // Generate conditional type branches from PrimitiveLift.Rules
+        // For System namespace, use direct type names (no prefix)
+        // For other namespaces, use System_Internal.TypeName (namespace-qualified)
+        var isSystemNamespace = currentNamespace == "System";
         foreach (var (tsName, _, clrSimpleName) in PrimitiveLift.Rules)
         {
-            sb.AppendLine($"    T extends {tsName} ? import(\"../../System/internal/index\").{clrSimpleName} :");
+            var typeRef = isSystemNamespace ? clrSimpleName : $"System_Internal.{clrSimpleName}";
+            sb.AppendLine($"    T extends {tsName} ? {typeRef} :");
         }
 
         sb.AppendLine("    T; // Identity fallback for non-primitive types");
