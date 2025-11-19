@@ -19,9 +19,9 @@
   - All records and properties explained
   - StableId system, canonical signatures, EmitScope
 
-- **[04-phase-shape.md](04-phase-shape.md)** - Phase 3: 14 transformation passes
-  - GlobalInterfaceIndex through ConstraintCloser
-  - Complete method documentation for all 16 Shape files
+- **[04-phase-shape.md](04-phase-shape.md)** - Phase 3: 23 transformation passes
+  - GlobalInterfaceIndex through PropertyOverrideUnifier and ExtensionMethodAnalyzer
+  - Complete method documentation for all Shape and Analysis files
   - Transformation examples and pass ordering
 
 - **[05-phase-normalize.md](05-phase-normalize.md)** - Phase 3.5: Name reservation and overload unification
@@ -91,7 +91,7 @@
 ### For Understanding Transformations
 
 **Shape phase is complex:**
-- **04-phase-shape.md** documents all 14 passes
+- **04-phase-shape.md** documents all 23 passes (including extension method analysis)
 - Shows why pass ordering matters
 - Examples of CLR → TypeScript transformations
 
@@ -141,12 +141,12 @@ Final validation before emission:
 
 ## Statistics
 
-- **76 source files** in src/tsbindgen/ directory
+- **79 source files** in src/tsbindgen/ directory
 - **11 architecture documents** (this collection)
 - **50+ validation rules** in PhaseGate
 - **43 diagnostic codes** (TBG001-TBG883)
-- **14 transformation passes** in Shape phase
-- **6 output file types** (d.ts, json, js)
+- **23 transformation passes** in Shape phase (including extension method analysis)
+- **7 output file types** (d.ts, json, js, extension buckets)
 
 ## Document Sizes
 
@@ -168,15 +168,15 @@ Final validation before emission:
 ## Coverage
 
 This documentation covers:
-- ✅ Every file in src/tsbindgen/ (76 files)
+- ✅ Every file in src/tsbindgen/ (79 files)
 - ✅ Every public method with full signatures
 - ✅ Every private method with algorithms
 - ✅ Every validation rule (50+)
 - ✅ Every diagnostic code (43 codes)
-- ✅ Every transformation pass (14 passes)
+- ✅ Every transformation pass (23 passes)
 - ✅ Complete call chains (entry to output)
 - ✅ All data structures (records, enums)
-- ✅ Key algorithms (dual-scope naming, collision detection, etc.)
+- ✅ Key algorithms (dual-scope naming, collision detection, extension method buckets, etc.)
 
 ## Navigation
 

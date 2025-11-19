@@ -1,9 +1,11 @@
 using System.Collections.Immutable;
+using System.Linq;
 using System.Reflection;
 using tsbindgen.Renaming;
 using tsbindgen.Model;
 using tsbindgen.Model.Symbols;
 using tsbindgen.Model.Symbols.MemberSymbols;
+using tsbindgen.Model.Types;
 
 namespace tsbindgen.Load;
 
@@ -291,6 +293,22 @@ public sealed class ReflectionReader
             ? method.GetGenericArguments().Select(_typeFactory.CreateGenericParameterSymbol).ToImmutableArray()
             : ImmutableArray<GenericParameterSymbol>.Empty;
 
+        // Detect extension methods (static method in static class with ExtensionAttribute on method)
+        bool isExtensionMethod = false;
+        TypeReference? extensionTarget = null;
+        if (method.IsStatic && parameters.Length > 0)
+        {
+            // Check for ExtensionAttribute on the method itself (not the parameter)
+            var hasExtensionAttr = method.CustomAttributes.Any(attr =>
+                attr.AttributeType.FullName == "System.Runtime.CompilerServices.ExtensionAttribute");
+
+            if (hasExtensionAttr)
+            {
+                isExtensionMethod = true;
+                extensionTarget = parameters[0].Type;  // The type of the first 'this' parameter
+            }
+        }
+
         return new MethodSymbol
         {
             StableId = stableId,
@@ -305,7 +323,9 @@ public sealed class ReflectionReader
             IsSealed = method.IsFinal,
             Visibility = GetVisibility(method),
             Provenance = MemberProvenance.Original,
-            EmitScope = EmitScope.ClassSurface  // All reflected members start on class surface
+            EmitScope = EmitScope.ClassSurface,  // All reflected members start on class surface
+            IsExtensionMethod = isExtensionMethod,
+            ExtensionTarget = extensionTarget
         };
     }
 

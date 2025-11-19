@@ -315,6 +315,11 @@ public static class Builder
         ctx.Log("Build", "\n--- Phase 4.10: Property Override Unification ---");
         var propertyOverrides = Shape.PropertyOverrideUnifier.Build(graph, ctx);
 
+        // Phase 4.11: Analyze extension methods
+        ctx.Log("Build", "\n--- Phase 4.11: Extension Method Analysis ---");
+        var extensionMethods = Analysis.ExtensionMethodAnalyzer.Analyze(ctx, graph);
+        ctx.Log("Build", $"Found {extensionMethods.Buckets.Length} extension method buckets ({extensionMethods.TotalMethodCount} total methods)");
+
         return new EmissionPlan
         {
             Graph = graph,
@@ -323,7 +328,8 @@ public static class Builder
             StaticFlattening = staticFlattening,
             StaticConflicts = staticConflicts,
             OverrideConflicts = overrideConflicts,
-            PropertyOverrides = propertyOverrides
+            PropertyOverrides = propertyOverrides,
+            ExtensionMethods = extensionMethods
         };
     }
 
@@ -337,6 +343,9 @@ public static class Builder
     {
         // Emit _support/types.d.ts (centralized marker types - emitted once)
         SupportTypesEmit.Emit(ctx, outputDirectory);
+
+        // Emit internal/extensions/index.d.ts (extension method buckets)
+        ExtensionsEmitter.Emit(ctx, plan.ExtensionMethods, plan.Graph, outputDirectory);
 
         // Emit internal/index.d.ts for each namespace
         InternalIndexEmitter.Emit(ctx, plan, outputDirectory);
@@ -447,6 +456,11 @@ public sealed record EmissionPlan
     /// E: Plan for unifying property override types to eliminate property covariance TS2416 errors.
     /// </summary>
     public required Plan.PropertyOverridePlan PropertyOverrides { get; init; }
+
+    /// <summary>
+    /// Extension methods plan: all extension method buckets grouped by target type.
+    /// </summary>
+    public required Analysis.ExtensionMethodsPlan ExtensionMethods { get; init; }
 
     public int NamespaceCount => Graph.Namespaces.Length;
 }

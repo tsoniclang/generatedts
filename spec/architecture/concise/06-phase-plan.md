@@ -6,7 +6,7 @@ The **Plan phase** builds import graph, plans emission order, combines all plans
 
 **Input:**
 - SymbolGraph (from Normalize, fully named)
-- StaticFlatteningPlan, StaticConflictPlan, OverrideConflictPlan, PropertyOverridePlan (from Shape)
+- StaticFlatteningPlan, StaticConflictPlan, OverrideConflictPlan, PropertyOverridePlan, ExtensionMethodsPlan (from Shape)
 
 **Output:** EmissionPlan containing:
 - SymbolGraph (unchanged)
@@ -230,6 +230,7 @@ Composite plan containing all data needed for emission.
 - **`StaticConflictPlan: StaticConflictPlan`** - Static conflict suppression (Pass 4.8)
 - **`OverrideConflictPlan: OverrideConflictPlan`** - Override conflict suppression (Pass 4.9)
 - **`PropertyOverridePlan: PropertyOverridePlan`** - Property type unification (Pass 4.10)
+- **`ExtensionMethodsPlan: ExtensionMethodsPlan`** - Extension method bucket grouping (Pass 4.11)
 
 **Created by:** Builder.PlanPhase
 

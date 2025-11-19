@@ -11,7 +11,7 @@ The tsbindgen pipeline executes in **strict sequential order** through 5 main ph
 1. BuildContext.Create
 2. PHASE 1: LOAD
 3. PHASE 2: NORMALIZE (Build Indices)
-4. PHASE 3: SHAPE (22 transformation passes)
+4. PHASE 3: SHAPE (23 transformation passes)
 5. PHASE 3.5: NAME RESERVATION
 6. PHASE 4: PLAN
 7. PHASE 4.5: OVERLOAD UNIFICATION
@@ -60,7 +60,7 @@ The tsbindgen pipeline executes in **strict sequential order** through 5 main ph
 
 ---
 
-## Phase 3: SHAPE (22 Transformation Passes)
+## Phase 3: SHAPE (23 Transformation Passes)
 
 **Purpose**: Transform CLR semantics → TypeScript semantics + create compatibility plans
 
@@ -76,7 +76,7 @@ The tsbindgen pipeline executes in **strict sequential order** through 5 main ph
 
 **Transformations**: Interface flattening, explicit interface synthesis, diamond resolution, overload handling, deduplication, EmitScope determination, static hierarchy flattening, conflict detection, property type unification.
 
-### 22 Shape Passes (Sequential Order)
+### 23 Shape Passes (Sequential Order)
 
 #### Pass 1: GlobalInterfaceIndex.Build
 - **Purpose**: Global interface inheritance lookup
@@ -222,6 +222,18 @@ The tsbindgen pipeline executes in **strict sequential order** through 5 main ph
 - **Statistics**: 222 property chains unified, 444 union entries created
 - **Safety**: Generic filter prevents TS2304 errors from leaked type parameters
 
+#### Pass 4.11 (23): ExtensionMethodAnalyzer.Analyze
+- **Purpose**: Group C# extension methods by target type for emission as TypeScript bucket interfaces
+- **Input**: SymbolGraph
+- **Output**: `ExtensionMethodsPlan`
+- **Files**: `Analysis/ExtensionMethodAnalyzer.cs`, `Analysis/ExtensionBucketPlan.cs`
+- **Algorithm**:
+  1. Collect all methods with `IsExtensionMethod = true`
+  2. Group by `(ExtensionTarget.FullName, ExtensionTarget.Arity)` key
+  3. Build bucket plans with target type and methods
+- **Impact**: 122 bucket interfaces, 1,759 extension methods (BCL .NET 9)
+- **Emission**: ExtensionsEmitter generates `internal/extensions/index.d.ts` with bucket interfaces and `ExtensionMethods<TShape>` helper type
+
 **Output State After Shape**:
 - All members have `EmitScope` (ClassSurface or ViewOnly)
 - All transformations complete
@@ -231,6 +243,7 @@ The tsbindgen pipeline executes in **strict sequential order** through 5 main ph
   - `StaticConflictPlan`: Hybrid types → conflicting statics
   - `OverrideConflictPlan`: Derived types → incompatible overrides
   - `PropertyOverridePlan`: Properties → unified union types
+  - `ExtensionMethodsPlan`: Extension methods → bucket interfaces by target type
 
 ---
 
@@ -376,7 +389,7 @@ The tsbindgen pipeline executes in **strict sequential order** through 5 main ph
 |-------|-----------|-------------|------------|---------------------|
 | **1. LOAD** | `string[]` | `SymbolGraph` | Immutable | Reflection → SymbolGraph |
 | **2. NORMALIZE** | `SymbolGraph` | `SymbolGraph` | Immutable | Build indices (NamespaceIndex, TypeIndex, GlobalInterfaceIndex) |
-| **3. SHAPE** | `SymbolGraph` | `SymbolGraph` + Plans | Immutable | 22 passes: flatten, synthesize, determine EmitScope, create plans |
+| **3. SHAPE** | `SymbolGraph` | `SymbolGraph` + Plans | Immutable | 23 passes: flatten, synthesize, determine EmitScope, create plans (including extension methods) |
 | **3.5. NAME RESERVATION** | `SymbolGraph` | `SymbolGraph` | Side effect + pure | Reserve names, set TsEmitName |
 | **4. PLAN** | `SymbolGraph` + Plans | `EmissionPlan` | Immutable | Build imports, plan order, combine plans |
 | **4.5. OVERLOAD UNIFICATION** | `SymbolGraph` | `SymbolGraph` | Immutable | Merge overloads |

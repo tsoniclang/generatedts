@@ -2551,6 +2551,166 @@ if (Regex.IsMatch(tsType, @"\b(T|E|K|V|TKey|TValue|TResult|TSource|TElement|TIte
 
 ---
 
+## Pass 4.11: ExtensionMethodAnalyzer
+
+**File:** `Analysis/ExtensionMethodAnalyzer.cs`
+
+### Purpose
+
+Analyzes C# extension methods across all static classes and groups them by target type for emission as TypeScript bucket interfaces. Extension methods are static methods marked with `ExtensionAttribute` that operate on a "this" parameter.
+
+This pass identifies extension methods, groups them by `(FullName, Arity)` key of their target type, and produces `ExtensionMethodsPlan` for the Emit phase to generate TypeScript bucket interfaces and helper types.
+
+### Public API
+
+#### `ExtensionMethodAnalyzer.Analyze(BuildContext ctx, SymbolGraph graph)`
+**Signature:** `public static ExtensionMethodsPlan Analyze(BuildContext ctx, SymbolGraph graph)`
+
+**What it does:**
+- Scans all static classes for extension methods
+- Groups extension methods by target type using `(FullName, Arity)` key
+- Creates bucket plans for each target type
+- Returns `ExtensionMethodsPlan` with all buckets
+
+**Algorithm:**
+1. Collect all extension methods from static classes:
+   - Filter: `type.IsStatic && method.IsExtensionMethod`
+   - Extension methods have `ExtensionAttribute` on the method itself
+2. Group by target type key:
+   - Extract target type from first parameter (`method.ExtensionTarget`)
+   - Create key: `(target.FullName, target.Arity)`
+   - Example: `("System.Collections.Generic.IEnumerable`1", 1)`
+3. For each unique target type:
+   - Look up `TypeSymbol` in graph by CLR full name
+   - Create `ExtensionBucketPlan` with target type and methods
+4. Return `ExtensionMethodsPlan` with all bucket plans
+
+**Called by:** Builder.cs Phase 4.11 (after PropertyOverrideUnifier)
+
+### Data Structures
+
+#### `ExtensionTargetKey` Record
+```csharp
+public sealed record ExtensionTargetKey
+{
+    public required string FullName { get; init; }  // "System.Collections.Generic.IEnumerable`1"
+    public required int Arity { get; init; }         // 1 for IEnumerable<T>
+}
+```
+
+Used as dictionary key for grouping extension methods.
+
+#### `ExtensionBucketPlan` Record
+```csharp
+public sealed record ExtensionBucketPlan
+{
+    public required ExtensionTargetKey Key { get; init; }
+    public required TypeSymbol TargetType { get; init; }
+    public required ImmutableArray<MethodSymbol> Methods { get; init; }
+
+    public string BucketInterfaceName => $"__Ext_{TargetType.TsEmitName}";
+}
+```
+
+Represents all extension methods for a single target type. Each bucket becomes a TypeScript interface.
+
+#### `ExtensionMethodsPlan` Record
+```csharp
+public sealed record ExtensionMethodsPlan
+{
+    public required ImmutableArray<ExtensionBucketPlan> Buckets { get; init; }
+    public int TotalMethodCount => Buckets.Sum(b => b.Methods.Length);
+}
+```
+
+Complete plan for all extension method buckets in the assembly graph.
+
+### Private Methods
+
+#### `FindTypeByClrFullName(SymbolGraph graph, string clrFullName)`
+**Returns:** `TypeSymbol?` - Type with matching CLR full name, or null
+
+Searches all namespaces for a type matching the CLR full name.
+
+### Example
+
+**Input (C# extension methods):**
+```csharp
+namespace System.Linq
+{
+    public static class Enumerable
+    {
+        public static IEnumerable<TResult> Select<TSource, TResult>(
+            this IEnumerable<TSource> source,
+            Func<TSource, TResult> selector) { ... }
+
+        public static IEnumerable<T> Where<T>(
+            this IEnumerable<T> source,
+            Func<T, bool> predicate) { ... }
+    }
+}
+```
+
+**Output (ExtensionMethodsPlan):**
+```csharp
+ExtensionMethodsPlan {
+    Buckets = [
+        ExtensionBucketPlan {
+            Key = ("System.Collections.Generic.IEnumerable`1", 1),
+            TargetType = IEnumerable_1<T>,
+            BucketInterfaceName = "__Ext_IEnumerable_1",
+            Methods = [
+                Select<TSource, TResult>(...),
+                Where<T>(...)
+            ]
+        }
+    ],
+    TotalMethodCount = 2
+}
+```
+
+**Generated TypeScript (by ExtensionsEmitter):**
+```typescript
+export interface __Ext_IEnumerable_1<T> {
+  Select<TResult>(selector: System.Func_2<T, TResult>): System_Collections_Generic.IEnumerable_1<TResult>;
+  Where(predicate: System.Func_2<T, boolean>): System_Collections_Generic.IEnumerable_1<T>;
+}
+
+export type ExtensionMethods<TShape> =
+  TShape extends System_Collections_Generic.IEnumerable_1<infer T0> ? __Ext_IEnumerable_1<T0>
+  : {};
+```
+
+### Statistics (BCL .NET 9)
+
+**Generation:**
+- Extension method buckets: 122
+- Total extension methods: 1,759
+- Largest bucket: `IEnumerable_1` (258 methods)
+- Buckets with IEquatable constraint: 4 (Span_1, ReadOnlySpan_1, Memory_1, ReadOnlyMemory_1)
+
+**Performance:**
+- Phase 4.11 overhead: <50ms
+- Memory overhead: ~100KB for plan
+
+**Common Buckets:**
+- `__Ext_String` (51 methods)
+- `__Ext_IEnumerable_1<T>` (258 methods - LINQ)
+- `__Ext_Span_1<T>` (85 methods)
+- `__Ext_ReadOnlySpan_1<T>` (81 methods)
+
+### Dependencies
+
+**Requires:**
+- `MethodSymbol.IsExtensionMethod` property (set during Load phase)
+- `MethodSymbol.ExtensionTarget` property (type of first parameter)
+- Extension methods must be in static classes
+
+**Used by:**
+- Phase 8 (Emit): `ExtensionsEmitter` consumes plan to generate TypeScript
+
+---
+
 ## Pass Order and Dependencies
 
 **Critical:** Shape passes MUST run in this exact order:
@@ -2577,6 +2737,7 @@ if (Regex.IsMatch(tsType, @"\b(T|E|K|V|TKey|TValue|TResult|TSource|TElement|TIte
 20. **StaticConflictDetector** (4.8) - Detect static member conflicts in hybrid types
 21. **OverrideConflictDetector** (4.9) - Detect instance override conflicts (same-assembly only)
 22. **PropertyOverrideUnifier** (4.10) - Unify property types across hierarchies with unions
+23. **ExtensionMethodAnalyzer** (4.11) - Group extension methods by target type for bucket emission
 
 **Dependencies:**
 - Passes 4-6 (synthesis) depend on pass 3 (inlining) - must work with flattened interfaces
@@ -2586,7 +2747,8 @@ if (Regex.IsMatch(tsType, @"\b(T|E|K|V|TKey|TValue|TResult|TSource|TElement|TIte
 - Pass 16 (final indexers) depends on pass 15 (indexer planner) - ensures no leaks
 - **Passes 4.7-4.8** (static handling) run AFTER constraint closer - need final graph
 - **Pass 4.9** (override conflicts) runs AFTER 4.7-4.8 - suppresses instance-side conflicts
-- **Pass 4.10** (property unification) runs LAST - unifies remaining property variance with unions
+- **Pass 4.10** (property unification) runs AFTER 4.9 - unifies remaining property variance with unions
+- **Pass 4.11** (extension methods) runs AFTER all other Shape passes - analyzes final graph for extension methods
 
 ---
 
@@ -2778,6 +2940,7 @@ class HttpRequestCachePolicy$instance extends RequestCachePolicy$instance {
 - **Static conflict plan** - Static member conflicts in hybrid types identified for suppression
 - **Override conflict plan** - Instance override conflicts identified for suppression (same-assembly)
 - **Property override plan** - Property type unions computed for inheritance hierarchies
+- **Extension methods plan** - Extension methods grouped by target type for bucket emission
 - Generic constraints resolved and validated
 - Clean graph ready for Renaming and Emit phases
 
@@ -2786,5 +2949,6 @@ class HttpRequestCachePolicy$instance extends RequestCachePolicy$instance {
 - `StaticConflictPlan` - Maps hybrid types to static members to suppress
 - `OverrideConflictPlan` - Maps derived types to instance members to suppress
 - `PropertyOverridePlan` - Maps properties to unified union type strings
+- `ExtensionMethodsPlan` - Maps target types to extension method buckets for TypeScript emission
 
 **Next Phase:** Renaming (reserve all member names, apply transformations)

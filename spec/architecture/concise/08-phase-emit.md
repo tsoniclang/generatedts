@@ -75,6 +75,36 @@ export class FileStream extends Stream implements IDisposable {
 
 ---
 
+## File: ExtensionsEmitter.cs
+
+### Purpose
+Emits `internal/extensions/index.d.ts` with extension method bucket interfaces (once per build, not per namespace).
+
+**Output:** `internal/extensions/index.d.ts`
+
+**Input:** `ExtensionMethodsPlan` (Pass 4.11)
+
+**Algorithm:**
+1. For each bucket in plan:
+   - Emit bucket interface: `export interface __Ext_TargetType<T> { ... }`
+   - Collapse method generics matching target generics
+   - Detect IEquatable constraints → add to infer clause
+2. Emit helper type: `export type ExtensionMethods<TShape> = ...`
+   - Map shapes to buckets with constrained infer clauses
+   - Example: `TShape extends IEnumerable_1<infer T> ? __Ext_IEnumerable_1<T> : ...`
+
+**Key Features:**
+- Generic parameter collapsing (method `T` matching bucket `T`)
+- IEquatable constraint propagation to infer clauses
+- TypeRefPrinter for all type emission (NO 'any' types)
+- Single source of truth (FacadeEmitter re-exports)
+
+**Statistics:** 122 bucket interfaces, 1,759 extension methods (BCL .NET 9)
+
+**Files:** `Emit/ExtensionsEmitter.cs`
+
+---
+
 ## File: FacadeEmitter.cs
 
 ### Purpose
@@ -441,14 +471,16 @@ The Emit phase uses 4 Shape plans for error-free emission:
 The Emit phase generates all output files with plan-based emission:
 1. **SupportTypesEmitter:** Centralized marker types (_support/types.d.ts)
 2. **InternalIndexEmitter:** Full declarations (internal/index.d.ts) with plan-based emission
-3. **FacadeEmitter:** Public facade (index.d.ts)
-4. **MetadataEmitter:** CLR metadata (metadata.json)
-5. **BindingEmitter:** Name bindings (bindings.json)
-6. **ModuleStubEmitter:** ES module stubs (index.js)
+3. **ExtensionsEmitter:** Extension method buckets (internal/extensions/index.d.ts)
+4. **FacadeEmitter:** Public facade (index.d.ts) with extension method re-export
+5. **MetadataEmitter:** CLR metadata (metadata.json)
+6. **BindingEmitter:** Name bindings (bindings.json)
+7. **ModuleStubEmitter:** ES module stubs (index.js)
 
 **Key Features:**
-- **Plan-based emission:** Uses 4 Shape plans for error elimination
+- **Plan-based emission:** Uses 5 Shape plans (including extension methods) for error elimination
 - **Zero TypeScript errors:** Achieved via plan-based emission
+- **Extension methods:** 122 bucket interfaces, 1,759 methods (BCL .NET 9)
 - **Complete metadata:** All CLR semantics preserved
 - **Deterministic output:** Stable emission order
 - **Type safety:** Branded primitives, readonly arrays

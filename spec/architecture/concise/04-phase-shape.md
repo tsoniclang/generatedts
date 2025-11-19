@@ -12,6 +12,7 @@ The **Shape phase** transforms CLR semantics → TypeScript semantics through 22
 - `StaticConflictPlan` (Pass 4.8) - Static conflict detection
 - `OverrideConflictPlan` (Pass 4.9) - Override conflict detection
 - `PropertyOverridePlan` (Pass 4.10) - Property type unification
+- `ExtensionMethodsPlan` (Pass 4.11) - Extension method bucket grouping
 
 ---
 
@@ -417,6 +418,40 @@ The **Shape phase** transforms CLR semantics → TypeScript semantics through 22
 
 ---
 
+## Pass 4.11 (23): ExtensionMethodAnalyzer.Analyze
+
+**Purpose:** Group C# extension methods by target type for emission as TypeScript bucket interfaces.
+
+**Input:** SymbolGraph
+
+**Output:** ExtensionMethodsPlan
+
+**Algorithm:**
+
+**Step 1: Collect extension methods:**
+- Filter all methods where `IsExtensionMethod = true`
+- Extension methods are static methods with `ExtensionAttribute`
+
+**Step 2: Group by target type:**
+- Key: `(ExtensionTarget.FullName, ExtensionTarget.Arity)`
+- Example: `("System.Collections.Generic.IEnumerable`1", 1)` for all `IEnumerable<T>` extensions
+
+**Step 3: Build bucket plans:**
+- Create `ExtensionBucketPlan` for each group
+- Store target type, methods, and bucket interface name (e.g., `__Ext_IEnumerable_1`)
+
+**Step 4: Return ExtensionMethodsPlan with all buckets**
+
+**Impact:** 122 bucket interfaces, 1,759 extension methods (BCL .NET 9)
+
+**Emission:** ExtensionsEmitter generates `internal/extensions/index.d.ts` with:
+- Bucket interfaces: `export interface __Ext_IEnumerable_1<T> { ... }`
+- Helper type: `export type ExtensionMethods<TShape> = ...` with constrained infer clauses
+
+**Files:** `Analysis/ExtensionMethodAnalyzer.cs`, `Analysis/ExtensionBucketPlan.cs`
+
+---
+
 ## Output State After Shape
 
 - All members have `EmitScope` determined (ClassSurface, ViewOnly, or Omitted)
@@ -427,18 +462,20 @@ The **Shape phase** transforms CLR semantics → TypeScript semantics through 22
   - `StaticConflictPlan`: Hybrid types → conflicting static member names
   - `OverrideConflictPlan`: Derived types → incompatible instance override names
   - `PropertyOverridePlan`: Properties → unified union type strings
+  - `ExtensionMethodsPlan`: Extension methods → bucket interfaces by target type
 
-**Data flow:** SymbolGraph + 4 Plans → Phase 3.5 (Name Reservation)
+**Data flow:** SymbolGraph + 5 Plans → Phase 3.5 (Name Reservation)
 
 ---
 
 ## Summary
 
-The Shape phase transforms CLR semantics to TypeScript through 22 passes:
+The Shape phase transforms CLR semantics to TypeScript through 23 passes:
 1. **Interface processing** (1-6): Flatten hierarchies, synthesize members, resolve diamonds
 2. **Member handling** (7-16): Add overloads, mark indexers, deduplicate, plan views
 3. **Static hierarchy** (4.7-4.8): Flatten static-only types, detect hybrid conflicts
 4. **Override handling** (4.9-4.10): Detect instance conflicts, unify property types
+5. **Extension methods** (4.11): Group extension methods by target type for bucket emission
 
 **Key achievements:**
 - Eliminates TS2417 errors (static hierarchy issues)

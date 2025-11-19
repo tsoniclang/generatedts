@@ -3084,6 +3084,93 @@ export type Bar<T> = Namespace.Bar<T>;  // ✓
 
 ---
 
+## File: ExtensionsEmitter.cs
+
+**Purpose**: Emits C# extension methods as TypeScript bucket interfaces.
+
+### What it emits
+
+Extension methods are emitted to `internal/extensions/index.d.ts` with:
+1. **Bucket interfaces** - One per target type (e.g., `__Ext_IEnumerable_1<T>`)
+2. **ExtensionMethods<TShape> helper** - Conditional type mapping shapes to buckets
+
+### Method: Emit
+
+**Signature:**
+```csharp
+public static void Emit(BuildContext ctx, ExtensionMethodsPlan plan, SymbolGraph graph, string outputDirectory)
+```
+
+**What it does:**
+- Creates `internal/extensions/` directory
+- Generates extension methods file from plan
+- Writes `internal/extensions/index.d.ts`
+
+### Key Features
+
+#### Generic Parameter Collapsing
+Extension methods that use the target type's generic parameter don't re-declare it:
+
+```csharp
+// C#: IndexOf<T>(this Span<T> span, T value)
+// TypeScript bucket:
+export interface __Ext_Span_1<T> {
+  IndexOf(value: T): int;  // No <T> - uses bucket's T
+}
+```
+
+#### IEquatable Constraint Propagation
+Buckets for types requiring `IEquatable<T>` get constrained:
+
+```typescript
+export interface __Ext_Span_1<T extends System.IEquatable_1<T>> {
+  Contains(value: T): boolean;
+  ContainsAny4(values: System_Buffers.SearchValues_1<T>): boolean;
+}
+
+// Helper propagates constraint to infer:
+export type ExtensionMethods<TShape> =
+  TShape extends System.Span_1<infer T0 extends System.IEquatable_1<T0>> ? __Ext_Span_1<T0>
+  : {};
+```
+
+#### Full Type Safety
+Uses TypeRefPrinter for all types - **NO `any` types**:
+
+```typescript
+export interface __Ext_IEnumerable_1<T> {
+  Select<TResult>(selector: System.Func_2<T, TResult>): System_Collections_Generic.IEnumerable_1<TResult>;
+  Where(predicate: System.Func_2<T, boolean>): System_Collections_Generic.IEnumerable_1<T>;
+}
+```
+
+### FacadeEmitter Integration
+
+Root facades re-export the helper (single source of truth):
+
+```typescript
+// Root facade (_root/index.d.ts or package root):
+export type { ExtensionMethods } from './internal/extensions/index.js';
+```
+
+User code pattern:
+```typescript
+import { ExtensionMethods } from '@tsonic/dotnet';
+type Rich<T> = T & ExtensionMethods<T>;
+
+const nums: Rich<IEnumerable_1<int>> = ...;
+nums.Where(x => x > 0);  // ✓ Fully typed
+```
+
+### Statistics (BCL .NET 9)
+
+- Extension method buckets: 122
+- Total extension methods: 1,759
+- File size: ~91KB
+- Largest bucket: `__Ext_IEnumerable_1<T>` (258 LINQ methods)
+
+---
+
 ## Output File Format Examples
 
 ### 1. index.d.ts (Facade)

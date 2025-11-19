@@ -288,10 +288,13 @@ Scopes enable:
         │  │  14. OverloadReturnConflict...   │  │
         │  │  15. ViewPlanner.Plan            │  │
         │  │  16. MemberDeduplicator          │  │
+        │  │  17-20. Static/override plans    │  │
+        │  │  21-22. Property override plans  │  │
+        │  │  23. Extension method analysis   │  │
         │  └──────────────────────────────────┘  │
         └────────────────┬───────────────────────┘
                          │
-                Output: SymbolGraph (shaped for TS)
+                Output: SymbolGraph + Plans (shaped for TS)
                          │
                          ▼
         ┌────────────────────────────────────────┐
@@ -356,6 +359,11 @@ Scopes enable:
         │  ┌──────────────────────────────────┐  │
         │  │  InternalIndexEmitter            │  │
         │  │  - internal/index.d.ts per NS    │  │
+        │  └────────────┬─────────────────────┘  │
+        │               ▼                         │
+        │  ┌──────────────────────────────────┐  │
+        │  │  ExtensionsEmitter               │  │
+        │  │  - internal/extensions/index.d.ts│  │
         │  └────────────┬─────────────────────┘  │
         │               ▼                         │
         │  ┌──────────────────────────────────┐  │
@@ -678,7 +686,7 @@ src/tsbindgen/
 │   ├── OverloadUnifier.cs            # Merge overload variants
 │   └── NameReservation.cs            # Reserve all names in Renamer
 │
-├── Shape/                       # Phase 3: Transformations
+├── Shape/                       # Phase 3: Transformations (passes 1-22)
 │   ├── GlobalInterfaceIndex.cs       # Index all interfaces
 │   ├── InterfaceDeclIndex.cs         # Index interface member declarations
 │   ├── StructuralConformance.cs      # Analyze structural conformance
@@ -695,6 +703,10 @@ src/tsbindgen/
 │   ├── OverloadReturnConflictResolver.cs  # Resolve return type conflicts
 │   ├── ViewPlanner.cs                # Plan explicit interface views
 │   └── MemberDeduplicator.cs         # Final deduplication
+│
+├── Analysis/                    # Phase 3: Planning passes (pass 23)
+│   ├── ExtensionBucketPlan.cs        # Extension method plan data structures
+│   └── ExtensionMethodAnalyzer.cs    # Group extension methods by target type
 │
 ├── Renaming/                    # Phase 3.5: Naming service
 │   ├── SymbolRenamer.cs         # Central naming authority
@@ -727,6 +739,7 @@ src/tsbindgen/
 └── Emit/                        # Phase 5: File generation
     ├── SupportTypesEmitter.cs   # _support/types.d.ts
     ├── InternalIndexEmitter.cs  # internal/index.d.ts per namespace
+    ├── ExtensionsEmitter.cs     # internal/extensions/index.d.ts (extension methods)
     ├── FacadeEmitter.cs         # facade/index.d.ts per namespace
     ├── MetadataEmitter.cs       # metadata.json per namespace
     ├── BindingEmitter.cs        # bindings.json per namespace
@@ -740,10 +753,11 @@ src/tsbindgen/
 1. **Load/**: Pure reflection, no TypeScript concepts
 2. **Model/**: Shared data structures across all phases
 3. **Normalize/**: Index building and canonicalization
-4. **Shape/**: 16 sequential transformations, each returns new graph
-5. **Renaming/**: Centralized naming service, used by all phases
-6. **Plan/**: Import analysis and validation gate
-7. **Emit/**: File generation, no logic beyond string building
+4. **Shape/**: 22 sequential transformations, each returns new graph
+5. **Analysis/**: Planning passes (Pass 23: extension methods)
+6. **Renaming/**: Centralized naming service, used by all phases
+7. **Plan/**: Import analysis and validation gate
+8. **Emit/**: File generation, no logic beyond string building
 
 ---
 
@@ -967,10 +981,10 @@ The tsbindgen pipeline is a **deterministic, pure functional transformation** fr
 
 1. **Load**: System.Reflection → SymbolGraph (pure CLR data)
 2. **Normalize**: Build indices for fast lookup
-3. **Shape**: 16 transformations to handle .NET/TypeScript impedance mismatches
+3. **Shape**: 23 transformations to handle .NET/TypeScript impedance mismatches (includes extension method analysis)
 4. **Name Reservation**: Reserve all names through SymbolRenamer
 5. **Plan**: Analyze dependencies, plan imports, validate everything (PhaseGate)
-6. **Emit**: Generate TypeScript files with metadata sidecars
+6. **Emit**: Generate TypeScript files with metadata sidecars and extension method buckets
 
 **Core Principles**:
 - **Immutability**: All data structures are immutable records

@@ -278,6 +278,15 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 - **Impact**: Eliminated final TS2416 error, achieving **zero TypeScript errors**
 - **Statistics**: 222 property chains unified, 444 union entries created
 
+#### Pass 4.11 (23): ExtensionMethodAnalyzer.Analyze
+- **Purpose**: Group C# extension methods by target type for TypeScript bucket emission
+- **Input**: SymbolGraph
+- **Output**: `ExtensionMethodsPlan`
+- **Files**: `src/tsbindgen/Analysis/ExtensionMethodAnalyzer.cs`, `src/tsbindgen/Analysis/ExtensionBucketPlan.cs`
+- **Key**: Scans static classes for methods with `ExtensionAttribute`, groups by target type `(FullName, Arity)`
+- **Impact**: Enables TypeScript extension method buckets with `type Rich<T> = T & ExtensionMethods<T>` pattern
+- **Statistics (BCL .NET 9)**: 122 buckets, 1,759 extension methods total
+
 **Output State After Shape**:
 - All members have `EmitScope` determined (ClassSurface or ViewOnly)
 - All transformations complete
@@ -287,6 +296,7 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
   - `StaticConflictPlan`: Maps hybrid types to conflicting static members
   - `OverrideConflictPlan`: Maps derived types to incompatible instance overrides
   - `PropertyOverridePlan`: Maps properties to unified union type strings
+  - `ExtensionMethodsPlan`: Maps target types to extension method buckets
 
 ---
 

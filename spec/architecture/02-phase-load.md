@@ -719,13 +719,26 @@ Converts a `MethodInfo` to `MethodSymbol`. Handles explicit interface implementa
 4. **Read generic parameters:**
    - If `method.IsGenericMethod`: Get generic arguments
    - Call `_typeFactory.CreateGenericParameterSymbol` for each
-5. **Build MethodSymbol:**
+5. **Detect extension methods:**
+   - Check if `method.IsStatic` and `parameters.Length > 0`
+   - Look for `ExtensionAttribute` on the method itself:
+     ```csharp
+     var hasExtensionAttr = method.CustomAttributes.Any(attr =>
+         attr.AttributeType.FullName == "System.Runtime.CompilerServices.ExtensionAttribute");
+     ```
+   - If found:
+     - `IsExtensionMethod = true`
+     - `ExtensionTarget = parameters[0].Type` (type of first 'this' parameter)
+   - Note: Check method, not parameter, for attribute
+6. **Build MethodSymbol:**
    - ReturnType via `_typeFactory.Create(method.ReturnType)`
    - IsStatic, IsAbstract, IsVirtual, IsSealed from method
    - IsOverride via `IsMethodOverride(method)`
    - Visibility via `GetVisibility(method)`
    - Provenance = `MemberProvenance.Original`
    - EmitScope = `EmitScope.ClassSurface` (all reflected members start on class)
+   - IsExtensionMethod (bool flag)
+   - ExtensionTarget (TypeReference, or null if not extension method)
 
 ---
 

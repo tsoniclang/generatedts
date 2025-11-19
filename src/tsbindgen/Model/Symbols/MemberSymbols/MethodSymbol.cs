@@ -102,6 +102,17 @@ public sealed record MethodSymbol
     public TypeReference? SourceInterface { get; init; }
 
     /// <summary>
+    /// True if this is a C# extension method (static, in static class, first param with 'this').
+    /// </summary>
+    public bool IsExtensionMethod { get; init; }
+
+    /// <summary>
+    /// For extension methods, the type of the first 'this' parameter (the type being extended).
+    /// Null if not an extension method.
+    /// </summary>
+    public TypeReference? ExtensionTarget { get; init; }
+
+    /// <summary>
     /// Create a new MethodSymbol with updated SourceInterface.
     /// Wither method for immutability.
     /// </summary>

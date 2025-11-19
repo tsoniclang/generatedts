@@ -2069,15 +2069,22 @@ public sealed record EmissionPlan
    - Used during emission to emit union types for property covariance
    - Ensures TypeScript structural compatibility
 
+8. **ExtensionMethods** - `ExtensionMethodsPlan` from Shape phase
+   - Groups extension methods by target type into buckets
+   - Maps target types `(FullName, Arity)` to method collections
+   - Used during emission to generate TypeScript bucket interfaces
+   - Enables `type Rich<T> = T & ExtensionMethods<T>` pattern
+
 **Plan Flow:**
 
 ```
-Shape Phase (4.7-4.10)
+Shape Phase (4.7-4.11)
   ↓
   Creates: StaticFlatteningPlan
            StaticConflictPlan
            OverrideConflictPlan
            PropertyOverridePlan
+           ExtensionMethodsPlan
   ↓
 Plan Phase (6)
   ↓

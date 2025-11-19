@@ -11,7 +11,7 @@
 ### Pipeline Phases
 - **[02-phase-load.md](02-phase-load.md)** - Phase 1: Reflection/assembly loading
 - **[03-phase-model.md](03-phase-model.md)** - Data structures (SymbolGraph, TypeSymbol, MemberSymbols)
-- **[04-phase-shape.md](04-phase-shape.md)** - Phase 3: 22 transformation passes
+- **[04-phase-shape.md](04-phase-shape.md)** - Phase 3: 23 transformation passes (including extension methods)
 - **[05-phase-normalize.md](05-phase-normalize.md)** - Phase 3.5: Name reservation, overload unification
 - **[06-phase-plan.md](06-phase-plan.md)** - Phase 4: Import planning, validation setup
 - **[07-phasegate.md](07-phasegate.md)** - PhaseGate validation (50+ rules, 43 diagnostic codes)
@@ -31,7 +31,7 @@
 ### By Topic
 - **Validation**: 07-phasegate.md (all rules + diagnostic codes)
 - **Naming**: 09-renaming.md (dual-scope algorithm)
-- **Transformations**: 04-phase-shape.md (22 passes, ordering, examples)
+- **Transformations**: 04-phase-shape.md (23 passes, ordering, examples)
 - **Code Generation**: 08-phase-emit.md (output formats, printers)
 
 ## Key Concepts
@@ -47,14 +47,14 @@
 **PhaseGate** - Final validation (50+ rules, 43 codes: TBG001-TBG883)
 
 ## Statistics
-- 76 source files
-- 22 transformation passes
+- 79 source files
+- 23 transformation passes (including extension methods)
 - 50+ validation rules
 - 43 diagnostic codes (TBG001-TBG883)
-- 6 output file types (.d.ts, .json, .js)
+- 7 output file types (.d.ts, .json, .js, extension buckets)
 
 ## Coverage
-All 76 files in src/tsbindgen/ documented:
+All 79 files in src/tsbindgen/ documented:
 - ✅ Public/private methods with algorithms
 - ✅ All validation rules & diagnostic codes
 - ✅ All transformation passes
