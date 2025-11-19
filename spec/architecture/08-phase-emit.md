@@ -79,14 +79,39 @@ private static string GenerateFacade(BuildContext ctx, EmissionPlan plan, Model.
 1. **File header** - Comments with namespace name and purpose
 2. **Internal import** - `import * as Internal from './internal/index.js';`
 3. **Dependency imports** - Cross-namespace references with aliases
-4. **Namespace re-export** - `export import System = Internal.System;` (non-dotted only)
-5. **Individual type exports** - `export type List_1 = Internal.System.Collections.Generic.List_1;`
+4. **Wildcard re-export** - `export * from './internal/index.js';` (exports all types)
+5. **Dual type exports** - For each generic type, exports both canonical and friendly aliases:
+   - **Canonical**: `export type List_1<T> = Internal.List_1<T>;` (includes arity suffix)
+   - **Friendly**: `export type List<T> = Internal.List_1<T>;` (arity-less, user-friendly)
 
 **Algorithm:**
 - Uses `plan.Imports.NamespaceImports` to get required imports
 - Uses `plan.Imports.NamespaceExports` to get types to re-export
-- Handles root namespace specially (no namespace wrapper, direct re-export)
-- Skips dotted namespaces for `export import` (TypeScript doesn't support dots in identifiers)
+- For each generic type (e.g., `List_1`, `Dictionary_2`):
+  - Exports canonical name with arity suffix
+  - Generates friendly name by stripping `_N` suffix
+  - Exports friendly alias pointing to same internal type
+- For non-generic types, exports single canonical name
+
+**Example output:**
+```typescript
+// System.Collections.Generic/index.d.ts
+export * from './internal/index.js';
+
+// Dual exports for generics
+export type List_1<T> = Internal.List_1<T>;              // Canonical
+export type List<T> = Internal.List_1<T>;                // Friendly
+export type Dictionary_2<TKey, TValue> = Internal.Dictionary_2<TKey, TValue>;  // Canonical
+export type Dictionary<TKey, TValue> = Internal.Dictionary_2<TKey, TValue>;    // Friendly
+
+// Single export for non-generics
+export type CollectionExtensions = Internal.CollectionExtensions;
+```
+
+**Why both?**
+- **Canonical names** match CLR naming, preserve full metadata
+- **Friendly names** provide ergonomic TypeScript experience
+- Users can choose either style: `List<string>` or `List_1<string>`
 
 ### Method: GetImportAlias
 ```csharp
@@ -229,28 +254,34 @@ private static string GenerateNamespaceDeclaration(BuildContext ctx, SymbolGraph
 **What it does:**
 1. **Creates TypeNameResolver** - Single source of truth for type names
 2. **File header** - Comments with namespace and contributing assemblies
-3. **Emits branded primitives** - All namespaces get `type int = number & { __brand: "int" };` etc.
+3. **Imports branded primitives** - Imports `int`, `byte`, `decimal`, etc. from `@tsonic/types` package
 4. **Conditional support types import** - If namespace uses pointers/byrefs, imports from `_support/types.d.ts`
 5. **Cross-namespace imports** - Type imports from other namespaces with aliases if needed
-6. **Namespace wrapper** - `export namespace Foo {` (skipped for root namespace)
-7. **Type declarations** - Iterates through `nsOrder.OrderedTypes` and emits each
+6. **Type declarations** - Iterates through `nsOrder.OrderedTypes` and emits each as pure ES module exports
 
 **Algorithm:**
 - Calls `NamespaceUsesSupportTypes` to check if `TSUnsafePointer`/`TSByRef` needed
 - Uses `importPlan.GetImportsFor` to get cross-namespace imports
-- For root namespace, emits types at module level (no namespace wrapper)
+- All types are exported directly at module level (pure ESM, no TypeScript namespace wrappers)
 - For each type, checks if it has explicit views (companion views pattern):
   - **With views**: Emits `TypeName$instance` class + `__TypeName$views` interface + intersection type alias
   - **Without views**: Emits normal class/interface/enum/delegate
 
-### Method: EmitBrandedPrimitives
-```csharp
-private static void EmitBrandedPrimitives(StringBuilder sb)
-```
+### Branded Primitive Types Import
 **What it does:**
-- Emits branded primitive type aliases for all CLR numeric types:
-  - `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`
-  - `float`, `double`, `decimal`, `nint`, `nuint`
+- Imports branded primitive type aliases from the external `@tsonic/types` package
+- All CLR numeric types are imported: `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `int128`, `uint128`, `half`, `float`, `double`, `decimal`, `nint`, `nuint`, `char`
+
+**Generated code:**
+```typescript
+// Branded primitive types are sourced from @tsonic/types
+import type { sbyte, byte, short, ushort, int, uint, long, ulong, int128, uint128, half, float, double, decimal, nint, nuint, char } from '@tsonic/types';
+```
+
+**Rationale:**
+- Centralizes branded primitive definitions in a shared package
+- Ensures consistency across all generated .NET bindings
+- Allows users to use the same branded types in their own code
 
 ### Method: EmitCompanionViewsInterface
 ```csharp
@@ -2844,8 +2875,14 @@ internal static readonly (string TsName, string ClrFullName, string ClrSimpleNam
 **Example entries:**
 ```csharp
 ("int", "System.Int32", "Int32"),
-("string", "System.String", "String_"),  // Note: emits as String_ (conflicts with TS String)
-("boolean", "System.Boolean", "Boolean_"),  // Note: emits as Boolean_ (reserved keyword)
+("string", "System.String", "String"),   // Note: imported as ClrString (conflicts with TS String)
+("boolean", "System.Boolean", "Boolean"), // Note: imported as ClrBoolean (reserved keyword)
+```
+
+**Built-in type aliasing:**
+For types that conflict with TypeScript built-ins (`String`, `Boolean`, `Object`), these are imported with aliases in cross-namespace imports:
+```typescript
+import type { String as ClrString, Boolean as ClrBoolean, Object as ClrObject, ... } from '../System/internal/index.js';
 ```
 
 ### Methods
