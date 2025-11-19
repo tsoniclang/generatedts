@@ -234,6 +234,14 @@ public static class FacadeEmitter
             AppendDelegateAliases(sb, ctx, plan.Graph);
         }
 
+        // Re-export extension method helper from internal bucket file
+        if (ns.IsRoot && plan.ExtensionMethods.Buckets.Length > 0)
+        {
+            sb.AppendLine("// Re-export extension method helper from internal bucket file");
+            sb.AppendLine("export type { ExtensionMethods } from './internal/extensions/index.js';");
+            sb.AppendLine();
+        }
+
         return sb.ToString();
     }
 
