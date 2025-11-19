@@ -274,13 +274,15 @@ IsStatic = type.IsAbstract && type.IsSealed && !type.IsValueType
    - `clrName = method.Name`
    - If `clrName.Contains('.')`: Explicit (e.g., "System.IDisposable.Dispose") - use qualified name
 2. **Create MemberStableId:** AssemblyName + DeclaringClrFullName + MemberName + CanonicalSignature + MetadataToken
-3. **Read parameters:** `ReadParameter` for each
-4. **Read generic parameters:** If generic method, `CreateGenericParameterSymbol` for each
-5. **Build MethodSymbol:**
+3. **Detect extension methods:** Check for `ExtensionAttribute` on method → Set `IsExtensionMethod = true`, `ExtensionTarget = parameters[0].Type`
+4. **Read parameters:** `ReadParameter` for each
+5. **Read generic parameters:** If generic method, `CreateGenericParameterSymbol` for each
+6. **Build MethodSymbol:**
    - ReturnType via `_typeFactory.Create(method.ReturnType)`
    - IsStatic, IsAbstract, IsVirtual, IsSealed from method
    - IsOverride via `IsMethodOverride(method)`
    - Visibility via `GetVisibility(method)`
+   - IsExtensionMethod, ExtensionTarget (from step 3)
    - Provenance = `MemberProvenance.Original`
    - EmitScope = `EmitScope.ClassSurface` (all reflected members start on class)
 

@@ -512,8 +512,9 @@ Full BCL generation: **4,295 types, 130 namespaces, 50,720 members**
 2. **StaticConflictDetector** (Pass 4.8) - Detect static conflicts
 3. **OverrideConflictDetector** (Pass 4.9) - Suppress override conflicts
 4. **PropertyOverrideUnifier** (Pass 4.10) - Unify property types via unions
-5. **Assembly forwarding fix** - Lookup by ClrFullName instead of StableId
-6. **Generic safety filter** - Skip properties with type parameters
+5. **ExtensionMethodAnalyzer** (Pass 4.11) - Group extension methods by target type
+6. **Assembly forwarding fix** - Lookup by ClrFullName instead of StableId
+7. **Generic safety filter** - Skip properties with type parameters
 
 **Data integrity**: **100%** - All reflected types/members accounted for (completeness verified).
 
@@ -527,10 +528,10 @@ The tsbindgen pipeline is a **deterministic, pure functional transformation** fr
 
 1. **Load**: System.Reflection → SymbolGraph (pure CLR)
 2. **Normalize**: Build indices
-3. **Shape**: 22 transformations for .NET/TypeScript impedance
+3. **Shape**: 23 transformations for .NET/TypeScript impedance (including extension methods)
 4. **Name Reservation**: Reserve all names via SymbolRenamer
 5. **Plan**: Analyze dependencies, plan imports, validate (PhaseGate)
-6. **Emit**: Generate TypeScript + metadata + bindings
+6. **Emit**: Generate TypeScript + metadata + bindings + extension buckets
 
 **Core Principles**:
 - **Immutability**: All data structures are immutable records

@@ -679,9 +679,68 @@ propertyOverrides = PropertyOverrideUnifier.Build(graph, ctx)
   Statistics: 222 property chains unified, 444 union entries created
 ```
 
+### Pass 4.11 (23): Extension Method Analysis
+
+Complete call chain for grouping extension methods by target type:
+
+```
+Builder.Build
+  ↓
+┌──────────────────────────────────────────────────────┐
+│ Pass 4.11 (21): Extension Method Analysis           │
+└──────────────────────────────────────────────────────┘
+  ↓
+extensionMethods = ExtensionMethodAnalyzer.Analyze(ctx, graph)
+  Location: src/tsbindgen/Analysis/ExtensionMethodAnalyzer.cs
+  ↓
+  Step 1: Collect all extension methods from static classes
+    For each namespace in graph:
+      For each type where type.IsStatic:
+        For each method in type.Members.Methods:
+          └─→ if method.IsExtensionMethod
+              Add to allExtensionMethods list
+  ↓
+  Step 2: Group by target type (FullName, Arity)
+    For each extension method:
+      └─→ Extract target type from method.ExtensionTarget
+          (TypeReference of first 'this' parameter)
+          ↓
+          if (target is NamedTypeReference namedRef):
+            Create key: ExtensionTargetKey {
+              FullName = namedRef.FullName,  // e.g., "System.Collections.Generic.IEnumerable`1"
+              Arity = namedRef.Arity         // e.g., 1
+            }
+            ↓
+            └─→ FindTypeByClrFullName(graph, namedRef.FullName)
+                Search all namespaces for type with matching CLR name
+                Returns: TypeSymbol or null
+                ↓
+                if (targetTypeSymbol != null):
+                  Add method to buckets[key]
+  ↓
+  Step 3: Build bucket plans
+    For each (key, methods) in buckets:
+      └─→ Create ExtensionBucketPlan {
+            Key = key,
+            TargetType = targetTypeSymbol,
+            Methods = methods.ToImmutableArray(),
+            BucketInterfaceName = $"__Ext_{targetType.TsEmitName}"
+          }
+  ↓
+  Returns: ExtensionMethodsPlan {
+    Buckets = bucketPlans.ToImmutableArray(),
+    TotalMethodCount = sum of all bucket method counts
+  }
+  ↓
+  Purpose: Group extension methods for TypeScript bucket interface emission
+  Impact: Enables LINQ and other extension method support in TypeScript
+  Statistics (BCL .NET 9): 122 buckets, 1,759 extension methods
+  Largest bucket: __Ext_IEnumerable_1 (258 LINQ methods)
+```
+
 **Key Observations:**
 - Shape passes 1-16 are PURE - each returns a new SymbolGraph
-- Shape passes 4.7-4.10 return PLANS (planning data, not graph transformations)
+- Shape passes 4.7-4.11 return PLANS (planning data, not graph transformations)
 - Members flow through passes accumulating EmitScope, Provenance, SourceInterface
 - Plans created in Shape are passed through to Emit phase for use during emission
 - Renamer is mutated (not pure) - accumulates rename decisions
@@ -1556,6 +1615,56 @@ InternalIndexEmitter.Emit(ctx, plan, outputDirectory)
     │
     └─→ Write to disk: namespace/internal/index.d.ts
         File.WriteAllTextAsync(path, builder.ToString)
+  ↓
+┌────────────────────────────────────────────────────────┐
+│ Step 2a: Emit Extension Method Buckets                │
+└────────────────────────────────────────────────────────┘
+  ↓
+ExtensionsEmitter.Emit(ctx, plan.ExtensionMethods, plan.Graph, outputDirectory)
+  Location: src/tsbindgen/Emit/ExtensionsEmitter.cs
+  ↓
+  Creates: internal/extensions/index.d.ts
+  ↓
+  Content structure:
+    ├─→ Import namespace modules (cross-namespace types)
+    │   import * as System from "../../System/internal/index.js";
+    │   import * as System_Collections_Generic from "../../System.Collections.Generic/internal/index.js";
+    │
+    ├─→ Import branded primitives from @tsonic/types
+    │   import type { int, uint, byte, ... } from '@tsonic/types';
+    │
+    ├─→ Import support types
+    │   import type { TSByRef, TSUnsafePointer } from '../../_support/types.js';
+    │
+    ├─→ Emit bucket interfaces (one per target type)
+    │   For each bucket in plan.ExtensionMethods.Buckets:
+    │     └─→ EmitBucketInterface(bucket, resolver)
+    │         ↓
+    │         export interface __Ext_{TargetType.TsEmitName}<...> {
+    │           // Generic parameters with IEquatable constraints if needed:
+    │           // <T extends System.IEquatable_1<T>>
+    │           ↓
+    │           For each method in bucket.Methods:
+    │             └─→ EmitExtensionMethod(method, resolver, targetGenericParams)
+    │                 ↓
+    │                 // Skip first 'this' parameter
+    │                 // Collapse method generics matching target generics
+    │                 // Use TypeRefPrinter for full type safety (NO 'any')
+    │                 ↓
+    │                 methodName<remaining generics>(params): ReturnType;
+    │         }
+    │
+    └─→ Emit ExtensionMethods<TShape> helper
+        └─→ EmitExtensionMethodsHelper(plan, graph)
+            ↓
+            export type ExtensionMethods<TShape> =
+              // Conditional type with constrained infer clauses:
+              TShape extends Namespace.TargetType<infer T0 extends Constraint> ? __Ext_Bucket<T0>
+            : TShape extends ... ? ...
+              : {};
+  ↓
+  Purpose: Enable type-safe extension method usage via intersection types
+  Usage pattern: type Rich<T> = T & ExtensionMethods<T>
   ↓
 ┌────────────────────────────────────────────────────────┐
 │ Step 3: Emit Facade Files (per namespace)             │

@@ -578,6 +578,21 @@ public sealed record MethodSymbol
   - Null for original members
   - Used to track provenance and for view planning
 
+**Extension Method Support:**
+
+- **`IsExtensionMethod: bool`**
+  - True if this is a C# extension method
+  - Extension methods are static methods marked with `ExtensionAttribute`
+  - Detected during Load phase by checking method for `System.Runtime.CompilerServices.ExtensionAttribute`
+  - Used by ExtensionMethodAnalyzer (Phase 4.11) to group methods for TypeScript bucket emission
+
+- **`ExtensionTarget: TypeReference?`**
+  - For extension methods, the type of the first 'this' parameter
+  - This is the type being extended
+  - Example: For `Select<T>(this IEnumerable<T> source, ...)`, target is `IEnumerable<T>`
+  - Null if not an extension method
+  - Used to group extension methods by target type key `(FullName, Arity)`
+
 **Documentation:**
 
 - **`Documentation: string?`**

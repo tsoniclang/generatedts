@@ -33,7 +33,7 @@ Builder.Build(assemblyPaths, outDir, policy, logger, verbose, logCategories)
 └────────────────────────────┘
   [Phase 1: Load]
   [Phase 2: Normalize]
-  [Phase 3: Shape - 22 passes]
+  [Phase 3: Shape - 23 passes]
   [Phase 3.5: Name Reservation]
   [Phase 4: Plan]
   [Phase 4.5-4.7: Validation]
@@ -98,6 +98,8 @@ ReflectionReader.ReadAssemblies(loadContext, allAssemblyPaths) → ReflectionRea
           │   │   ├─→ CreateMethodSignature(method) → ReflectionReader.cs:465
           │   │   │   └─→ ctx.CanonicalizeMethod(name, paramTypes, returnType)
           │   │   │
+          │   │   ├─→ Check ExtensionAttribute → Set IsExtensionMethod, ExtensionTarget
+          │   │   │
           │   │   ├─→ ReadParameter(param) → ReflectionReader.cs:446
           │   │   │   ├─→ TypeScriptReservedWords.SanitizeParameterName(name)
           │   │   │   └─→ TypeReferenceFactory.Create(param.ParameterType)
@@ -149,7 +151,7 @@ graph = graph.WithIndices → Model/SymbolGraph.cs
 
 ## Phase 3: Shape Call Graph
 
-22 transformation passes:
+23 transformation passes:
 
 ```
 Builder.Build
@@ -438,11 +440,25 @@ propertyOverrides = PropertyOverrideUnifier.Build(graph, ctx)
   Returns: PropertyOverridePlan
   Impact: Eliminated final TS2416 error → **ZERO TypeScript errors**
   Statistics: 222 property chains unified, 444 union entries created
+  ↓
+┌──────────────────────────────────────────────────────┐
+│ Pass 4.11 (23): Extension Method Analysis          │
+└──────────────────────────────────────────────────────┘
+  ↓
+extensionMethods = ExtensionMethodAnalyzer.Analyze(ctx, graph)
+  Location: Analysis/ExtensionMethodAnalyzer.cs
+  ↓
+  Collect all extension methods (IsExtensionMethod = true)
+  Group by ExtensionTarget → (FullName, Arity) key
+  Build bucket plans with target type and methods
+  ↓
+  Returns: ExtensionMethodsPlan
+  Impact: 122 bucket interfaces, 1,759 extension methods (BCL .NET 9)
 ```
 
 **Key Observations:**
 - Passes 1-16: PURE (each returns new SymbolGraph)
-- Passes 4.7-4.10: Return PLANS (planning data, not graph transformations)
+- Passes 4.7-4.11: Return PLANS (planning data, not graph transformations)
 - Renamer: MUTATED (not pure, accumulates rename decisions)
 - Plans passed through EmissionPlan to Emit phase
 
@@ -661,6 +677,7 @@ record EmissionPlan
     StaticConflictPlan;             // Pass 4.8 plan
     OverrideConflictPlan;           // Pass 4.9 plan
     PropertyOverridePlan;           // Pass 4.10 plan
+    ExtensionMethodsPlan;           // Pass 4.11 plan
 }
 ```
 
@@ -1030,6 +1047,28 @@ InternalIndexEmitter.Emit(ctx, plan, outputDirectory) → Emit/InternalIndexEmit
     ├─→ Close namespace: }
     └─→ Write to disk: namespace/internal/index.d.ts
   ↓
+┌──────────────────────────────────────────────────┐
+│ Step 2a: Emit Extension Method Buckets (once)  │
+└──────────────────────────────────────────────────┘
+  ↓
+ExtensionsEmitter.Emit(ctx, plan.ExtensionMethods, plan.Graph, outputDirectory)
+  Location: Emit/ExtensionsEmitter.cs
+  Generate: internal/extensions/index.d.ts (once per build, not per namespace)
+  ↓
+  For each bucket in plan.ExtensionMethods.Buckets:
+    Emit bucket interface: export interface __Ext_TargetType<T> {
+      For each method in bucket:
+        Collapse method generics matching target generics
+        Emit method signature with TypeRefPrinter
+        Detect IEquatable constraints → add to infer clause
+      Close: }
+  ↓
+  Emit helper type: export type ExtensionMethods<TShape> = ...
+    Map shapes to buckets with constrained infer clauses
+    Example: TShape extends IEnumerable_1<infer T> ? __Ext_IEnumerable_1<T> : ...
+  Write to disk: internal/extensions/index.d.ts
+  Result: 122 bucket interfaces, 1,759 extension methods
+  ↓
 ┌────────────────────────────────────────────┐
 │ Step 3: Emit Facade Files (per namespace) │
 └────────────────────────────────────────────┘
@@ -1181,9 +1220,9 @@ Policy.Validation.StrictVersionChecks → AssemblyLoader.ValidateAssemblyIdentit
 
 Called from everywhere (selective logging based on category/verbose flag):
 - AssemblyLoader, ReflectionReader
-- All 22 Shape passes
+- All 23 Shape passes
 - NameReservation, PhaseGate
-- All 6 Emit emitters
+- All 7 Emit emitters
 
 Usage: `ctx.Log("category", "message")`
 Only logs if: verboseLogging == true OR logCategories.Contains("category")
@@ -1197,17 +1236,18 @@ Complete call chains through tsbindgen pipeline:
 1. **Entry Point** - CLI → GenerateCommand → Builder
 2. **Phase 1: Load** - Assembly loading, reflection, member reading, interface substitution
 3. **Phase 2: Normalize** - Index building for O(1) lookups
-4. **Phase 3: Shape** - 22 transformation passes (including 4.7-4.10 planning passes)
+4. **Phase 3: Shape** - 23 transformation passes (including 4.7-4.11 planning passes)
 5. **Phase 3.5: Name Reservation** - Central naming through Renamer (6 steps)
 6. **Phase 4: Plan** - Import planning, ordering, overload unification, constraint audit
 7. **Phase 4.7: PhaseGate** - 20+ validation functions with 40+ diagnostic codes
-8. **Phase 5: Emit** - Plan-based file generation (TypeScript, metadata, bindings, stubs)
+8. **Phase 5: Emit** - Plan-based file generation (TypeScript, metadata, bindings, stubs, extension buckets)
 9. **Cross-Cutting** - SymbolRenamer, DiagnosticBag, Policy, Logging
 
 **Key Insights:**
 - Shape passes 1-16: PURE (return new graph)
-- Shape passes 4.7-4.10: Return PLANS (planning data, not graph transformations)
+- Shape passes 4.7-4.11: Return PLANS (planning data, not graph transformations)
 - Renamer: MUTATED (accumulates decisions across phases)
 - PhaseGate: Validates before emission (fail-fast)
-- Emit: Uses TsEmitName from graph + 4 Shape plans (no further name transformation)
+- Emit: Uses TsEmitName from graph + 5 Shape plans (no further name transformation)
 - Plans enable **zero TypeScript errors** for full BCL (4,295 types, 130 namespaces)
+- Extension methods: 122 bucket interfaces, 1,759 methods (BCL .NET 9)

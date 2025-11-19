@@ -150,6 +150,8 @@ public readonly record struct AssemblyKey(
 **Characteristics:**
 - **`IsStatic, IsAbstract, IsVirtual, IsSealed, IsOverride: bool`**
 - **`Visibility: Visibility`** - Public, Protected, Internal, etc.
+- **`IsExtensionMethod: bool`** - True if method has ExtensionAttribute
+- **`ExtensionTarget: TypeReference?`** - Type of first 'this' parameter (for extension methods)
 
 **Metadata:**
 - **`Provenance: MemberProvenance`** - Original, InterfaceInlined, ExplicitImpl, BaseOverload, Synthesized
