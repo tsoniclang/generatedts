@@ -691,59 +691,59 @@ private static MethodMetadata GenerateMethodMetadata(MethodSymbol method, TypeSy
 
 ```json
 {
-  "Namespace": "System.Collections.Generic",
-  "ContributingAssemblies": [
+  "namespace": "System.Collections.Generic",
+  "contributingAssemblies": [
     "System.Private.CoreLib"
   ],
-  "Types": [
+  "types": [
     {
-      "ClrName": "System.Collections.Generic.List`1",
-      "TsEmitName": "List_1",
-      "Kind": "Class",
-      "Accessibility": "Public",
-      "IsAbstract": false,
-      "IsSealed": false,
-      "IsStatic": false,
-      "Arity": 1,
-      "Methods": [
+      "clrName": "System.Collections.Generic.List`1",
+      "tsEmitName": "List_1",
+      "kind": "Class",
+      "accessibility": "Public",
+      "isAbstract": false,
+      "isSealed": false,
+      "isStatic": false,
+      "arity": 1,
+      "methods": [
         {
-          "ClrName": "Add",
-          "TsEmitName": "Add",
-          "NormalizedSignature": "Add(T):System.Void",
-          "Provenance": "Direct",
-          "EmitScope": "ClassSurface",
-          "IsStatic": false,
-          "IsAbstract": false,
-          "IsVirtual": false,
-          "IsOverride": false,
-          "IsSealed": false,
-          "Arity": 0,
-          "ParameterCount": 1
+          "clrName": "Add",
+          "tsEmitName": "Add",
+          "normalizedSignature": "Add(T):System.Void",
+          "provenance": "Direct",
+          "emitScope": "ClassSurface",
+          "isStatic": false,
+          "isAbstract": false,
+          "isVirtual": false,
+          "isOverride": false,
+          "isSealed": false,
+          "arity": 0,
+          "parameterCount": 1
         },
         {
-          "ClrName": "GetEnumerator",
-          "TsEmitName": "IEnumerable_1$view$GetEnumerator",
-          "NormalizedSignature": "GetEnumerator:System.Collections.Generic.IEnumerator`1<T>",
-          "Provenance": "ExplicitImpl",
-          "EmitScope": "ViewOnly",
-          "IsStatic": false,
-          "IsAbstract": false,
-          "IsVirtual": false,
-          "IsOverride": false,
-          "IsSealed": false,
-          "Arity": 0,
-          "ParameterCount": 0,
-          "SourceInterface": "System.Collections.Generic.IEnumerable`1"
+          "clrName": "GetEnumerator",
+          "tsEmitName": "IEnumerable_1$view$GetEnumerator",
+          "normalizedSignature": "GetEnumerator:System.Collections.Generic.IEnumerator`1<T>",
+          "provenance": "ExplicitImpl",
+          "emitScope": "ViewOnly",
+          "isStatic": false,
+          "isAbstract": false,
+          "isVirtual": false,
+          "isOverride": false,
+          "isSealed": false,
+          "arity": 0,
+          "parameterCount": 0,
+          "sourceInterface": "System.Collections.Generic.IEnumerable`1"
         }
       ],
-      "Properties": [],
-      "Fields": [],
-      "Events": [],
-      "Constructors": [
+      "properties": [],
+      "fields": [],
+      "events": [],
+      "constructors": [
         {
-          "NormalizedSignature": ".ctor(System.Int32):System.Void",
-          "IsStatic": false,
-          "ParameterCount": 1
+          "normalizedSignature": ".ctor(System.Int32):System.Void",
+          "isStatic": false,
+          "parameterCount": 1
         }
       ]
     }
@@ -885,39 +885,39 @@ private static TypeBinding GenerateTypeBinding(TypeSymbol type, BuildContext ctx
 
 ```json
 {
-  "Namespace": "System.Collections.Generic",
-  "Types": [
+  "namespace": "System.Collections.Generic",
+  "types": [
     {
-      "ClrName": "System.Collections.Generic.List`1",
-      "TsEmitName": "List_1",
-      "AssemblyName": "System.Private.CoreLib",
-      "MetadataToken": 0,
-      "Methods": [
+      "clrName": "System.Collections.Generic.List`1",
+      "tsEmitName": "List_1",
+      "assemblyName": "System.Private.CoreLib",
+      "metadataToken": 0,
+      "methods": [
         {
-          "ClrName": "Add",
-          "TsEmitName": "Add",
-          "MetadataToken": 100663359,
-          "CanonicalSignature": "Add(!0):System.Void",
-          "NormalizedSignature": "Add(T):System.Void",
-          "EmitScope": "ClassSurface",
-          "Arity": 0,
-          "ParameterCount": 1
+          "clrName": "Add",
+          "tsEmitName": "Add",
+          "metadataToken": 100663359,
+          "canonicalSignature": "Add(!0):System.Void",
+          "normalizedSignature": "Add(T):System.Void",
+          "emitScope": "ClassSurface",
+          "arity": 0,
+          "parameterCount": 1
         },
         {
-          "ClrName": "GetEnumerator",
-          "TsEmitName": "IEnumerable_1$view$GetEnumerator",
-          "MetadataToken": 100663360,
-          "CanonicalSignature": "GetEnumerator:System.Collections.Generic.IEnumerator`1<!0>",
-          "NormalizedSignature": "GetEnumerator:System.Collections.Generic.IEnumerator`1<T>",
-          "EmitScope": "ViewOnly",
-          "Arity": 0,
-          "ParameterCount": 0
+          "clrName": "GetEnumerator",
+          "tsEmitName": "IEnumerable_1$view$GetEnumerator",
+          "metadataToken": 100663360,
+          "canonicalSignature": "GetEnumerator:System.Collections.Generic.IEnumerator`1<!0>",
+          "normalizedSignature": "GetEnumerator:System.Collections.Generic.IEnumerator`1<T>",
+          "emitScope": "ViewOnly",
+          "arity": 0,
+          "parameterCount": 0
         }
       ],
-      "Properties": [],
-      "Fields": [],
-      "Events": [],
-      "Constructors": []
+      "properties": [],
+      "fields": [],
+      "events": [],
+      "constructors": []
     }
   ]
 }
@@ -3238,40 +3238,40 @@ export namespace System.Collections.Generic {
 
 ```json
 {
-  "Namespace": "System.Collections.Generic",
-  "ContributingAssemblies": [
+  "namespace": "System.Collections.Generic",
+  "contributingAssemblies": [
     "System.Private.CoreLib"
   ],
-  "Types": [
+  "types": [
     {
-      "ClrName": "System.Collections.Generic.List`1",
-      "TsEmitName": "List_1",
-      "Kind": "Class",
-      "Accessibility": "Public",
-      "IsAbstract": false,
-      "IsSealed": false,
-      "IsStatic": false,
-      "Arity": 1,
-      "Methods": [
+      "clrName": "System.Collections.Generic.List`1",
+      "tsEmitName": "List_1",
+      "kind": "Class",
+      "accessibility": "Public",
+      "isAbstract": false,
+      "isSealed": false,
+      "isStatic": false,
+      "arity": 1,
+      "methods": [
         {
-          "ClrName": "Add",
-          "TsEmitName": "Add",
-          "NormalizedSignature": "Add(T):System.Void",
-          "Provenance": "Direct",
-          "EmitScope": "ClassSurface",
-          "IsStatic": false,
-          "IsAbstract": false,
-          "IsVirtual": false,
-          "IsOverride": false,
-          "IsSealed": false,
-          "Arity": 0,
-          "ParameterCount": 1
+          "clrName": "Add",
+          "tsEmitName": "Add",
+          "normalizedSignature": "Add(T):System.Void",
+          "provenance": "Direct",
+          "emitScope": "ClassSurface",
+          "isStatic": false,
+          "isAbstract": false,
+          "isVirtual": false,
+          "isOverride": false,
+          "isSealed": false,
+          "arity": 0,
+          "parameterCount": 1
         }
       ],
-      "Properties": [],
-      "Fields": [],
-      "Events": [],
-      "Constructors": []
+      "properties": [],
+      "fields": [],
+      "events": [],
+      "constructors": []
     }
   ]
 }
@@ -3281,29 +3281,29 @@ export namespace System.Collections.Generic {
 
 ```json
 {
-  "Namespace": "System.Collections.Generic",
-  "Types": [
+  "namespace": "System.Collections.Generic",
+  "types": [
     {
-      "ClrName": "System.Collections.Generic.List`1",
-      "TsEmitName": "List_1",
-      "AssemblyName": "System.Private.CoreLib",
-      "MetadataToken": 0,
-      "Methods": [
+      "clrName": "System.Collections.Generic.List`1",
+      "tsEmitName": "List_1",
+      "assemblyName": "System.Private.CoreLib",
+      "metadataToken": 0,
+      "methods": [
         {
-          "ClrName": "Add",
-          "TsEmitName": "Add",
-          "MetadataToken": 100663359,
-          "CanonicalSignature": "Add(!0):System.Void",
-          "NormalizedSignature": "Add(T):System.Void",
-          "EmitScope": "ClassSurface",
-          "Arity": 0,
-          "ParameterCount": 1
+          "clrName": "Add",
+          "tsEmitName": "Add",
+          "metadataToken": 100663359,
+          "canonicalSignature": "Add(!0):System.Void",
+          "normalizedSignature": "Add(T):System.Void",
+          "emitScope": "ClassSurface",
+          "arity": 0,
+          "parameterCount": 1
         }
       ],
-      "Properties": [],
-      "Fields": [],
-      "Events": [],
-      "Constructors": []
+      "properties": [],
+      "fields": [],
+      "events": [],
+      "constructors": []
     }
   ]
 }

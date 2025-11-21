@@ -113,10 +113,10 @@ export * from "./internal/index.js";
 ```json
 {
   "SelectMany": {
-    "Kind": "method",
-    "Name": "SelectMany",
-    "Alias": "selectMany",
-    "FullName": "System.Linq.Enumerable.SelectMany"
+    "kind": "method",
+    "name": "SelectMany",
+    "alias": "selectMany",
+    "fullName": "System.Linq.Enumerable.SelectMany"
   }
 }
 ```

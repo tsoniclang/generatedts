@@ -29,16 +29,16 @@ When naming transforms are applied (e.g., `--method-names camelCase`), TypeScrip
 ```json
 {
   "SelectMany": {
-    "Kind": "method",
-    "Name": "SelectMany",
-    "Alias": "selectMany",
-    "FullName": "System.Linq.Enumerable.SelectMany"
+    "kind": "method",
+    "name": "SelectMany",
+    "alias": "selectMany",
+    "fullName": "System.Linq.Enumerable.SelectMany"
   },
   "Enumerable": {
-    "Kind": "class",
-    "Name": "Enumerable",
-    "Alias": "Enumerable",
-    "FullName": "System.Linq.Enumerable"
+    "kind": "class",
+    "name": "Enumerable",
+    "alias": "Enumerable",
+    "fullName": "System.Linq.Enumerable"
   }
 }
 ```
@@ -54,19 +54,19 @@ When naming transforms are applied (e.g., `--method-names camelCase`), TypeScrip
 
 ```json
 {
-  "Kind": "method",
-  "Name": "SelectMany",
-  "Alias": "selectMany",
-  "FullName": "System.Linq.Enumerable.SelectMany"
+  "kind": "method",
+  "name": "SelectMany",
+  "alias": "selectMany",
+  "fullName": "System.Linq.Enumerable.SelectMany"
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `Kind` | string | Entity kind (see below) |
-| `Name` | string | Original CLR identifier |
-| `Alias` | string | TypeScript identifier (after transform) |
-| `FullName` | string | Fully-qualified CLR name |
+| `kind` | string | Entity kind (see below) |
+| `name` | string | Original CLR identifier |
+| `alias` | string | TypeScript identifier (after transform) |
+| `fullName` | string | Fully-qualified CLR name |
 
 ### Kind Values
 
@@ -89,34 +89,34 @@ When naming transforms are applied (e.g., `--method-names camelCase`), TypeScrip
 ```json
 {
   "System.Linq": {
-    "Kind": "namespace",
-    "Name": "System.Linq",
-    "Alias": "systemLinq",
-    "FullName": "System.Linq"
+    "kind": "namespace",
+    "name": "System.Linq",
+    "alias": "systemLinq",
+    "fullName": "System.Linq"
   },
   "Enumerable": {
-    "Kind": "class",
-    "Name": "Enumerable",
-    "Alias": "Enumerable",
-    "FullName": "System.Linq.Enumerable"
+    "kind": "class",
+    "name": "Enumerable",
+    "alias": "Enumerable",
+    "fullName": "System.Linq.Enumerable"
   },
   "SelectMany": {
-    "Kind": "method",
-    "Name": "SelectMany",
-    "Alias": "selectMany",
-    "FullName": "System.Linq.Enumerable.SelectMany"
+    "kind": "method",
+    "name": "SelectMany",
+    "alias": "selectMany",
+    "fullName": "System.Linq.Enumerable.SelectMany"
   },
   "Where": {
-    "Kind": "method",
-    "Name": "Where",
-    "Alias": "where",
-    "FullName": "System.Linq.Enumerable.Where"
+    "kind": "method",
+    "name": "Where",
+    "alias": "where",
+    "fullName": "System.Linq.Enumerable.Where"
   },
   "Count": {
-    "Kind": "property",
-    "Name": "Count",
-    "Alias": "count",
-    "FullName": "System.Linq.Enumerable.Count"
+    "kind": "property",
+    "name": "Count",
+    "alias": "count",
+    "fullName": "System.Linq.Enumerable.Count"
   }
 }
 ```
@@ -129,7 +129,7 @@ When naming transforms are applied (e.g., `--method-names camelCase`), TypeScrip
 ```csharp
 // Compiler has CLR name "SelectMany" from metadata
 var binding = bindings["SelectMany"];
-var tsName = binding.Alias; // "selectMany"
+var tsName = binding.alias; // "selectMany"
 // Verify user wrote: list.selectMany(...) not list.SelectMany(...)
 ```
 
@@ -138,10 +138,10 @@ var tsName = binding.Alias; // "selectMany"
 
 ```csharp
 // User wrote: list.selectMany(...)
-// Find binding where Alias == "selectMany"
-var binding = bindings.Values.First(b => b.Alias == "selectMany");
-var clrName = binding.Name; // "SelectMany"
-var fullName = binding.FullName; // "System.Linq.Enumerable.SelectMany"
+// Find binding where alias == "selectMany"
+var binding = bindings.Values.First(b => b.alias == "selectMany");
+var clrName = binding.name; // "SelectMany"
+var fullName = binding.fullName; // "System.Linq.Enumerable.SelectMany"
 // Emit C#: list.SelectMany(...)
 ```
 
@@ -178,16 +178,16 @@ export namespace System.Linq {
 ```json
 {
   "SelectMany": {
-    "Kind": "method",
-    "Name": "SelectMany",
-    "Alias": "selectMany",
-    "FullName": "System.Linq.Enumerable.SelectMany"
+    "kind": "method",
+    "name": "SelectMany",
+    "alias": "selectMany",
+    "fullName": "System.Linq.Enumerable.SelectMany"
   },
   "Where": {
-    "Kind": "method",
-    "Name": "Where",
-    "Alias": "where",
-    "FullName": "System.Linq.Enumerable.Where"
+    "kind": "method",
+    "name": "Where",
+    "alias": "where",
+    "fullName": "System.Linq.Enumerable.Where"
   }
 }
 ```
@@ -217,6 +217,6 @@ tsbindgen uses smart camelCase conversion:
 
 - **Encoding**: UTF-8
 - **Formatting**: Indented (2 spaces)
-- **Property naming**: PascalCase (matches C# conventions)
+- **Property naming**: camelCase (JavaScript convention)
 - **Null handling**: Null values not included
 - **Empty bindings**: File omitted if no transforms applied
