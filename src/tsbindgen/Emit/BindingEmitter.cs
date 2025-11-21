@@ -41,7 +41,8 @@ public static class BindingEmitter
             var jsonOptions = new JsonSerializerOptions
             {
                 WriteIndented = true,
-                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
             };
             var json = JsonSerializer.Serialize(bindings, jsonOptions);
             File.WriteAllText(outputFile, json);
