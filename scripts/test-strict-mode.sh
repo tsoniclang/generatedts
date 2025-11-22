@@ -11,7 +11,8 @@ echo ""
 # Run strict mode validation
 echo "[1/2] Running strict mode validation..."
 output=$(dotnet run --project src/tsbindgen/tsbindgen.csproj -- \
-    generate-bcl --out-dir .tests/strict-test --strict-mode 2>&1)
+    generate -d ~/dotnet/shared/Microsoft.NETCore.App/10.0.0-rc.1.25451.107 \
+    -o .tests/strict-test --strict --logs PhaseGate 2>&1)
 
 # Check exit code
 exit_code=$?
@@ -68,6 +69,6 @@ echo ""
 echo "Summary:"
 echo "  - Strict mode validation passes"
 echo "  - Zero errors (ERROR level diagnostics)"
-echo "  - Only whitelisted warnings allowed (TBG120 for PR D)"
-echo "  - INFO diagnostics don't count toward warning totals"
+echo "  - Zero warnings (strict mode zero tolerance achieved)"
+echo "  - INFO diagnostics don't count toward totals (25 expected)"
 echo ""
