@@ -161,9 +161,10 @@ public static class PhaseGate
         if (ctx.LibraryContract != null)
         {
             ctx.Log("PhaseGate", "Running library mode validation...");
-            LibraryMode.ValidateContractExists(graph, ctx.LibraryContract, validationContext);
+            // LIB001 is validated during contract loading (LibraryContractLoader.Load)
             LibraryMode.ValidateNoDanglingReferences(graph, ctx.LibraryContract, validationContext);
-            LibraryMode.ValidateBindingConsistency(graph, ctx.LibraryContract, validationContext);
+            // LIB003 is disabled - binding consistency is validated post-emission by verify-completeness.js
+            // In library mode, the contract's bindings are for the library, not for the current build
         }
 
         // Strict Mode Enforcement

@@ -11,76 +11,10 @@ namespace tsbindgen.Plan.Validation;
 /// </summary>
 internal static class LibraryMode
 {
-    /// <summary>
-    /// LIB001: Validate that all types/members in library contract exist in current graph.
-    /// Missing symbols indicate BCL API removal or assembly version mismatch.
-    /// </summary>
-    internal static void ValidateContractExists(
-        SymbolGraph graph,
-        LibraryContract contract,
-        ValidationContext validationCtx)
-    {
-        // Check each type in contract
-        var missingTypes = 0;
-        var missingMembers = 0;
-
-        foreach (var typeStableId in contract.AllowedTypeStableIds)
-        {
-            // Find type in graph by StableId
-            var type = graph.TypeIndex.Values.FirstOrDefault(t => t.StableId.ToString() == typeStableId);
-            if (type == null)
-            {
-                validationCtx.RecordDiagnostic(
-                    "LIB001",
-                    "ERROR",
-                    $"Library contract references type that doesn't exist in current graph: {typeStableId}");
-                missingTypes++;
-            }
-        }
-
-        // Check each member in contract
-        foreach (var memberStableId in contract.AllowedMemberStableIds)
-        {
-            // Find member in graph by StableId
-            var found = false;
-            foreach (var type in graph.TypeIndex.Values)
-            {
-                // Check methods
-                if (type.Members.Methods.Any(m => m.StableId.ToString() == memberStableId))
-                {
-                    found = true;
-                    break;
-                }
-                // Check properties
-                if (type.Members.Properties.Any(p => p.StableId.ToString() == memberStableId))
-                {
-                    found = true;
-                    break;
-                }
-                // Check fields
-                if (type.Members.Fields.Any(f => f.StableId.ToString() == memberStableId))
-                {
-                    found = true;
-                    break;
-                }
-                // Check events
-                if (type.Members.Events.Any(e => e.StableId.ToString() == memberStableId))
-                {
-                    found = true;
-                    break;
-                }
-            }
-
-            if (!found)
-            {
-                validationCtx.RecordDiagnostic(
-                    "LIB001",
-                    "ERROR",
-                    $"Library contract references member that doesn't exist in current graph: {memberStableId}");
-                missingMembers++;
-            }
-        }
-    }
+    // LIB001: Library contract path validation
+    // This validation is performed during contract loading (LibraryContractLoader.Load)
+    // Checks: directory exists, has metadata.json files, has bindings.json files
+    // If contract loading fails, build terminates before reaching PhaseGate
 
     /// <summary>
     /// LIB002: Validate that filtered output contains no dangling references.

@@ -29,14 +29,15 @@ public static class LibraryFilter
 
             foreach (var type in ns.Types)
             {
-                // Check if type is in contract
-                if (!IsAllowedType(type, contract))
+                // Library mode filtering: REMOVE types that are IN the contract (they're already emitted by the library)
+                // KEEP types that are NOT in the contract (they're the user's types)
+                if (IsInLibraryContract(type, contract))
                 {
-                    ctx.Log("LibraryFilter", $"Filtered out type: {type.StableId}");
+                    ctx.Log("LibraryFilter", $"Filtered out type (in library): {type.StableId}");
                     continue;
                 }
 
-                // Filter members within allowed type
+                // Keep user type, but filter members to only those NOT in contract
                 var filteredType = FilterTypeMembers(ctx, type, contract);
                 filteredTypes.Add(filteredType);
             }
@@ -63,27 +64,29 @@ public static class LibraryFilter
 
     /// <summary>
     /// Filter all members of a type by library contract.
+    /// REMOVE members that are IN the contract (they're already emitted by the library).
+    /// KEEP members that are NOT in the contract (they're the user's members).
     /// </summary>
     private static TypeSymbol FilterTypeMembers(BuildContext ctx, TypeSymbol type, LibraryContract contract)
     {
         var filteredMethods = type.Members.Methods
-            .Where(m => IsAllowedMember(m.StableId.ToString(), contract))
+            .Where(m => !IsInLibraryContract(m.StableId.ToString(), contract))
             .ToImmutableArray();
 
         var filteredProperties = type.Members.Properties
-            .Where(p => IsAllowedMember(p.StableId.ToString(), contract))
+            .Where(p => !IsInLibraryContract(p.StableId.ToString(), contract))
             .ToImmutableArray();
 
         var filteredFields = type.Members.Fields
-            .Where(f => IsAllowedMember(f.StableId.ToString(), contract))
+            .Where(f => !IsInLibraryContract(f.StableId.ToString(), contract))
             .ToImmutableArray();
 
         var filteredEvents = type.Members.Events
-            .Where(e => IsAllowedMember(e.StableId.ToString(), contract))
+            .Where(e => !IsInLibraryContract(e.StableId.ToString(), contract))
             .ToImmutableArray();
 
         var filteredConstructors = type.Members.Constructors
-            .Where(c => IsAllowedMember(c.StableId.ToString(), contract))
+            .Where(c => !IsInLibraryContract(c.StableId.ToString(), contract))
             .ToImmutableArray();
 
         var filteredMembers = new TypeMembers
@@ -98,13 +101,19 @@ public static class LibraryFilter
         return type.WithMembers(filteredMembers);
     }
 
-    public static bool IsAllowedType(TypeSymbol type, LibraryContract contract)
+    /// <summary>
+    /// Check if a type is in the library contract.
+    /// </summary>
+    public static bool IsInLibraryContract(TypeSymbol type, LibraryContract contract)
     {
         var stableId = type.StableId.ToString();
         return contract.AllowedTypeStableIds.Contains(stableId);
     }
 
-    private static bool IsAllowedMember(string memberStableId, LibraryContract contract)
+    /// <summary>
+    /// Check if a member (by StableId string) is in the library contract.
+    /// </summary>
+    private static bool IsInLibraryContract(string memberStableId, LibraryContract contract)
     {
         return contract.AllowedMemberStableIds.Contains(memberStableId);
     }
