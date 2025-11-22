@@ -196,19 +196,22 @@ Emits `<namespace>/bindings.json` with CLR → TS name mappings.
 **Output:** `<namespace>/bindings.json` for each namespace
 
 **Contents:**
-- Type name bindings (CLR name → TS emit name)
-- Member name bindings (CLR signature → TS emit name)
+- Type name bindings (StableId, CLR name → TS emit name)
+- Member name bindings (StableId, CLR signature → TS emit name)
 - Rename decisions (requested → final, strategy)
+- **StableId field**: Immutable assembly-qualified identifier for types/members (used by library mode)
 
 **Example:**
 ```json
 {
   "types": {
     "List`1": {
+      "stableId": "System.Private.CoreLib:System.Collections.Generic.List`1",
       "clrName": "List`1",
       "tsEmitName": "List_1",
       "members": {
         "Add": {
+          "stableId": "System.Private.CoreLib:System.Collections.Generic.List`1::Add(T):Void",
           "clrSignature": "Add(T):Void",
           "tsEmitName": "Add"
         }

@@ -771,6 +771,7 @@ public sealed record NamespaceBindings
 ```csharp
 public sealed record TypeBinding
 {
+    public required string StableId { get; init; }          // "System.Private.CoreLib:System.Collections.Generic.List`1"
     public required string ClrName { get; init; }           // "System.Collections.Generic.List`1"
     public required string TsEmitName { get; init; }        // "List_1"
     public required string AssemblyName { get; init; }      // "System.Private.CoreLib"
@@ -787,6 +788,7 @@ public sealed record TypeBinding
 ```csharp
 public sealed record MethodBinding
 {
+    public required string StableId { get; init; }              // "System.Private.CoreLib:System.Collections.Generic.List`1::Add(!0):System.Void"
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
     public required int MetadataToken { get; init; }
@@ -802,6 +804,7 @@ public sealed record MethodBinding
 ```csharp
 public sealed record PropertyBinding
 {
+    public required string StableId { get; init; }          // Full member StableId
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
     public required int MetadataToken { get; init; }
@@ -818,6 +821,7 @@ public sealed record PropertyBinding
 ```csharp
 public sealed record FieldBinding
 {
+    public required string StableId { get; init; }          // Full member StableId
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
     public required int MetadataToken { get; init; }
@@ -831,6 +835,7 @@ public sealed record FieldBinding
 ```csharp
 public sealed record EventBinding
 {
+    public required string StableId { get; init; }          // Full member StableId
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
     public required int MetadataToken { get; init; }
@@ -843,6 +848,7 @@ public sealed record EventBinding
 ```csharp
 public sealed record ConstructorBinding
 {
+    public required string StableId { get; init; }          // Full member StableId
     public required int MetadataToken { get; init; }
     public required string CanonicalSignature { get; init; }
     public required string NormalizedSignature { get; init; }
@@ -888,12 +894,14 @@ private static TypeBinding GenerateTypeBinding(TypeSymbol type, BuildContext ctx
   "namespace": "System.Collections.Generic",
   "types": [
     {
+      "stableId": "System.Private.CoreLib:System.Collections.Generic.List`1",
       "clrName": "System.Collections.Generic.List`1",
       "tsEmitName": "List_1",
       "assemblyName": "System.Private.CoreLib",
       "metadataToken": 0,
       "methods": [
         {
+          "stableId": "System.Private.CoreLib:System.Collections.Generic.List`1::Add(!0):System.Void",
           "clrName": "Add",
           "tsEmitName": "Add",
           "metadataToken": 100663359,

@@ -85,7 +85,7 @@ PhaseGate runs **20+ validation modules** in strict order:
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
-│ 2. HARDENING VALIDATIONS (M1-M10)                          │
+│ 2. HARDENING VALIDATIONS (M1-M19)                          │
 ├─────────────────────────────────────────────────────────────┤
 │   M1: Views.Validate                    (ViewOnly orphans)│
 │   M2: Names.ValidateFinalNames          (Renamer coverage)│
@@ -105,6 +105,7 @@ PhaseGate runs **20+ validation modules** in strict order:
 │   M16: ImportExport.ValidatePublicApiSurface (PG_API_001/2)│
 │   M17: ImportExport.ValidateImportCompleteness (PG_IMPORT_001)│
 │   M18: ImportExport.ValidateExportCompleteness (PG_EXPORT_001)│
+│   M19: LibraryMode.Validate             (LIB001-003)       │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
@@ -1574,6 +1575,162 @@ namespace A {
 3. For each imported type:
    - Check if exported: `exportedNames.Contains(importedName)`
    - If not exported: ERROR TBG851
+
+---
+
+### Module: LibraryMode.cs
+
+**Purpose:** Library mode validation (contract loading, dangling references, binding consistency).
+
+**File:** `src/tsbindgen/Plan/Validation/LibraryMode.cs`
+
+**Functions:**
+
+#### 1. `Validate(BuildContext ctx, SymbolGraph graph, LibraryContract? contract, ValidationContext validationCtx)`
+
+**What it validates:**
+- **LIB002:** No dangling references (user types don't reference filtered-out types)
+- **LIB003:** Disabled in library mode (binding consistency validated separately)
+
+**Error codes:**
+- `LIB002` (DanglingReference) - User type references filtered-out type
+
+**Runs only when:**
+- `ctx.LibraryMode == true`
+- `contract != null`
+
+**Algorithm:**
+1. Skip validation if not in library mode
+2. For each namespace in graph:
+3. For each type in namespace:
+4. Walk all type references recursively:
+   - `CheckTypeReference(typeRef, type, context, contract, graph, validationCtx)`
+5. Check base types, interfaces, method parameters/returns, property types, field types, event types, generics
+
+#### 2. `CheckTypeReference(TypeReference typeRef, TypeSymbol referencingType, string context, LibraryContract contract, SymbolGraph graph, ValidationContext validationCtx)`
+
+**What it validates:**
+- **LIB002:** Every referenced type is either:
+  - In the contract (allowed dependency on base library)
+  - In the current graph (user type)
+  - Builtin/generic parameter (TypeScript primitive)
+
+**Error codes:**
+- `LIB002` (DanglingReference) - Type reference not in contract, not in graph, not builtin
+
+**Algorithm:**
+1. **Named type reference:**
+   - Get StableId from full name (resolve assembly)
+   - Check if in contract: `contract.AllowedTypeStableIds.Contains(stableId)` → ALLOWED
+   - Check if in graph: `graph.TypeIndex.TryGetValue(stableId, out _)` → ALLOWED
+   - If exists but was filtered: **ERROR LIB002** (dangling reference)
+   - If external (not in graph): ALLOWED (external dependency)
+
+2. **Generic type reference:**
+   - Recursively check base type
+   - Recursively check each type argument
+
+3. **Array type reference:**
+   - Recursively check element type
+
+4. **Pointer/ByRef type reference:**
+   - Recursively check underlying type
+
+5. **Generic parameter:**
+   - SKIP (always allowed, TypeScript handles)
+
+**Error message format:**
+```
+Dangling reference detected:
+  User member:     {referencingMember}
+  References:      {missingStableId}
+  Location:        {context}
+  Fix:             {fixDirection}
+```
+
+**Fix direction logic:**
+- BCL types (`System.*`): "Add BCL types to --lib package OR remove dependency on this BCL type"
+- User assembly types: "Add dependency assembly to --lib package OR remove/replace this dependency"
+
+**Examples of failures:**
+
+##### **LIB002: Dangling reference to filtered BCL type**
+```csharp
+// Base package has System.Collections.Generic.List<T>
+// User assembly:
+namespace MyCompany.Utils
+{
+    public class Calculator
+    {
+        public System.Collections.Generic.List<int> GetResults() { ... }
+        // ERROR: LIB002 - List<T> was filtered out by --lib
+    }
+}
+```
+
+**Error:**
+```
+Dangling reference detected:
+  User member:     MyLib:MyCompany.Utils.Calculator::GetResults():List`1
+  References:      System.Private.CoreLib:System.Collections.Generic.List`1
+  Location:        return type
+  Fix:             Add BCL types to --lib package OR remove dependency on this BCL type
+```
+
+##### **LIB002: Dangling reference to filtered user dependency**
+```csharp
+// Base package has MyCompany.Core.IService
+// User assembly:
+namespace MyCompany.App
+{
+    public class ServiceConsumer
+    {
+        public void UseService(MyCompany.Core.IService service) { ... }
+        // ERROR: LIB002 - IService was filtered out by --lib
+    }
+}
+```
+
+**Error:**
+```
+Dangling reference detected:
+  User member:     MyApp:MyCompany.App.ServiceConsumer::UseService(IService):void
+  References:      MyCore:MyCompany.Core.IService
+  Location:        parameter type
+  Fix:             Add dependency assembly to --lib package OR remove/replace this dependency
+```
+
+**Key properties:**
+- **Strict validation**: LIB002 is ERROR-level (blocks emission)
+- **StableId-based**: Uses exact assembly-qualified identity
+- **Recursive**: Walks nested generics, arrays, pointers
+- **Actionable errors**: Provides clear fix direction (add to contract OR remove dependency)
+- **No silent fallbacks**: Either package is self-consistent or build fails
+
+**Contract structure:**
+```csharp
+public sealed record LibraryContract
+{
+    // Types IN the base library (to be excluded from emission)
+    public required HashSet<string> AllowedTypeStableIds { get; init; }
+
+    // Members IN the base library (for validation)
+    public required HashSet<string> AllowedBindingStableIds { get; init; }
+}
+```
+
+**Contract loading:**
+- Happens in Phase 2 (Normalize) via `LibraryContractLoader.Load(libraryPath)`
+- Reads `metadata.json` files → Extract type StableIds
+- Reads `bindings.json` files → Extract member StableIds
+- Validates LIB001: Contract directory exists, files present
+- Builds `HashSet<string>` for O(1) lookup
+
+**Graph filtering:**
+- Happens in Phase 2 (Normalize) via `LibraryFilter.Filter(graph, contract)`
+- For each type: if `type.StableId` IN contract → REMOVE (base library type)
+- For each type: if `type.StableId` NOT in contract → KEEP (user type)
+- Returns new `SymbolGraph` with only user types
 
 ---
 

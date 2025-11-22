@@ -97,7 +97,7 @@ CLI Entry (Program.cs)
     ↓
 Builder.Build (Builder.cs)
     ↓
-BuildContext (Policy, SymbolRenamer, DiagnosticBag, Interner, Logger)
+BuildContext (Policy, SymbolRenamer, DiagnosticBag, Interner, Logger, LibraryMode)
     ↓
 ┌─────────────────────────────────────────┐
 │ PHASE 1: Load (Reflection)              │
@@ -110,6 +110,8 @@ BuildContext (Policy, SymbolRenamer, DiagnosticBag, Interner, Logger)
 ┌─────────────────────────────────────────┐
 │ PHASE 2: Normalize (Build Indices)      │
 │  - SymbolGraph.WithIndices              │
+│  - [Library Mode] Contract loading      │
+│  - [Library Mode] Graph filtering       │
 │  - NamespaceIndex, TypeIndex            │
 │  Output: SymbolGraph (with indices)     │
 └────────────────┬────────────────────────┘
@@ -158,6 +160,7 @@ BuildContext (Policy, SymbolRenamer, DiagnosticBag, Interner, Logger)
 │  - OverloadUnifier.UnifyOverloads       │
 │  - InterfaceConstraintAuditor           │
 │  - PhaseGate.Validate (50+ rules)       │
+│  - [Library Mode] LIB002 validation     │
 │  Output: EmissionPlan                   │
 └────────────────┬────────────────────────┘
                  ▼
@@ -303,6 +306,19 @@ PhaseGate.Validate(ctx, graph, imports, constraintFindings);
 if (ctx.Diagnostics.HasErrors) return new BuildResult { Success = false };
 ```
 
+### Library Mode: Filtered Package Generation
+
+Excludes base library types when generating declarations for user assemblies (`--lib` flag).
+
+**How it works**:
+1. **Contract Loading** (Phase 2): Read base package `metadata.json` and `bindings.json` to extract type/member StableIds
+2. **Graph Filtering** (Phase 2): Remove types whose StableId is in contract HashSet (O(1) lookup)
+3. **Validation** (Phase 4): LIB002 checks no dangling references to filtered types
+
+**Files**: `LibraryContractLoader.cs`, `LibraryFilter.cs`, `LibraryMode.cs` (validation)
+
+**Codes**: LIB001 (contract files exist), LIB002 (no dangling references), LIB003 (disabled in --lib mode)
+
 ---
 
 ## 5. Directory Structure
@@ -356,6 +372,10 @@ src/tsbindgen/
 │   ├── RenameDecision.cs       # Rename decision record
 │   ├── NameReservationTable.cs # Per-scope name tracking
 │   └── TypeScriptReservedWords.cs  # Keyword sanitization
+├── Library/                    # Library mode filtering
+│   ├── LibraryContract.cs      # Contract record (StableId sets)
+│   ├── LibraryContractLoader.cs  # Load base package metadata
+│   └── LibraryFilter.cs        # Filter graph by contract
 ├── Plan/                       # Phase 4: Import planning
 │   ├── ImportGraph.cs          # Dependency graph
 │   ├── ImportPlanner.cs        # Plan imports/aliases
@@ -369,10 +389,10 @@ src/tsbindgen/
 │   ├── PhaseGate.cs            # Pre-emission validation
 │   ├── TsAssignability.cs      # TypeScript assignability
 │   ├── TsErase.cs              # Type erasure
-│   └── Validation/             # PhaseGate modules
+│   └── Validation/             # PhaseGate modules (19 files)
 │       ├── Core.cs, Names.cs, Views.cs, Scopes.cs
 │       ├── Types.cs, ImportExport.cs, Constraints.cs
-│       ├── Finalization.cs, Context.cs
+│       ├── Finalization.cs, Context.cs, LibraryMode.cs
 └── Emit/                       # Phase 5: File generation
     ├── SupportTypesEmitter.cs  # _support/types.d.ts
     ├── InternalIndexEmitter.cs # internal/index.d.ts
@@ -527,10 +547,10 @@ Full BCL generation: **4,295 types, 130 namespaces, 50,720 members**
 The tsbindgen pipeline is a **deterministic, pure functional transformation** from .NET assemblies to TypeScript:
 
 1. **Load**: System.Reflection → SymbolGraph (pure CLR)
-2. **Normalize**: Build indices
+2. **Normalize**: Build indices + [Library Mode] contract loading & filtering
 3. **Shape**: 23 transformations for .NET/TypeScript impedance (including extension methods)
 4. **Name Reservation**: Reserve all names via SymbolRenamer
-5. **Plan**: Analyze dependencies, plan imports, validate (PhaseGate)
+5. **Plan**: Analyze dependencies, plan imports, validate (PhaseGate + LIB002)
 6. **Emit**: Generate TypeScript + metadata + bindings + extension buckets
 
 **Core Principles**:
