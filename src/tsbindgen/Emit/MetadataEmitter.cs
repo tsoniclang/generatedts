@@ -69,7 +69,7 @@ public static class MetadataEmitter
         return new NamespaceMetadata
         {
             Namespace = nsOrder.Namespace.Name,
-            ContributingAssemblies = nsOrder.Namespace.ContributingAssemblies.ToList(),
+            ContributingAssemblies = nsOrder.Namespace.ContributingAssemblies.OrderBy(a => a).ToList(),
             Types = typeMetadata
         };
     }
