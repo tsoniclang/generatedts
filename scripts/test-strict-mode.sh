@@ -1,5 +1,5 @@
 #!/bin/bash
-# Regression test for strict mode - ensures zero errors, zero warnings, and disciplined INFO codes
+# Regression test for strict mode - ensures zero errors, zero warnings, disciplined INFO codes, and surface stability
 
 set -e  # Exit on error
 
@@ -9,7 +9,7 @@ echo "================================================"
 echo ""
 
 # Run strict mode validation
-echo "[1/3] Running strict mode validation..."
+echo "[1/4] Running strict mode validation..."
 output=$(dotnet run --project src/tsbindgen/tsbindgen.csproj -- \
     generate -d ~/dotnet/shared/Microsoft.NETCore.App/10.0.0-rc.1.25451.107 \
     -o .tests/strict-test --strict --logs PhaseGate 2>&1)
@@ -29,7 +29,7 @@ echo "✓ Strict mode validation passed"
 echo ""
 
 # Check validation output
-echo "[2/3] Checking diagnostic counts..."
+echo "[2/4] Checking diagnostic counts..."
 
 # Extract counts from output
 errors=$(echo "$output" | grep -o "Validation complete - [0-9]* errors" | grep -o "[0-9]*" || echo "0")
@@ -59,7 +59,7 @@ echo "✓ Zero warnings verified (strict mode zero tolerance)"
 echo ""
 
 # Check INFO code discipline
-echo "[3/3] Validating INFO diagnostic codes..."
+echo "[3/4] Validating INFO diagnostic codes..."
 
 # Expected INFO codes (these are the only allowed codes)
 # TBG120: Reserved word collisions (8 instances - core BCL types in qualified contexts)
@@ -98,6 +98,26 @@ fi
 echo "✓ INFO diagnostic codes match expected set"
 echo ""
 
+# Verify surface manifest
+echo "[4/4] Verifying API surface stability..."
+
+# Run surface manifest verification
+bash scripts/test-surface-manifest.sh > /dev/null 2>&1
+
+if [ $? -eq 0 ]; then
+    echo "✓ Surface matches baseline (no drift detected)"
+else
+    echo "❌ FAILED: Surface manifest verification failed"
+    echo ""
+    echo "The emitted TypeScript API surface has changed."
+    echo "Run: bash scripts/test-surface-manifest.sh"
+    echo ""
+    echo "For details and remediation steps."
+    exit 1
+fi
+
+echo ""
+
 echo "================================================"
 echo "✓ ALL TESTS PASSED"
 echo "================================================"
@@ -107,5 +127,5 @@ echo "  - Strict mode validation passes"
 echo "  - Zero errors (ERROR level diagnostics)"
 echo "  - Zero warnings (strict mode zero tolerance achieved)"
 echo "  - INFO codes disciplined (only TBG120, TBG310, TBG410 allowed)"
-echo "  - INFO counts may vary with BCL changes, but code set is locked"
+echo "  - Surface stable (matches baseline manifest)"
 echo ""
