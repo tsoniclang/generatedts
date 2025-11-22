@@ -80,6 +80,10 @@ public static class GenerateCommand
             getDefaultValue: () => false,
             description: "Enable strict mode validation (zero non-whitelisted warnings)");
 
+        var libOption = new Option<string?>(
+            aliases: new[] { "--lib" },
+            description: "Path to existing tsbindgen package (library mode - emit only what's in the library contract)");
+
         command.AddOption(assemblyOption);
         command.AddOption(assemblyDirOption);
         command.AddOption(outDirOption);
@@ -93,6 +97,7 @@ public static class GenerateCommand
         command.AddOption(verboseOption);
         command.AddOption(logsOption);
         command.AddOption(strictOption);
+        command.AddOption(libOption);
 
         command.SetHandler(async (context) =>
         {
@@ -109,6 +114,7 @@ public static class GenerateCommand
             var verbose = context.ParseResult.GetValueForOption(verboseOption);
             var logs = context.ParseResult.GetValueForOption(logsOption) ?? Array.Empty<string>();
             var strict = context.ParseResult.GetValueForOption(strictOption);
+            var lib = context.ParseResult.GetValueForOption(libOption);
 
             await ExecuteAsync(
                 assemblies,
@@ -123,7 +129,8 @@ public static class GenerateCommand
                 enumMemberNames,
                 verbose,
                 logs,
-                strict);
+                strict,
+                lib);
         });
 
         return command;
@@ -142,7 +149,8 @@ public static class GenerateCommand
         string? enumMemberNames,
         bool verbose,
         string[] logs,
-        bool strict)
+        bool strict,
+        string? lib)
     {
         try
         {
