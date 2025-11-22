@@ -24,6 +24,7 @@ public static class Builder
     /// <param name="logger">Optional logger for progress messages</param>
     /// <param name="verboseLogging">Enable verbose logging (all categories)</param>
     /// <param name="logCategories">Specific log categories to enable</param>
+    /// <param name="strictMode">Enable strict mode (zero non-whitelisted warnings)</param>
     /// <returns>Build result with statistics and diagnostics</returns>
     public static BuildResult Build(
         IReadOnlyList<string> assemblyPaths,
@@ -31,10 +32,11 @@ public static class Builder
         GenerationPolicy? policy = null,
         Action<string>? logger = null,
         bool verboseLogging = false,
-        HashSet<string>? logCategories = null)
+        HashSet<string>? logCategories = null,
+        bool strictMode = false)
     {
         // Create build context with all shared services
-        var ctx = BuildContext.Create(policy, logger, verboseLogging, logCategories);
+        var ctx = BuildContext.Create(policy, logger, verboseLogging, logCategories, strictMode);
 
         ctx.Log("Build", "=== Build Started ===");
         ctx.Log("Build", $"Assemblies: {assemblyPaths.Count}");
@@ -296,9 +298,6 @@ public static class Builder
         var constraintFindings = InterfaceConstraintAuditor.Audit(ctx, graph);
         ctx.Log("Build", $"Found {constraintFindings.Findings.Length} interface constraint findings");
 
-        // Validate before proceeding
-        PhaseGate.Validate(ctx, graph, imports, constraintFindings);
-
         // D1: Plan static hierarchy flattening to eliminate TS2417 errors
         ctx.Log("Build", "\n--- Phase 4.7: Static Hierarchy Flattening ---");
         var staticFlattening = Shape.StaticHierarchyFlattener.Plan(ctx, graph);
@@ -320,7 +319,19 @@ public static class Builder
         var extensionMethods = Analysis.ExtensionMethodAnalyzer.Analyze(ctx, graph);
         ctx.Log("Build", $"Found {extensionMethods.Buckets.Length} extension method buckets ({extensionMethods.TotalMethodCount} total methods)");
 
-        return new EmissionPlan
+        // PR B: Compute SCC buckets to eliminate circular namespace dependencies
+        ctx.Log("Build", "\n--- Phase 4.12: SCC Bucketing ---");
+        var sccPlan = Plan.SCCPlanner.PlanSCCBuckets(ctx, imports);
+        ctx.Log("Build", $"Computed {sccPlan.Buckets.Count} SCC buckets ({sccPlan.Buckets.Count(b => b.IsMultiNamespace)} multi-namespace)");
+
+        // PR C: Analyze interface conformance and plan honest emission
+        ctx.Log("Build", "\n--- Phase 4.13: Honest Emission Planning ---");
+        var conformanceIssues = Plan.InterfaceConformanceAnalyzer.AnalyzeConformance(ctx, graph);
+        var honestEmissionPlan = Plan.HonestEmissionPlanner.PlanHonestEmission(ctx, graph, conformanceIssues);
+        ctx.Log("Build", $"Planned {honestEmissionPlan.TotalUnsatisfiableCount} unsatisfiable interfaces across {honestEmissionPlan.UnsatisfiableInterfaces.Count} types");
+
+        // Build emission plan
+        var emissionPlan = new EmissionPlan
         {
             Graph = graph,
             Imports = imports,
@@ -329,8 +340,16 @@ public static class Builder
             StaticConflicts = staticConflicts,
             OverrideConflicts = overrideConflicts,
             PropertyOverrides = propertyOverrides,
-            ExtensionMethods = extensionMethods
+            ExtensionMethods = extensionMethods,
+            SCCBuckets = sccPlan,
+            HonestEmission = honestEmissionPlan
         };
+
+        // Phase 4.7: PhaseGate Validation - validate complete emission plan before emission
+        ctx.Log("Build", "\n--- Phase 4.7: PhaseGate Validation ---");
+        PhaseGate.Validate(ctx, emissionPlan, constraintFindings);
+
+        return emissionPlan;
     }
 
     /// <summary>
@@ -461,6 +480,18 @@ public sealed record EmissionPlan
     /// Extension methods plan: all extension method buckets grouped by target type.
     /// </summary>
     public required Analysis.ExtensionMethodsPlan ExtensionMethods { get; init; }
+
+    /// <summary>
+    /// PR B: Plan for SCC bucketing to eliminate circular namespace dependencies (TBG201).
+    /// Groups namespaces by Strongly Connected Components.
+    /// </summary>
+    public required Plan.SCCPlan SCCBuckets { get; init; }
+
+    /// <summary>
+    /// PR C: Plan for honest TypeScript emission of interface conformance.
+    /// Tracks interfaces that cannot be fully expressed in TypeScript (TBG203).
+    /// </summary>
+    public required Plan.HonestEmissionPlan HonestEmission { get; init; }
 
     public int NamespaceCount => Graph.Namespaces.Length;
 }

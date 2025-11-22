@@ -75,6 +75,11 @@ public static class GenerateCommand
             AllowMultipleArgumentsPerToken = true
         };
 
+        var strictOption = new Option<bool>(
+            aliases: new[] { "--strict" },
+            getDefaultValue: () => false,
+            description: "Enable strict mode validation (zero non-whitelisted warnings)");
+
         command.AddOption(assemblyOption);
         command.AddOption(assemblyDirOption);
         command.AddOption(outDirOption);
@@ -87,6 +92,7 @@ public static class GenerateCommand
         command.AddOption(enumMemberNamesOption);
         command.AddOption(verboseOption);
         command.AddOption(logsOption);
+        command.AddOption(strictOption);
 
         command.SetHandler(async (context) =>
         {
@@ -102,6 +108,7 @@ public static class GenerateCommand
             var enumMemberNames = context.ParseResult.GetValueForOption(enumMemberNamesOption);
             var verbose = context.ParseResult.GetValueForOption(verboseOption);
             var logs = context.ParseResult.GetValueForOption(logsOption) ?? Array.Empty<string>();
+            var strict = context.ParseResult.GetValueForOption(strictOption);
 
             await ExecuteAsync(
                 assemblies,
@@ -115,7 +122,8 @@ public static class GenerateCommand
                 propertyNames,
                 enumMemberNames,
                 verbose,
-                logs);
+                logs,
+                strict);
         });
 
         return command;
@@ -133,7 +141,8 @@ public static class GenerateCommand
         string? propertyNames,
         string? enumMemberNames,
         bool verbose,
-        string[] logs)
+        string[] logs,
+        bool strict)
     {
         try
         {
@@ -197,7 +206,8 @@ public static class GenerateCommand
                 policy,
                 logger,
                 verbose,
-                logCategories);
+                logCategories,
+                strict);
 
             // Report results
             Console.WriteLine();

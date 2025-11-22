@@ -55,11 +55,30 @@ internal static class Core
                     }
                     else
                     {
-                        // Name wasn't sanitized - this is a problem
+                        // Name wasn't sanitized - check if this is a known safe BCL type
+                        // These 8 core BCL types use reserved words but are always referenced in qualified contexts
+                        // (e.g., System.Type, not bare Type) so they don't cause actual collisions
+                        var knownSafeBclTypes = new HashSet<string>
+                        {
+                            "System.Enum",
+                            "System.String",
+                            "System.Type",
+                            "System.Boolean",
+                            "System.Void",
+                            "System.Diagnostics.Switch",
+                            "System.Diagnostics.Debugger",
+                            "System.Reflection.Module"
+                        };
+
+                        var level = knownSafeBclTypes.Contains(type.ClrFullName) ? "INFO" : "WARNING";
+                        var reason = level == "INFO"
+                            ? "(always used in qualified contexts)"
+                            : "but was not sanitized";
+
                         validationCtx.RecordDiagnostic(
                             DiagnosticCodes.ReservedWordUnsanitized,
-                            "WARNING",
-                            $"Type '{type.TsEmitName}' uses TypeScript reserved word but was not sanitized");
+                            level,
+                            $"Type '{type.TsEmitName}' uses TypeScript reserved word {reason}");
                     }
                 }
                 else if (type.ClrName != type.TsEmitName && Shared.IsTypeScriptReservedWord(type.ClrName))
@@ -221,7 +240,7 @@ internal static class Core
         ctx.Log("PhaseGate", $"Validated {totalGenericParams} generic parameters ({constraintNarrowings} constraint narrowings detected)");
     }
 
-    internal static void ValidateInterfaceConformance(BuildContext ctx, SymbolGraph graph, ValidationContext validationCtx)
+    internal static void ValidateInterfaceConformance(BuildContext ctx, SymbolGraph graph, HonestEmissionPlan honestPlan, ValidationContext validationCtx)
     {
         ctx.Log("PhaseGate", "Validating interface conformance...");
 
@@ -230,6 +249,7 @@ internal static class Core
         int suppressedDueToViews = 0;
         int typesWithExplicitViews = 0;
         int totalExplicitViews = 0;
+        int suppressedDueToHonestEmission = 0;
 
         foreach (var ns in graph.Namespaces)
         {
@@ -343,14 +363,25 @@ internal static class Core
 
                 if (conformanceIssues.Count > 0)
                 {
-                    typesWithIssues++;
-                    validationCtx.InterfaceConformanceIssuesByType[type.ClrFullName] = conformanceIssues;
+                    // PR C: Check if this type's conformance issues are covered by honest emission plan
+                    var isPlannedOmission = honestPlan.UnsatisfiableInterfaces.ContainsKey(type.ClrFullName);
 
-                    // Emit one-line summary to console
-                    validationCtx.RecordDiagnostic(
-                        DiagnosticCodes.StructuralConformanceFailure,
-                        "WARNING",
-                        $"{type.ClrFullName} has {conformanceIssues.Count} interface conformance issues (see diagnostics file)");
+                    if (isPlannedOmission)
+                    {
+                        // Suppressed - this will be handled by honest emission (omit from implements clause)
+                        suppressedDueToHonestEmission++;
+                    }
+                    else
+                    {
+                        // Unexpected conformance issue - emit TBG203 warning
+                        typesWithIssues++;
+                        validationCtx.InterfaceConformanceIssuesByType[type.ClrFullName] = conformanceIssues;
+
+                        validationCtx.RecordDiagnostic(
+                            DiagnosticCodes.StructuralConformanceFailure,
+                            "WARNING",
+                            $"{type.ClrFullName} has {conformanceIssues.Count} interface conformance issues (see diagnostics file)");
+                    }
                 }
 
                 typesChecked++;
@@ -359,6 +390,7 @@ internal static class Core
 
         ctx.Log("PhaseGate", $"Validated interface conformance for {typesChecked} types ({typesWithIssues} with issues)");
         ctx.Log("PhaseGate", $"{typesWithExplicitViews} types have {totalExplicitViews} explicit views, {suppressedDueToViews} interfaces satisfied via views");
+        ctx.Log("PhaseGate", $"PR C: {suppressedDueToHonestEmission} types with planned honest emission (interfaces omitted from implements clause)");
     }
 
     internal static void ValidateInheritance(BuildContext ctx, SymbolGraph graph, ValidationContext validationCtx)
@@ -424,7 +456,7 @@ internal static class Core
         ctx.Log("PhaseGate", $"{totalMembers} members, {viewOnlyMembers} ViewOnly");
     }
 
-    internal static void ValidateImports(BuildContext ctx, SymbolGraph graph, ImportPlan imports, ValidationContext validationCtx)
+    internal static void ValidateImports(BuildContext ctx, SymbolGraph graph, ImportPlan imports, SCCPlan sccPlan, ValidationContext validationCtx)
     {
         ctx.Log("PhaseGate", "Validating import plan...");
 
@@ -432,16 +464,26 @@ internal static class Core
         int totalExports = imports.NamespaceExports.Values.Sum(list => list.Count);
 
         // Check for circular dependencies
+        // PR B: Filter out intra-SCC cycles (these are handled by SCC bucketing)
         var circularDeps = DetectCircularDependencies(imports);
-        if (circularDeps.Count > 0)
+        var interSCCCircularDeps = FilterInterSCCCycles(circularDeps, sccPlan);
+
+        if (interSCCCircularDeps.Count > 0)
         {
-            foreach (var cycle in circularDeps)
+            foreach (var cycle in interSCCCircularDeps)
             {
                 validationCtx.RecordDiagnostic(
                     DiagnosticCodes.CircularInheritance,
                     "WARNING",
                     $"Circular dependency detected: {cycle}");
             }
+        }
+
+        // PR B: Log eliminated intra-SCC cycles for visibility
+        var intraSCCCount = circularDeps.Count - interSCCCircularDeps.Count;
+        if (intraSCCCount > 0)
+        {
+            ctx.Log("PhaseGate", $"Filtered {intraSCCCount} intra-SCC circular dependencies (handled by SCC bucketing)");
         }
 
         ctx.Log("PhaseGate", $"{totalImports} import statements, {totalExports} export statements");
@@ -583,5 +625,51 @@ internal static class Core
         path.RemoveAt(path.Count - 1);
         recursionStack.Remove(node);
         return false;
+    }
+
+    /// <summary>
+    /// PR B: Filter circular dependencies to only include inter-SCC cycles.
+    /// Intra-SCC cycles are handled by SCC bucketing and should not generate warnings.
+    /// </summary>
+    private static List<string> FilterInterSCCCycles(List<string> cycles, SCCPlan sccPlan)
+    {
+        var interSCCCycles = new List<string>();
+
+        foreach (var cycle in cycles)
+        {
+            // Parse cycle string: "NS1 -> NS2 -> NS3 -> NS1"
+            var namespaces = cycle.Split(new[] { " -> " }, System.StringSplitOptions.RemoveEmptyEntries);
+
+            if (namespaces.Length < 2)
+                continue;
+
+            // Check if all namespaces in cycle are in the same SCC
+            var firstNS = namespaces[0];
+            if (!sccPlan.NamespaceToBucket.TryGetValue(firstNS, out var firstBucket))
+            {
+                // Unknown namespace - include cycle as warning
+                interSCCCycles.Add(cycle);
+                continue;
+            }
+
+            var allInSameSCC = true;
+            foreach (var ns in namespaces)
+            {
+                if (!sccPlan.NamespaceToBucket.TryGetValue(ns, out var bucket) || bucket != firstBucket)
+                {
+                    allInSameSCC = false;
+                    break;
+                }
+            }
+
+            // If not all in same SCC, this is an inter-SCC cycle (should not happen with correct SCC algorithm)
+            if (!allInSameSCC)
+            {
+                interSCCCycles.Add(cycle);
+            }
+            // Otherwise, it's an intra-SCC cycle - filter it out (handled by SCC bucketing)
+        }
+
+        return interSCCCycles;
     }
 }

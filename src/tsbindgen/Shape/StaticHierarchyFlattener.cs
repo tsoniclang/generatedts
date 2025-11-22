@@ -48,6 +48,10 @@ public static class StaticHierarchyFlattener
         // Step 3: For each static-only type, compute flattened member set
         foreach (var type in staticOnlyTypes)
         {
+            // Skip types not in TypeIndex (platform-specific intrinsics, internal types, etc.)
+            if (!graph.IsEmittableType(type.StableId.ToString()))
+                continue;
+
             var baseMembers = CollectBaseStaticMembers(ctx, graph, type, staticOnlyTypes);
 
             if (baseMembers.Count > 0)

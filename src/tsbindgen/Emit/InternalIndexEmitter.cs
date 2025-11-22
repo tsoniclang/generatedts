@@ -39,7 +39,7 @@ public static class InternalIndexEmitter
             ctx.Log("InternalIndexEmitter", $"  Emitting namespace: {ns.Name}");
 
             // Generate .d.ts content
-            var content = GenerateNamespaceDeclaration(ctx, plan.Graph, plan.Imports, nsOrder, plan.StaticFlattening, plan.StaticConflicts, plan.OverrideConflicts, plan.PropertyOverrides);
+            var content = GenerateNamespaceDeclaration(ctx, plan.Graph, plan.Imports, nsOrder, plan.StaticFlattening, plan.StaticConflicts, plan.OverrideConflicts, plan.PropertyOverrides, plan.HonestEmission);
 
             // Write to file: output/Namespace.Name/internal/index.d.ts (or _root for empty namespace)
             var namespacePath = Path.Combine(outputDirectory, ns.Name);
@@ -58,7 +58,7 @@ public static class InternalIndexEmitter
         ctx.Log("InternalIndexEmitter", $"Generated {emittedCount} declaration files");
     }
 
-    private static string GenerateNamespaceDeclaration(BuildContext ctx, SymbolGraph graph, ImportPlan importPlan, NamespaceEmitOrder nsOrder, Shape.StaticFlatteningPlan staticFlattening, Shape.StaticConflictPlan staticConflicts, Shape.OverrideConflictPlan overrideConflicts, Plan.PropertyOverridePlan propertyOverrides)
+    private static string GenerateNamespaceDeclaration(BuildContext ctx, SymbolGraph graph, ImportPlan importPlan, NamespaceEmitOrder nsOrder, Shape.StaticFlatteningPlan staticFlattening, Shape.StaticConflictPlan staticConflicts, Shape.OverrideConflictPlan overrideConflicts, Plan.PropertyOverridePlan propertyOverrides, Plan.HonestEmissionPlan honestEmission)
     {
         // Create TypeNameResolver - single source of truth for type names
         // TS2693 FIX: Pass ImportPlan and current namespace for qualified name resolution
@@ -183,7 +183,7 @@ public static class InternalIndexEmitter
             if (hasViews)
             {
                 // Emit class with $instance suffix - PUBLIC TYPES GET export KEYWORD
-                var instanceClass = ClassPrinter.PrintInstance(typeOrder.Type, resolver, ctx, graph, bindingsProvider, staticFlattening, staticConflicts, overrideConflicts, propertyOverrides);
+                var instanceClass = ClassPrinter.PrintInstance(typeOrder.Type, resolver, ctx, graph, bindingsProvider, staticFlattening, staticConflicts, overrideConflicts, propertyOverrides, honestEmission);
                 var indentedInstance = Indent(instanceClass, indent);
 
                 // PUBLIC TYPES: Always export (both root and namespaces)
@@ -212,7 +212,7 @@ public static class InternalIndexEmitter
             else
             {
                 // Normal emission (no views) - PUBLIC TYPES GET export KEYWORD
-                var typeDecl = ClassPrinter.Print(typeOrder.Type, resolver, ctx, graph, typesWithoutGenerics, bindingsProvider, staticFlattening, staticConflicts, overrideConflicts, propertyOverrides);
+                var typeDecl = ClassPrinter.Print(typeOrder.Type, resolver, ctx, graph, typesWithoutGenerics, bindingsProvider, staticFlattening, staticConflicts, overrideConflicts, propertyOverrides, honestEmission);
                 var indented = Indent(typeDecl, indent);
 
                 // PUBLIC TYPES: Always export (both root and namespaces)

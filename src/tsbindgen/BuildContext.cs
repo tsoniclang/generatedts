@@ -51,13 +51,21 @@ public sealed class BuildContext
     public HashSet<string>? LogCategories { get; init; }
 
     /// <summary>
+    /// Enable strict mode validation.
+    /// When true, PhaseGate enforces zero warnings unless explicitly whitelisted in StrictModePolicy.
+    /// Informational messages (INFO) are always allowed and don't count toward warning totals.
+    /// </summary>
+    public bool StrictMode { get; init; }
+
+    /// <summary>
     /// Create a new BuildContext with default services.
     /// </summary>
     public static BuildContext Create(
         GenerationPolicy? policy = null,
         Action<string>? logger = null,
         bool verboseLogging = false,
-        HashSet<string>? logCategories = null)
+        HashSet<string>? logCategories = null,
+        bool strictMode = false)
     {
         policy ??= PolicyDefaults.Create();
 
@@ -88,7 +96,8 @@ public sealed class BuildContext
             Diagnostics = diagnostics,
             Logger = logger,
             VerboseLogging = verboseLogging,
-            LogCategories = logCategories
+            LogCategories = logCategories,
+            StrictMode = strictMode
         };
     }
 

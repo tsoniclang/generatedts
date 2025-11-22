@@ -25,7 +25,7 @@ public static class ClassPrinter
     /// <param name="bindingsProvider">Optional bindings provider for V2 inherited member exposure (if null, falls back to V1 behavior)</param>
     /// <param name="staticFlattening">D1: Plan for flattening static-only type hierarchies (if null, no flattening)</param>
     /// <param name="staticConflicts">D2: Plan for suppressing conflicting static members (if null, no suppression)</param>
-    public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, HashSet<string>? typesWithoutGenerics = null, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null, Plan.PropertyOverridePlan? propertyOverrides = null)
+    public static string Print(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, HashSet<string>? typesWithoutGenerics = null, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null, Plan.PropertyOverridePlan? propertyOverrides = null, Plan.HonestEmissionPlan? honestEmission = null)
     {
         // GUARD: Never print non-public types
         if (type.Accessibility != Accessibility.Public)
@@ -43,8 +43,8 @@ public static class ClassPrinter
 
         return type.Kind switch
         {
-            TypeKind.Class => PrintClass(type, resolver, ctx, graph, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, propertyOverrides: propertyOverrides),
-            TypeKind.Struct => PrintStruct(type, resolver, ctx, graph, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, propertyOverrides: propertyOverrides),
+            TypeKind.Class => PrintClass(type, resolver, ctx, graph, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, propertyOverrides: propertyOverrides, honestEmission: honestEmission),
+            TypeKind.Struct => PrintStruct(type, resolver, ctx, graph, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, propertyOverrides: propertyOverrides, honestEmission: honestEmission),
             TypeKind.Enum => PrintEnum(type, ctx),
             TypeKind.Delegate => PrintDelegate(type, resolver, ctx),
             TypeKind.Interface => PrintInterface(type, resolver, ctx),
@@ -57,7 +57,7 @@ public static class ClassPrinter
     /// Used when type has explicit interface views that will be in separate companion interface.
     /// GUARD: Only prints public types - internal types are rejected.
     /// </summary>
-    public static string PrintInstance(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null, Plan.PropertyOverridePlan? propertyOverrides = null)
+    public static string PrintInstance(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null, Plan.PropertyOverridePlan? propertyOverrides = null, Plan.HonestEmissionPlan? honestEmission = null)
     {
         // GUARD: Never print non-public types
         if (type.Accessibility != Accessibility.Public)
@@ -68,13 +68,13 @@ public static class ClassPrinter
 
         return type.Kind switch
         {
-            TypeKind.Class => PrintClass(type, resolver, ctx, graph, instanceSuffix: true, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, overrideConflicts: overrideConflicts, propertyOverrides: propertyOverrides),
-            TypeKind.Struct => PrintStruct(type, resolver, ctx, graph, instanceSuffix: true, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, overrideConflicts: overrideConflicts, propertyOverrides: propertyOverrides),
-            _ => Print(type, resolver, ctx, graph, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, overrideConflicts: overrideConflicts, propertyOverrides: propertyOverrides) // Fallback (guard already checked above)
+            TypeKind.Class => PrintClass(type, resolver, ctx, graph, instanceSuffix: true, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, overrideConflicts: overrideConflicts, propertyOverrides: propertyOverrides, honestEmission: honestEmission),
+            TypeKind.Struct => PrintStruct(type, resolver, ctx, graph, instanceSuffix: true, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, overrideConflicts: overrideConflicts, propertyOverrides: propertyOverrides, honestEmission: honestEmission),
+            _ => Print(type, resolver, ctx, graph, bindingsProvider: bindingsProvider, staticFlattening: staticFlattening, staticConflicts: staticConflicts, overrideConflicts: overrideConflicts, propertyOverrides: propertyOverrides, honestEmission: honestEmission) // Fallback (guard already checked above)
         };
     }
 
-    private static string PrintClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, bool instanceSuffix = false, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null, Plan.PropertyOverridePlan? propertyOverrides = null)
+    private static string PrintClass(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, bool instanceSuffix = false, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null, Plan.PropertyOverridePlan? propertyOverrides = null, Plan.HonestEmissionPlan? honestEmission = null)
     {
         var sb = new StringBuilder();
 
@@ -127,8 +127,10 @@ public static class ClassPrinter
 
         // Interfaces: implements IFoo, IBar
         // TS2304 FIX: Filter out non-public interfaces (not in graph)
+        // PR C: Filter out unsatisfiable interfaces (honest emission)
         var publicInterfaces = type.Interfaces
             .Where(i => IsInterfaceInGraph(i, graph))
+            .Where(i => !IsUnsatisfiableInterface(type, i, honestEmission))
             .ToArray();
 
         if (publicInterfaces.Length > 0)
@@ -205,7 +207,7 @@ public static class ClassPrinter
         return sb.ToString();
     }
 
-    private static string PrintStruct(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, bool instanceSuffix = false, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null, Plan.PropertyOverridePlan? propertyOverrides = null)
+    private static string PrintStruct(TypeSymbol type, TypeNameResolver resolver, BuildContext ctx, Model.SymbolGraph graph, bool instanceSuffix = false, BindingsProvider? bindingsProvider = null, Shape.StaticFlatteningPlan? staticFlattening = null, Shape.StaticConflictPlan? staticConflicts = null, Shape.OverrideConflictPlan? overrideConflicts = null, Plan.PropertyOverridePlan? propertyOverrides = null, Plan.HonestEmissionPlan? honestEmission = null)
     {
         // Structs emit as classes in TypeScript (with metadata noting value semantics)
         var sb = new StringBuilder();
@@ -227,8 +229,10 @@ public static class ClassPrinter
 
         // Interfaces
         // TS2304 FIX: Filter out non-public interfaces (not in graph)
+        // PR C: Filter out unsatisfiable interfaces (honest emission)
         var publicInterfaces = type.Interfaces
             .Where(i => IsInterfaceInGraph(i, graph))
+            .Where(i => !IsUnsatisfiableInterface(type, i, honestEmission))
             .ToArray();
 
         if (publicInterfaces.Length > 0)
@@ -1562,5 +1566,31 @@ public static class ClassPrinter
         sb.Append("    ");
         sb.Append(MethodPrinter.PrintWithName(method, derivedType, emitName, resolver, ctx));
         sb.AppendLine(";");
+    }
+
+    /// <summary>
+    /// PR C: Check if an interface is unsatisfiable for this type (honest emission).
+    /// Returns true if the interface should be omitted from the 'implements' clause.
+    /// </summary>
+    private static bool IsUnsatisfiableInterface(TypeSymbol type, TypeReference interfaceRef, Plan.HonestEmissionPlan? honestPlan)
+    {
+        if (honestPlan == null)
+            return false;
+
+        if (!honestPlan.UnsatisfiableInterfaces.TryGetValue(type.ClrFullName, out var unsatisfiableList))
+            return false;
+
+        // Extract CLR full name from interface reference
+        var interfaceClrName = interfaceRef switch
+        {
+            NamedTypeReference named => named.FullName,
+            NestedTypeReference nested => nested.FullReference.FullName,
+            _ => null
+        };
+
+        if (interfaceClrName == null)
+            return false;
+
+        return unsatisfiableList.Any(u => u.InterfaceClrName == interfaceClrName);
     }
 }

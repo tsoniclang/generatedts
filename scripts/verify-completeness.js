@@ -29,8 +29,8 @@ const colors = {
     cyan: '\x1b[36m',
 };
 
-const VALIDATION_DIR = path.join(__dirname, '../.tests/validation');
-const NAMESPACES_DIR = path.join(VALIDATION_DIR, 'namespaces');
+const VALIDATION_DIR = path.join(__dirname, '../.tests/validate');
+const NAMESPACES_DIR = VALIDATION_DIR;
 
 // Statistics tracking
 const stats = {

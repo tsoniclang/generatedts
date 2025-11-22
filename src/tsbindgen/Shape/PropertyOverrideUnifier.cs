@@ -36,6 +36,10 @@ public static class PropertyOverrideUnifier
 
         foreach (var type in typesWithBase)
         {
+            // Skip types not in TypeIndex (defensive check - should already be filtered)
+            if (!graph.IsEmittableType(type.StableId.ToString()))
+                continue;
+
             UnifyPropertiesInHierarchy(type, graph, ctx, plan);
         }
 
