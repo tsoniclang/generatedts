@@ -24,6 +24,7 @@ public static class Builder
     /// <param name="logger">Optional logger for progress messages</param>
     /// <param name="verboseLogging">Enable verbose logging (all categories)</param>
     /// <param name="logCategories">Specific log categories to enable</param>
+    /// <param name="strictMode">Enable strict mode (zero non-whitelisted warnings)</param>
     /// <returns>Build result with statistics and diagnostics</returns>
     public static BuildResult Build(
         IReadOnlyList<string> assemblyPaths,
@@ -31,10 +32,11 @@ public static class Builder
         GenerationPolicy? policy = null,
         Action<string>? logger = null,
         bool verboseLogging = false,
-        HashSet<string>? logCategories = null)
+        HashSet<string>? logCategories = null,
+        bool strictMode = false)
     {
         // Create build context with all shared services
-        var ctx = BuildContext.Create(policy, logger, verboseLogging, logCategories);
+        var ctx = BuildContext.Create(policy, logger, verboseLogging, logCategories, strictMode);
 
         ctx.Log("Build", "=== Build Started ===");
         ctx.Log("Build", $"Assemblies: {assemblyPaths.Count}");

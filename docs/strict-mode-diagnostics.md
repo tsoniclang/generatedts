@@ -1,0 +1,298 @@
+# Strict Mode Diagnostic Policy
+
+**Last Updated**: 2025-11-22
+**Policy File**: `src/tsbindgen/Plan/Validation/StrictModePolicy.cs`
+
+---
+
+## Philosophy
+
+Strict mode enforces **zero warnings** unless explicitly whitelisted with documented justification.
+
+### Diagnostic Levels
+
+| Level | Strict Mode Behavior | Description |
+|-------|---------------------|-------------|
+| **ERROR** | ❌ Always forbidden | Blocks emission - must be eliminated |
+| **WARNING** | ⚠️ Forbidden unless whitelisted | Must be resolved or have documented exception |
+| **INFO** | ✅ Always allowed | Informational only - doesn't count toward totals |
+
+---
+
+## Current Policy
+
+### ❌ Forbidden (ERROR codes)
+
+All ERROR codes are forbidden in strict mode - no exceptions.
+
+| Code | Description | Status |
+|------|-------------|--------|
+| TBG900 | StaticFlatteningPlan invalid | ✅ Eliminated |
+| TBG901 | StaticConflictPlan invalid | ✅ Eliminated |
+| TBG902 | OverrideConflictPlan invalid | ✅ Eliminated |
+| TBG903 | PropertyOverridePlan invalid | ✅ Eliminated |
+| TBG904 | ExtensionMethodsPlan invalid | ✅ Eliminated |
+| TBG905 | Extension method 'any' erasures | ✅ Eliminated |
+| TBG906 | Extension bucket name invalid | ✅ Eliminated |
+| TBG907 | Extension import unresolved | ✅ Eliminated |
+
+---
+
+### ⚠️ Whitelisted Warnings (Temporary Exceptions)
+
+These warnings are **temporarily whitelisted** pending structural fixes in PRs B-D.
+
+#### TBG120: Reserved Word Collisions (8 instances)
+
+**Status**: ⏳ Whitelisted until PR D
+**Count**: 8 types
+**Justification**: Core BCL types (Enum, String, Type, Boolean, Void, Switch, Debugger, Module) collide with TypeScript reserved words but are always used in qualified contexts (e.g., `System.Type`).
+
+**Whitelisted Because**:
+- Fundamental BCL types with well-known names
+- Sanitization would break compatibility
+- Always emitted in qualified contexts
+- TypeScript's module system isolates names
+
+**Elimination Plan** (PR D):
+- Add runtime guards to ensure qualification
+- Convert to ERROR if unqualified usage detected
+- Verify all emissions use qualified paths
+
+**Affected Types**:
+```
+System.Enum
+System.String
+System.Type
+System.Boolean
+System.Void
+Switch
+Debugger
+Module
+```
+
+---
+
+#### TBG201: Circular Namespace Dependencies (267 instances)
+
+**Status**: ⏳ Whitelisted until PR B
+**Count**: 267 dependency cycles
+**Justification**: TypeScript's module system handles circular imports correctly. Warnings document structural complexity but don't affect correctness.
+
+**Whitelisted Because**:
+- TypeScript handles circular imports natively
+- No runtime errors or type safety issues
+- Common in BCL due to cross-cutting concerns (serialization, reflection, networking)
+
+**Elimination Plan** (PR B - SCC Bucketing):
+1. Compute Strongly Connected Components (SCCs) in namespace dependency graph
+2. Collapse each SCC into a single TypeScript module/bucket
+3. Internal edges become local references (no imports)
+4. Imports only between SCC-buckets (acyclic by construction)
+
+**Example Cycles**:
+```
+System.Collections → System.Globalization → System.Runtime.Serialization
+→ System.Xml → System.Collections
+
+System.Net ↔ System.Net.Security ↔ System.Security.Cryptography.X509Certificates
+
+System.Reflection.Metadata ↔ System.Reflection.PortableExecutable
+```
+
+**Expected Result**: TBG201 = 0 after PR B
+
+---
+
+#### TBG203: Interface Conformance Issues (87 instances)
+
+**Status**: ⏳ Whitelisted until PR C
+**Count**: 87 types
+**Justification**: Types claim to implement interfaces they can't fully express in TypeScript due to static abstract members (generic math interfaces).
+
+**Whitelisted Because**:
+- Fundamental TypeScript limitation (no static abstract members)
+- Affects generic math interfaces (`IBinaryNumber<T>`, `IFloatingPoint<T>`, etc.)
+- Instance members fully functional
+- Truth preserved in metadata for Tsonic compiler
+
+**Elimination Plan** (PR C - Honest Emission):
+1. Detect interfaces with static abstract members during audit
+2. Suppress `implements` clause in TypeScript emission
+3. Preserve full truth in metadata.json:
+   ```json
+   {
+     "dotnetImplements": ["IBinaryNumber<T>", "IFloatingPoint<T>"],
+     "tsImplements": [],
+     "omittedInterfaces": [
+       {
+         "stableId": "...:IBinaryNumber`1",
+         "reason": "static-abstract-not-expressible"
+       }
+     ]
+   }
+   ```
+
+**Affected Types** (sample):
+```
+Numeric primitives: byte, char, short, int, long, float, double, decimal
+Large integers: Int128, UInt128, BigInteger, Half, NFloat
+Collections: ArraySegment<T> (GetEnumerator variance)
+```
+
+**Expected Result**: TBG203 = 0 after PR C
+
+---
+
+### ✅ Informational (INFO codes)
+
+These codes are informational only and **never count toward warning totals**.
+
+#### TBG310: Property Covariance (12 instances)
+
+**Status**: ✅ Informational (allowed)
+**Count**: 12 types
+**Justification**: C# allows property covariance, TypeScript doesn't support property overloads. This is a fundamental TypeScript limitation.
+
+**Why Informational**:
+- Not actionable (TS language limitation)
+- Properties still accessible
+- PropertyOverridePlan unifies types where needed
+- Documented in metadata
+
+**Affected Types**:
+```
+System.Half (59 issues)
+System.Runtime.InteropServices.NFloat (28 issues)
+System.Numerics.BigInteger (4 issues)
+System.Int128, System.UInt128
+```
+
+**Resolution**: Not required - working as designed
+
+---
+
+#### TBG410: Narrowed Generic Constraints (5 instances)
+
+**Status**: ✅ Informational (allowed)
+**Count**: 5 types
+**Justification**: Derived types add generic constraints beyond base class. This is correct TypeScript behavior.
+
+**Why Informational**:
+- Valid TypeScript pattern
+- Constraints correctly emitted
+- Type safety preserved
+- Documented in metadata
+
+**Affected Types**:
+```
+System.Collections.Generic.GenericEqualityComparer<T>
+System.Collections.Generic.NullableEqualityComparer<T>
+System.Collections.Generic.EnumEqualityComparer<T>
+System.Collections.Generic.GenericComparer<T>
+System.Collections.Generic.NullableComparer<T>
+```
+
+**Resolution**: Not required - working correctly
+
+---
+
+## Roadmap to Zero Warnings
+
+### Current State (Post PR A)
+
+```
+Errors:   0  ✅
+Warnings: 362 ⚠️ (all whitelisted)
+Info:     17  ✅
+```
+
+### After PR B (SCC Bucketing)
+
+```
+Errors:   0  ✅
+Warnings: 95  ⚠️ (TBG120: 8, TBG203: 87)
+Info:     17  ✅
+```
+
+**Eliminated**: TBG201 (267 instances) via structural change
+
+### After PR C (Honest Emission)
+
+```
+Errors:   0  ✅
+Warnings: 8   ⚠️ (TBG120 only)
+Info:     17  ✅
+```
+
+**Eliminated**: TBG203 (87 instances) by not claiming unsupported TS conformance
+
+### After PR D (Final Cleanup)
+
+```
+Errors:   0  ✅
+Warnings: 0  ✅
+Info:     17  ✅
+```
+
+**Eliminated**: TBG120 (8 instances) via qualification guards
+**Downgraded**: TBG310, TBG410 already INFO (no change needed)
+
+---
+
+## Strict Mode Enforcement
+
+When `BuildContext.StrictMode == true`:
+
+1. **Validation fails** if any WARNING exists that isn't whitelisted in `StrictModePolicy`
+2. **INFO messages** are allowed and don't count toward totals
+3. **ERROR messages** always fail validation (zero tolerance)
+
+### Usage
+
+```bash
+# Enable strict mode (default in production builds)
+dotnet run -- generate -a assembly.dll --strict
+
+# Disable for development
+dotnet run -- generate -a assembly.dll --no-strict
+```
+
+---
+
+## Policy Maintenance
+
+### Adding a New Diagnostic Code
+
+1. Add to `StrictModePolicy.cs` with justification
+2. Document in this file under appropriate section
+3. If WARNING: provide elimination roadmap
+4. If INFO: explain why it's informational only
+
+### Removing a Whitelisted Warning
+
+1. Implement structural fix (PR B/C/D pattern)
+2. Verify warning count reaches zero
+3. Remove from whitelist in `StrictModePolicy.cs`
+4. Update this documentation
+
+### Promoting WARNING to ERROR
+
+If a whitelisted WARNING becomes critical:
+
+1. Change `AllowedLevel.WhitelistedWarning` → `AllowedLevel.Forbidden` in policy
+2. Update justification to explain why it's now forbidden
+3. Ensure count is zero before merge
+
+---
+
+## References
+
+- **Policy Implementation**: `src/tsbindgen/Plan/Validation/StrictModePolicy.cs`
+- **Enforcement**: `src/tsbindgen/Plan/PhaseGate.cs` (strict mode validation)
+- **Roadmap**: PRs B, C, D eliminate all whitelisted warnings
+
+---
+
+**Last Review**: 2025-11-22
+**Next Review**: After each PR (B, C, D) completion

@@ -156,6 +156,12 @@ public static class PhaseGate
         // Validates extension method buckets have correct arity and no erased 'any' types
         Validation.Extensions.Validate(ctx, graph, plan.ExtensionMethods, imports, validationContext);
 
+        // Strict Mode Enforcement
+        if (ctx.StrictMode)
+        {
+            EnforceStrictMode(ctx, validationContext);
+        }
+
         // Report results
         ctx.Log("PhaseGate", $"Validation complete - {validationContext.ErrorCount} errors, {validationContext.WarningCount} warnings, {validationContext.InfoCount} info");
         ctx.Log("PhaseGate", $"Sanitized {validationContext.SanitizedNameCount} reserved word identifiers");
@@ -210,5 +216,61 @@ public static class PhaseGate
 
         // Write summary JSON for CI/snapshot comparison
         VCtx.WriteSummaryJson(ctx, validationContext);
+    }
+
+    /// <summary>
+    /// Enforce strict mode policy: fail validation if any non-whitelisted warnings exist.
+    /// INFO diagnostics are always allowed and don't count toward warning totals.
+    /// </summary>
+    private static void EnforceStrictMode(BuildContext ctx, ValidationContext validationContext)
+    {
+        ctx.Log("PhaseGate", "Enforcing strict mode policy (zero non-whitelisted warnings)...");
+
+        var violations = new List<(string Code, int Count, string Justification)>();
+
+        // Check each diagnostic code
+        foreach (var (code, count) in validationContext.DiagnosticCountsByCode)
+        {
+            // Determine level from diagnostics
+            var levelFromDiagnostics = validationContext.Diagnostics
+                .Where(d => d.Contains($"[{code}]"))
+                .Select(d =>
+                {
+                    if (d.StartsWith("ERROR:")) return "ERROR";
+                    if (d.StartsWith("WARNING:")) return "WARNING";
+                    if (d.StartsWith("INFO:")) return "INFO";
+                    return "UNKNOWN";
+                })
+                .FirstOrDefault() ?? "UNKNOWN";
+
+            // Check if allowed in strict mode
+            if (!StrictModePolicy.IsAllowed(code, levelFromDiagnostics))
+            {
+                var justification = StrictModePolicy.GetJustification(code);
+                violations.Add((code, count, justification));
+            }
+        }
+
+        if (violations.Count > 0)
+        {
+            var totalViolations = violations.Sum(v => v.Count);
+            var violationText = string.Join("\n", violations.Select(v =>
+                $"  {v.Code}: {v.Count} instances - {v.Justification}"));
+
+            ctx.Log("PhaseGate", $"Strict mode violations: {totalViolations} total");
+            ctx.Log("PhaseGate", violationText);
+
+            // Convert to ERROR
+            validationContext.RecordDiagnostic(
+                Core.Diagnostics.DiagnosticCodes.ValidationFailed,
+                "ERROR",
+                $"Strict mode enforced: {totalViolations} non-whitelisted warnings detected.\n\n" +
+                $"Violations:\n{violationText}\n\n" +
+                $"See docs/strict-mode-diagnostics.md for policy details.");
+        }
+        else
+        {
+            ctx.Log("PhaseGate", "✓ Strict mode: No non-whitelisted warnings");
+        }
     }
 }
