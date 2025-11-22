@@ -221,7 +221,7 @@ internal static class Core
         ctx.Log("PhaseGate", $"Validated {totalGenericParams} generic parameters ({constraintNarrowings} constraint narrowings detected)");
     }
 
-    internal static void ValidateInterfaceConformance(BuildContext ctx, SymbolGraph graph, ValidationContext validationCtx)
+    internal static void ValidateInterfaceConformance(BuildContext ctx, SymbolGraph graph, HonestEmissionPlan honestPlan, ValidationContext validationCtx)
     {
         ctx.Log("PhaseGate", "Validating interface conformance...");
 
@@ -230,6 +230,7 @@ internal static class Core
         int suppressedDueToViews = 0;
         int typesWithExplicitViews = 0;
         int totalExplicitViews = 0;
+        int suppressedDueToHonestEmission = 0;
 
         foreach (var ns in graph.Namespaces)
         {
@@ -343,14 +344,25 @@ internal static class Core
 
                 if (conformanceIssues.Count > 0)
                 {
-                    typesWithIssues++;
-                    validationCtx.InterfaceConformanceIssuesByType[type.ClrFullName] = conformanceIssues;
+                    // PR C: Check if this type's conformance issues are covered by honest emission plan
+                    var isPlannedOmission = honestPlan.UnsatisfiableInterfaces.ContainsKey(type.ClrFullName);
 
-                    // Emit one-line summary to console
-                    validationCtx.RecordDiagnostic(
-                        DiagnosticCodes.StructuralConformanceFailure,
-                        "WARNING",
-                        $"{type.ClrFullName} has {conformanceIssues.Count} interface conformance issues (see diagnostics file)");
+                    if (isPlannedOmission)
+                    {
+                        // Suppressed - this will be handled by honest emission (omit from implements clause)
+                        suppressedDueToHonestEmission++;
+                    }
+                    else
+                    {
+                        // Unexpected conformance issue - emit TBG203 warning
+                        typesWithIssues++;
+                        validationCtx.InterfaceConformanceIssuesByType[type.ClrFullName] = conformanceIssues;
+
+                        validationCtx.RecordDiagnostic(
+                            DiagnosticCodes.StructuralConformanceFailure,
+                            "WARNING",
+                            $"{type.ClrFullName} has {conformanceIssues.Count} interface conformance issues (see diagnostics file)");
+                    }
                 }
 
                 typesChecked++;
@@ -359,6 +371,7 @@ internal static class Core
 
         ctx.Log("PhaseGate", $"Validated interface conformance for {typesChecked} types ({typesWithIssues} with issues)");
         ctx.Log("PhaseGate", $"{typesWithExplicitViews} types have {totalExplicitViews} explicit views, {suppressedDueToViews} interfaces satisfied via views");
+        ctx.Log("PhaseGate", $"PR C: {suppressedDueToHonestEmission} types with planned honest emission (interfaces omitted from implements clause)");
     }
 
     internal static void ValidateInheritance(BuildContext ctx, SymbolGraph graph, ValidationContext validationCtx)

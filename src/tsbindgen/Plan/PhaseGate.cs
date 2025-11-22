@@ -41,7 +41,7 @@ public static class PhaseGate
         ValidationCore.ValidateTypeNames(ctx, graph, validationContext);
         ValidationCore.ValidateMemberNames(ctx, graph, validationContext);
         ValidationCore.ValidateGenericParameters(ctx, graph, validationContext);
-        ValidationCore.ValidateInterfaceConformance(ctx, graph, validationContext);
+        ValidationCore.ValidateInterfaceConformance(ctx, graph, plan.HonestEmission, validationContext);
         ValidationCore.ValidateInheritance(ctx, graph, validationContext);
         ValidationCore.ValidateEmitScopes(ctx, graph, validationContext);
         ValidationCore.ValidateImports(ctx, graph, imports, plan.SCCBuckets, validationContext);

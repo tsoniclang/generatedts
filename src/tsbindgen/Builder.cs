@@ -324,6 +324,12 @@ public static class Builder
         var sccPlan = Plan.SCCPlanner.PlanSCCBuckets(ctx, imports);
         ctx.Log("Build", $"Computed {sccPlan.Buckets.Count} SCC buckets ({sccPlan.Buckets.Count(b => b.IsMultiNamespace)} multi-namespace)");
 
+        // PR C: Analyze interface conformance and plan honest emission
+        ctx.Log("Build", "\n--- Phase 4.13: Honest Emission Planning ---");
+        var conformanceIssues = Plan.InterfaceConformanceAnalyzer.AnalyzeConformance(ctx, graph);
+        var honestEmissionPlan = Plan.HonestEmissionPlanner.PlanHonestEmission(ctx, graph, conformanceIssues);
+        ctx.Log("Build", $"Planned {honestEmissionPlan.TotalUnsatisfiableCount} unsatisfiable interfaces across {honestEmissionPlan.UnsatisfiableInterfaces.Count} types");
+
         // Build emission plan
         var emissionPlan = new EmissionPlan
         {
@@ -335,7 +341,8 @@ public static class Builder
             OverrideConflicts = overrideConflicts,
             PropertyOverrides = propertyOverrides,
             ExtensionMethods = extensionMethods,
-            SCCBuckets = sccPlan
+            SCCBuckets = sccPlan,
+            HonestEmission = honestEmissionPlan
         };
 
         // Phase 4.7: PhaseGate Validation - validate complete emission plan before emission
@@ -479,6 +486,12 @@ public sealed record EmissionPlan
     /// Groups namespaces by Strongly Connected Components.
     /// </summary>
     public required Plan.SCCPlan SCCBuckets { get; init; }
+
+    /// <summary>
+    /// PR C: Plan for honest TypeScript emission of interface conformance.
+    /// Tracks interfaces that cannot be fully expressed in TypeScript (TBG203).
+    /// </summary>
+    public required Plan.HonestEmissionPlan HonestEmission { get; init; }
 
     public int NamespaceCount => Graph.Namespaces.Length;
 }

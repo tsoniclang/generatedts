@@ -30,8 +30,8 @@ public static class MetadataEmitter
             var ns = nsOrder.Namespace;
             ctx.Log("MetadataEmitter", $"  Emitting metadata for: {ns.Name}");
 
-            // Generate metadata
-            var metadata = GenerateMetadata(ctx, nsOrder);
+            // Generate metadata (include HonestEmissionPlan for unsatisfiable interfaces)
+            var metadata = GenerateMetadata(ctx, nsOrder, plan.HonestEmission);
 
             // Write to file: output/Namespace.Name/internal/metadata.json (or _root for empty namespace)
             var namespacePath = Path.Combine(outputDirectory, ns.Name);
@@ -57,13 +57,13 @@ public static class MetadataEmitter
         ctx.Log("MetadataEmitter", $"Generated {emittedCount} metadata files");
     }
 
-    private static NamespaceMetadata GenerateMetadata(BuildContext ctx, NamespaceEmitOrder nsOrder)
+    private static NamespaceMetadata GenerateMetadata(BuildContext ctx, NamespaceEmitOrder nsOrder, HonestEmissionPlan honestEmission)
     {
         var typeMetadata = new List<TypeMetadata>();
 
         foreach (var typeOrder in nsOrder.OrderedTypes)
         {
-            typeMetadata.Add(GenerateTypeMetadata(typeOrder.Type, ctx));
+            typeMetadata.Add(GenerateTypeMetadata(typeOrder.Type, ctx, honestEmission));
         }
 
         return new NamespaceMetadata
@@ -74,10 +74,22 @@ public static class MetadataEmitter
         };
     }
 
-    private static TypeMetadata GenerateTypeMetadata(TypeSymbol type, BuildContext ctx)
+    private static TypeMetadata GenerateTypeMetadata(TypeSymbol type, BuildContext ctx, HonestEmissionPlan honestEmission)
     {
         // Get final TypeScript name from Renamer
         var tsEmitName = ctx.Renamer.GetFinalTypeName(type);
+
+        // PR C: Get unsatisfiable interfaces for this type (if any)
+        List<UnsatisfiableInterfaceMetadata>? unsatisfiableInterfaces = null;
+        if (honestEmission.UnsatisfiableInterfaces.TryGetValue(type.ClrFullName, out var unsatisfiableList))
+        {
+            unsatisfiableInterfaces = unsatisfiableList.Select(u => new UnsatisfiableInterfaceMetadata
+            {
+                InterfaceClrName = u.InterfaceClrName,
+                Reason = u.Reason.ToString(),
+                IssueCount = u.IssueCount
+            }).ToList();
+        }
 
         return new TypeMetadata
         {
@@ -93,7 +105,8 @@ public static class MetadataEmitter
             Properties = type.Members.Properties.Select(p => GeneratePropertyMetadata(p, type, ctx)).ToList(),
             Fields = type.Members.Fields.Select(f => GenerateFieldMetadata(f, type, ctx)).ToList(),
             Events = type.Members.Events.Select(e => GenerateEventMetadata(e, type, ctx)).ToList(),
-            Constructors = type.Members.Constructors.Select(c => GenerateConstructorMetadata(c, type, ctx)).ToList()
+            Constructors = type.Members.Constructors.Select(c => GenerateConstructorMetadata(c, type, ctx)).ToList(),
+            UnsatisfiableInterfaces = unsatisfiableInterfaces
         };
     }
 
@@ -267,6 +280,23 @@ public sealed record TypeMetadata
     public required List<FieldMetadata> Fields { get; init; }
     public required List<EventMetadata> Events { get; init; }
     public required List<ConstructorMetadata> Constructors { get; init; }
+
+    /// <summary>
+    /// PR C: Interfaces that this type claims to implement in CLR but cannot satisfy in TypeScript.
+    /// These are omitted from TypeScript 'implements' clause but preserved here for truth.
+    /// Null if no unsatisfiable interfaces.
+    /// </summary>
+    public List<UnsatisfiableInterfaceMetadata>? UnsatisfiableInterfaces { get; init; }
+}
+
+/// <summary>
+/// PR C: Metadata for an unsatisfiable interface omitted from TypeScript 'implements' clause.
+/// </summary>
+public sealed record UnsatisfiableInterfaceMetadata
+{
+    public required string InterfaceClrName { get; init; }
+    public required string Reason { get; init; }
+    public required int IssueCount { get; init; }
 }
 
 /// <summary>
