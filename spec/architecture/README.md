@@ -23,6 +23,7 @@
   - GlobalInterfaceIndex through PropertyOverrideUnifier and ExtensionMethodAnalyzer
   - Complete method documentation for all Shape and Analysis files
   - Transformation examples and pass ordering
+  - Extension method analysis and filtering
 
 - **[05-phase-normalize.md](05-phase-normalize.md)** - Phase 3.5: Name reservation and overload unification
   - NameReservation orchestration
@@ -38,7 +39,8 @@
 - **[07-phasegate.md](07-phasegate.md)** - **SUPER DETAILED** PhaseGate validation
   - **ALL 50+ validation rules** documented
   - **ALL 43 diagnostic codes** (TBG001-TBG883) with complete reference table
-  - All 10 validation module files documented with every method
+  - All 19 validation module files documented with every method (including LibraryMode.cs)
+  - Library mode validation (LIB001-LIB003)
   - Diagnostic output formats (summary.json, diagnostics.txt)
   - This is the most comprehensive document
 
@@ -135,16 +137,25 @@ Explicit interface implementation support:
 ### PhaseGate
 Final validation before emission:
 - 50+ validation rules checking invariants
-- 43 diagnostic codes (TBG001-TBG883)
+- 43 diagnostic codes (TBG001-TBG883, LIB001-LIB003)
+- Library mode validation (contract loading, dangling references)
 - Stops emission if errors found
 - Comprehensive documentation in **07-phasegate.md**
 
+### Library Mode
+Filtered package generation for user assemblies:
+- Excludes base library types from emission
+- Contract loading from base package metadata/bindings
+- Graph filtering via StableId HashSet lookups
+- Dangling reference validation (LIB002)
+- Documented in: **00-overview.md**, **01-pipeline-flow.md**, **07-phasegate.md**, **10-call-graphs.md**
+
 ## Statistics
 
-- **79 source files** in src/tsbindgen/ directory
+- **82+ source files** in src/tsbindgen/ directory
 - **11 architecture documents** (this collection)
-- **50+ validation rules** in PhaseGate
-- **43 diagnostic codes** (TBG001-TBG883)
+- **50+ validation rules** in PhaseGate (19 modules including LibraryMode)
+- **46 diagnostic codes** (TBG001-TBG883, LIB001-LIB003)
 - **23 transformation passes** in Shape phase (including extension method analysis)
 - **7 output file types** (d.ts, json, js, extension buckets)
 
@@ -168,15 +179,15 @@ Final validation before emission:
 ## Coverage
 
 This documentation covers:
-- ✅ Every file in src/tsbindgen/ (79 files)
+- ✅ Every file in src/tsbindgen/ (82+ files)
 - ✅ Every public method with full signatures
 - ✅ Every private method with algorithms
 - ✅ Every validation rule (50+)
-- ✅ Every diagnostic code (43 codes)
+- ✅ Every diagnostic code (46 codes: TBG001-TBG883, LIB001-LIB003)
 - ✅ Every transformation pass (23 passes)
 - ✅ Complete call chains (entry to output)
 - ✅ All data structures (records, enums)
-- ✅ Key algorithms (dual-scope naming, collision detection, extension method buckets, etc.)
+- ✅ Key algorithms (dual-scope naming, collision detection, extension method buckets, library mode filtering, etc.)
 
 ## Navigation
 
