@@ -72,34 +72,21 @@ public static class StrictModePolicy
 
         // TBG201: Circular namespace dependencies (ELIMINATED in PR B)
         // Was 267 instances - now 0 after SCC bucketing filters intra-SCC cycles
-        // Kept in policy for documentation, but should never trigger
+        // Not in whitelist - should never trigger
 
-        // TBG203: Interface conformance issues (87 instances)
-        // TEMPORARY WHITELIST - Will be eliminated in PR C by honest emission
-        // Types claim to implement interfaces they can't fully express in TypeScript
-        // (e.g., generic math interfaces with static abstract members).
-        // PR C will suppress TS 'implements' claims while preserving truth in metadata.
-        ["TBG203"] = (AllowedLevel.WhitelistedWarning,
-            "Interface conformance issues - whitelisted until PR C implements honest emission. " +
-            "Will be eliminated by not claiming TS conformance for unsupported interfaces."),
+        // TBG203: Interface conformance issues (ELIMINATED in PR C)
+        // Was 87 instances - now 0 after honest emission filtering
+        // Types with unsatisfiable interfaces are filtered from HonestEmissionPlan
+        // Not in whitelist - should never trigger
 
         // ============================================================================
         // INFO - Always allowed (informational, doesn't count as warnings)
         // ============================================================================
-
-        // TBG310: Property covariance (12 instances)
-        // C# allows property covariance, TypeScript doesn't support property overloads.
-        // This is a fundamental TS limitation - documented but not actionable.
-        // Already marked as INFO in current implementation.
-        ["TBG310"] = (AllowedLevel.Informational,
-            "Property covariance - fundamental TypeScript limitation, documented but not actionable."),
-
-        // TBG410: Narrowed generic constraints (5 instances)
-        // Derived types add constraints beyond base class (e.g., where T : IEquatable<T>).
-        // This is correct TypeScript behavior - informational only.
-        // Already marked as INFO in current implementation.
-        ["TBG410"] = (AllowedLevel.Informational,
-            "Narrowed generic constraints - correct behavior, informational only."),
+        //
+        // NOTE: INFO diagnostics don't need whitelist entries - they're always allowed
+        // Listed here for documentation only:
+        // - TBG310: Property covariance (emitted as INFO)
+        // - TBG410: Narrowed generic constraints (emitted as INFO)
     };
 
     /// <summary>
