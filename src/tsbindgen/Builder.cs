@@ -1,11 +1,15 @@
+using System.Collections.Immutable;
 using System.Reflection;
 using tsbindgen.Core.Policy;
 using tsbindgen.Load;
 using tsbindgen.Model;
+using tsbindgen.Model.Symbols;
+using tsbindgen.Model.Symbols.MemberSymbols;
 using tsbindgen.Normalize;
 using tsbindgen.Shape;
 using tsbindgen.Plan;
 using tsbindgen.Emit;
+using tsbindgen.Library;
 
 namespace tsbindgen;
 
@@ -25,6 +29,7 @@ public static class Builder
     /// <param name="verboseLogging">Enable verbose logging (all categories)</param>
     /// <param name="logCategories">Specific log categories to enable</param>
     /// <param name="strictMode">Enable strict mode (zero non-whitelisted warnings)</param>
+    /// <param name="libraryPackagePath">Path to existing tsbindgen package for library mode (null = normal mode)</param>
     /// <returns>Build result with statistics and diagnostics</returns>
     public static BuildResult Build(
         IReadOnlyList<string> assemblyPaths,
@@ -33,12 +38,23 @@ public static class Builder
         Action<string>? logger = null,
         bool verboseLogging = false,
         HashSet<string>? logCategories = null,
-        bool strictMode = false)
+        bool strictMode = false,
+        string? libraryPackagePath = null)
     {
+        // Load library contract if in library mode
+        LibraryContract? libraryContract = null;
+        if (libraryPackagePath != null)
+        {
+            logger?.Invoke($"Loading library contract from: {libraryPackagePath}");
+            libraryContract = LibraryContractLoader.Load(libraryPackagePath);
+            logger?.Invoke($"Library contract loaded: {libraryContract.TypeCount} types, {libraryContract.MemberCount} members");
+        }
+
         // Create build context with all shared services
-        var ctx = BuildContext.Create(policy, logger, verboseLogging, logCategories, strictMode);
+        var ctx = BuildContext.Create(policy, logger, verboseLogging, logCategories, strictMode, libraryContract);
 
         ctx.Log("Build", "=== Build Started ===");
+        ctx.Log("Build", $"Mode: {(libraryContract != null ? "Library" : "Normal")}");
         ctx.Log("Build", $"Assemblies: {assemblyPaths.Count}");
         ctx.Log("Build", $"Output: {outputDirectory}");
 
@@ -49,6 +65,13 @@ public static class Builder
             var (graph, loadContext) = LoadPhase(ctx, assemblyPaths);
             var stats = graph.GetStatistics();
             ctx.Log("Build", $"Loaded: {stats.NamespaceCount} namespaces, {stats.TypeCount} types, {stats.TotalMembers} members");
+
+            // Library mode: contract loaded and attached to context
+            // Filtering happens during emission, not here
+            if (libraryContract != null)
+            {
+                ctx.Log("Build", $"Library mode: contract has {libraryContract.TypeCount} types, {libraryContract.MemberCount} members");
+            }
 
             // Phase 2: Normalize (build indices)
             ctx.Log("Build", "\n--- Phase 2: Normalize ---");
@@ -433,6 +456,81 @@ public static class Builder
                     $"EmitScope={prop.EmitScope} SourceInterface={ifaceStableId}");
             }
         }
+    }
+
+    /// <summary>
+    /// Filter symbol graph to only include types and members present in library contract.
+    /// Used in library mode to restrict emission to library surface.
+    /// </summary>
+    private static SymbolGraph FilterByLibraryContract(
+        BuildContext ctx,
+        SymbolGraph graph,
+        LibraryContract contract)
+    {
+        ctx.Log("Library", "Filtering symbol graph by library contract...");
+
+        var filteredNamespaces = new List<NamespaceSymbol>();
+
+        foreach (var ns in graph.Namespaces)
+        {
+            // Filter types in this namespace
+            var filteredTypes = new List<TypeSymbol>();
+
+            foreach (var type in ns.Types)
+            {
+                // Check if type is allowed
+                if (!LibraryFilter.IsAllowedType(type, contract))
+                {
+                    ctx.Log("Library", $"Filtered out type: {type.StableId}");
+                    continue;
+                }
+
+                // Filter members within type
+                var filteredMethods = type.Members.Methods
+                    .Where(m => LibraryFilter.IsAllowedMethod(m, contract))
+                    .ToImmutableArray();
+
+                var filteredProperties = type.Members.Properties
+                    .Where(p => LibraryFilter.IsAllowedProperty(p, contract))
+                    .ToImmutableArray();
+
+                var filteredFields = type.Members.Fields
+                    .Where(f => LibraryFilter.IsAllowedField(f, contract))
+                    .ToImmutableArray();
+
+                var filteredEvents = type.Members.Events
+                    .Where(e => LibraryFilter.IsAllowedEvent(e, contract))
+                    .ToImmutableArray();
+
+                // Constructors are not in contract (no StableIds), so keep all
+                var filteredConstructors = type.Members.Constructors;
+
+                // Create filtered members bag
+                var filteredMembers = new TypeMembers
+                {
+                    Methods = filteredMethods,
+                    Properties = filteredProperties,
+                    Fields = filteredFields,
+                    Events = filteredEvents,
+                    Constructors = filteredConstructors
+                };
+
+                // Create filtered type
+                var filteredType = type.WithMembers(filteredMembers);
+                filteredTypes.Add(filteredType);
+            }
+
+            // Only keep namespace if it has types after filtering
+            if (filteredTypes.Count > 0)
+            {
+                var filteredNs = ns with { Types = filteredTypes.ToImmutableArray() };
+                filteredNamespaces.Add(filteredNs);
+            }
+        }
+
+        ctx.Log("Library", $"Filtered: {filteredNamespaces.Count} namespaces remain (from {graph.Namespaces.Length})");
+
+        return graph with { Namespaces = filteredNamespaces.ToImmutableArray() };
     }
 }
 

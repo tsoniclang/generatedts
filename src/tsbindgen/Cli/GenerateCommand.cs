@@ -215,7 +215,8 @@ public static class GenerateCommand
                 logger,
                 verbose,
                 logCategories,
-                strict);
+                strict,
+                lib);
 
             // Report results
             Console.WriteLine();

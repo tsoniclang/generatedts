@@ -156,6 +156,16 @@ public static class PhaseGate
         // Validates extension method buckets have correct arity and no erased 'any' types
         Validation.Extensions.Validate(ctx, graph, plan.ExtensionMethods, imports, validationContext);
 
+        // Library Mode Validation (LIB001-003)
+        // Only run when in library mode (BuildContext.LibraryContract is non-null)
+        if (ctx.LibraryContract != null)
+        {
+            ctx.Log("PhaseGate", "Running library mode validation...");
+            LibraryMode.ValidateContractExists(graph, ctx.LibraryContract, validationContext);
+            LibraryMode.ValidateNoDanglingReferences(graph, ctx.LibraryContract, validationContext);
+            LibraryMode.ValidateBindingConsistency(graph, ctx.LibraryContract, validationContext);
+        }
+
         // Strict Mode Enforcement
         if (ctx.StrictMode)
         {

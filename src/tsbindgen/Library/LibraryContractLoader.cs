@@ -43,14 +43,19 @@ public static class LibraryContractLoader
             ProcessMetadataFile(metadataFile, allowedTypes, allowedMembers, namespaceToTypes);
         }
 
-        // Load bindings.json
-        var bindingsPath = Path.Combine(packagePath, "bindings.json");
-        if (!File.Exists(bindingsPath))
+        // Load all bindings.json files from namespace subdirectories
+        var bindingsFiles = Directory.GetFiles(packagePath, "bindings.json", SearchOption.AllDirectories);
+
+        if (bindingsFiles.Length == 0)
         {
-            throw new FileNotFoundException($"bindings.json not found in library package: {packagePath}");
+            throw new FileNotFoundException($"No bindings.json files found in library package: {packagePath}");
         }
 
-        var allowedBindings = ProcessBindingsFile(bindingsPath);
+        var allowedBindings = new HashSet<string>();
+        foreach (var bindingsFile in bindingsFiles)
+        {
+            ProcessBindingsFile(bindingsFile, allowedBindings);
+        }
 
         return new LibraryContract
         {
@@ -134,13 +139,11 @@ public static class LibraryContractLoader
         }
     }
 
-    private static HashSet<string> ProcessBindingsFile(string bindingsPath)
+    private static void ProcessBindingsFile(string bindingsPath, HashSet<string> bindings)
     {
         var json = File.ReadAllText(bindingsPath);
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
-
-        var bindings = new HashSet<string>();
 
         // bindings.json structure: object with StableId keys
         // We extract all keys
@@ -148,7 +151,5 @@ public static class LibraryContractLoader
         {
             bindings.Add(property.Name);
         }
-
-        return bindings;
     }
 }
