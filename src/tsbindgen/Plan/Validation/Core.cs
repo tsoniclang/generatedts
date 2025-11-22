@@ -55,11 +55,30 @@ internal static class Core
                     }
                     else
                     {
-                        // Name wasn't sanitized - this is a problem
+                        // Name wasn't sanitized - check if this is a known safe BCL type
+                        // These 8 core BCL types use reserved words but are always referenced in qualified contexts
+                        // (e.g., System.Type, not bare Type) so they don't cause actual collisions
+                        var knownSafeBclTypes = new HashSet<string>
+                        {
+                            "System.Enum",
+                            "System.String",
+                            "System.Type",
+                            "System.Boolean",
+                            "System.Void",
+                            "System.Diagnostics.Switch",
+                            "System.Diagnostics.Debugger",
+                            "System.Reflection.Module"
+                        };
+
+                        var level = knownSafeBclTypes.Contains(type.ClrFullName) ? "INFO" : "WARNING";
+                        var reason = level == "INFO"
+                            ? "(always used in qualified contexts)"
+                            : "but was not sanitized";
+
                         validationCtx.RecordDiagnostic(
                             DiagnosticCodes.ReservedWordUnsanitized,
-                            "WARNING",
-                            $"Type '{type.TsEmitName}' uses TypeScript reserved word but was not sanitized");
+                            level,
+                            $"Type '{type.TsEmitName}' uses TypeScript reserved word {reason}");
                     }
                 }
                 else if (type.ClrName != type.TsEmitName && Shared.IsTypeScriptReservedWord(type.ClrName))

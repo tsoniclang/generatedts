@@ -61,7 +61,13 @@ public static class HonestEmissionPlanner
             var fromIndex = issue.IndexOf(" from ");
             if (fromIndex >= 0)
             {
-                var interfaceName = issue.Substring(fromIndex + 6).Trim();
+                var interfaceNameRaw = issue.Substring(fromIndex + 6);
+                // Extract just the interface name, removing any trailing text after space
+                // E.g., "IReadOnlyList`1 has incompatible..." → "IReadOnlyList`1"
+                var spaceIndex = interfaceNameRaw.IndexOf(' ');
+                var interfaceName = spaceIndex >= 0
+                    ? interfaceNameRaw.Substring(0, spaceIndex).Trim()
+                    : interfaceNameRaw.Trim();
 
                 if (!unsatisfiableInterfaces.ContainsKey(interfaceName))
                 {
@@ -105,6 +111,7 @@ public static class HonestEmissionPlanner
         foreach (var ifaceRef in typeSymbol.Interfaces)
         {
             var ifaceShortNameFromRef = GetShortInterfaceName(ifaceRef);
+
             if (ifaceShortNameFromRef == interfaceShortName)
             {
                 // Return the full CLR name from the type reference
@@ -117,22 +124,14 @@ public static class HonestEmissionPlanner
 
     private static string GetShortInterfaceName(Model.Types.TypeReference typeRef)
     {
-        // Extract simple name from type reference (without generic arity suffix)
+        // Extract simple name from type reference (WITH generic arity suffix for matching)
+        // The issue strings from Core.cs include the arity (e.g., "IFoo`1"), so we must too
         if (typeRef is not Model.Types.NamedTypeReference namedRef)
             return "";
 
-        var clrName = namedRef.FullName;
-        var lastDotIndex = clrName.LastIndexOf('.');
-        var simpleName = lastDotIndex >= 0 ? clrName.Substring(lastDotIndex + 1) : clrName;
-
-        // Remove generic arity (e.g., "IFoo`1" → "IFoo")
-        var backtickIndex = simpleName.IndexOf('`');
-        if (backtickIndex >= 0)
-        {
-            simpleName = simpleName.Substring(0, backtickIndex);
-        }
-
-        return simpleName;
+        // Return the simple name directly from the NamedTypeReference (includes arity)
+        // This matches what Core.cs/InterfaceConformanceAnalyzer uses in issue strings
+        return namedRef.Name;
     }
 
     private static string GetInterfaceClrFullName(Model.Types.TypeReference typeRef)

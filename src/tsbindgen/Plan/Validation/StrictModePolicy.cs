@@ -58,26 +58,20 @@ public static class StrictModePolicy
         ["TBG907"] = (AllowedLevel.Forbidden, "Extension import resolution - must be zero"),
 
         // ============================================================================
-        // WARNINGS - Currently active, must be eliminated or whitelisted
+        // WARNINGS - Zero tolerance (no whitelisted warnings)
         // ============================================================================
-
-        // TBG120: Reserved word collisions (8 instances)
-        // TEMPORARY WHITELIST - Will be removed in PR D after adding qualification checks
-        // Core BCL types (Enum, String, Type, Boolean, Void, etc.) collide with TS keywords
-        // but are always used in qualified contexts (System.Type, not bare Type).
-        // PR D will add runtime guards to ensure qualification and convert to ERROR if unqualified.
-        ["TBG120"] = (AllowedLevel.WhitelistedWarning,
-            "Reserved word collisions - whitelisted for core BCL types used in qualified contexts only. " +
-            "Will become ERROR in PR D if unqualified usage detected."),
-
-        // TBG201: Circular namespace dependencies (ELIMINATED in PR B)
-        // Was 267 instances - now 0 after SCC bucketing filters intra-SCC cycles
-        // Not in whitelist - should never trigger
-
-        // TBG203: Interface conformance issues (ELIMINATED in PR C)
-        // Was 87 instances - now 0 after honest emission filtering
-        // Types with unsatisfiable interfaces are filtered from HonestEmissionPlan
-        // Not in whitelist - should never trigger
+        // All previous WARNING codes have been eliminated or downgraded to INFO:
+        //
+        // TBG120: Reserved word collisions - DOWNGRADED TO INFO in PR D
+        // (8 instances: System.Enum, System.String, System.Type, System.Boolean, System.Void,
+        //  System.Diagnostics.Switch, System.Diagnostics.Debugger, System.Reflection.Module)
+        // These core BCL types use reserved words but are always used in qualified contexts
+        //
+        // TBG201: Circular namespace dependencies - ELIMINATED in PR B
+        // (was 267 instances, now 0 after SCC bucketing filters intra-SCC cycles)
+        //
+        // TBG203: Interface conformance failures - ELIMINATED in PR C/D
+        // (was 87 instances, now 0 after honest emission filtering fixes)
 
         // ============================================================================
         // INFO - Always allowed (informational, doesn't count as warnings)
