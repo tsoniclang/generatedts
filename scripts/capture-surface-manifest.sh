@@ -11,7 +11,7 @@ echo ""
 # Configuration
 BCL_PATH="$HOME/dotnet/shared/Microsoft.NETCore.App/10.0.0-rc.1.25451.107"
 TEMP_OUTPUT=".tests/surface-capture"
-MANIFEST_FILE="baselines/bcl-surface-manifest.json"
+MANIFEST_FILE="scripts/harness/baselines/bcl-surface-manifest.json"
 
 # Clean and prepare
 echo "[1/4] Preparing output directory..."

@@ -39,6 +39,45 @@ Output directory for generated files.
 tsbindgen generate --assembly Assembly.dll --out-dir ./types
 ```
 
+## Library Mode
+
+### `--lib`
+Path to existing tsbindgen output package (base library contract).
+
+When generating TypeScript declarations for a user assembly that references a base library (e.g., BCL), `--lib` excludes base library types from emission, producing a clean package containing only user types.
+
+**Path**: Directory containing prior tsbindgen output with `metadata.json` and `bindings.json` files.
+
+**Usage**:
+```bash
+# Step 1: Generate base BCL package (done once)
+tsbindgen generate -d ~/dotnet/shared/Microsoft.NETCore.App/10.0.0 -o ./bcl-package
+
+# Step 2: Generate user library, excluding BCL types
+tsbindgen generate -a MyLib.dll -d ~/dotnet/.../10.0.0 \
+  --lib ./bcl-package -o ./my-lib-package
+```
+
+**What `--lib` does**:
+1. Loads contract from base package (`metadata.json` → type StableIds, `bindings.json` → runtime bindings)
+2. **Filters** symbol graph: removes types IN contract, keeps types NOT in contract
+3. **Validates** (LIB002): No dangling references (all type references must be in contract OR in current build)
+
+**Validation**:
+- **LIB001**: Contract directory/files exist (validated at load time, build fails if missing)
+- **LIB002**: No dangling references (strict failure if user type references filtered-out type)
+
+**Example error (LIB002)**:
+```
+Dangling reference detected:
+  User member:     MyLib:MyCompany.Utils.Calculator::DoWork():void
+  References:      System.Data.SqlClient:System.Data.SqlClient.SqlConnection
+  Location:        return type
+  Fix:             Add BCL types to --lib package OR remove dependency on this BCL type
+```
+
+**Result**: User package contains ONLY user types, BCL types excluded.
+
 ## Filter Options
 
 ### `--namespaces`, `-n`

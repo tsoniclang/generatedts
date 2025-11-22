@@ -1,11 +1,15 @@
+using System.Collections.Immutable;
 using System.Reflection;
 using tsbindgen.Core.Policy;
 using tsbindgen.Load;
 using tsbindgen.Model;
+using tsbindgen.Model.Symbols;
+using tsbindgen.Model.Symbols.MemberSymbols;
 using tsbindgen.Normalize;
 using tsbindgen.Shape;
 using tsbindgen.Plan;
 using tsbindgen.Emit;
+using tsbindgen.Library;
 
 namespace tsbindgen;
 
@@ -25,6 +29,7 @@ public static class Builder
     /// <param name="verboseLogging">Enable verbose logging (all categories)</param>
     /// <param name="logCategories">Specific log categories to enable</param>
     /// <param name="strictMode">Enable strict mode (zero non-whitelisted warnings)</param>
+    /// <param name="libraryPackagePath">Path to existing tsbindgen package for library mode (null = normal mode)</param>
     /// <returns>Build result with statistics and diagnostics</returns>
     public static BuildResult Build(
         IReadOnlyList<string> assemblyPaths,
@@ -33,12 +38,23 @@ public static class Builder
         Action<string>? logger = null,
         bool verboseLogging = false,
         HashSet<string>? logCategories = null,
-        bool strictMode = false)
+        bool strictMode = false,
+        string? libraryPackagePath = null)
     {
+        // Load library contract if in library mode
+        LibraryContract? libraryContract = null;
+        if (libraryPackagePath != null)
+        {
+            logger?.Invoke($"Loading library contract from: {libraryPackagePath}");
+            libraryContract = LibraryContractLoader.Load(libraryPackagePath);
+            logger?.Invoke($"Library contract loaded: {libraryContract.TypeCount} types, {libraryContract.MemberCount} members");
+        }
+
         // Create build context with all shared services
-        var ctx = BuildContext.Create(policy, logger, verboseLogging, logCategories, strictMode);
+        var ctx = BuildContext.Create(policy, logger, verboseLogging, logCategories, strictMode, libraryContract);
 
         ctx.Log("Build", "=== Build Started ===");
+        ctx.Log("Build", $"Mode: {(libraryContract != null ? "Library" : "Normal")}");
         ctx.Log("Build", $"Assemblies: {assemblyPaths.Count}");
         ctx.Log("Build", $"Output: {outputDirectory}");
 
@@ -54,6 +70,19 @@ public static class Builder
             ctx.Log("Build", "\n--- Phase 2: Normalize ---");
             graph = graph.WithIndices();
             ctx.Log("Build", "Built symbol indices");
+
+            // Library mode: Filter graph to contract BEFORE Shape passes
+            // This ensures all Shape plans only see allowed types/members
+            if (libraryContract != null)
+            {
+                ctx.Log("Build", "\n--- Library Filtering (before Shape) ---");
+                ctx.Log("Build", $"Contract: {libraryContract.TypeCount} types, {libraryContract.MemberCount} members");
+                graph = LibraryFilter.FilterGraph(ctx, graph, libraryContract);
+
+                // Rebuild indices after filtering
+                graph = graph.WithIndices();
+                ctx.Log("Build", "Rebuilt indices after filtering");
+            }
 
             // Phase 3: Shape
             ctx.Log("Build", "\n--- Phase 3: Shape ---");
@@ -434,6 +463,7 @@ public static class Builder
             }
         }
     }
+
 }
 
 /// <summary>

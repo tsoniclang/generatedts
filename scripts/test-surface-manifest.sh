@@ -11,7 +11,7 @@ echo ""
 # Configuration
 BCL_PATH="$HOME/dotnet/shared/Microsoft.NETCore.App/10.0.0-rc.1.25451.107"
 TEMP_OUTPUT=".tests/surface-verify"
-BASELINE_MANIFEST="baselines/bcl-surface-manifest.json"
+BASELINE_MANIFEST="scripts/harness/baselines/bcl-surface-manifest.json"
 CURRENT_MANIFEST=".tests/surface-current-manifest.json"
 
 # Check baseline exists

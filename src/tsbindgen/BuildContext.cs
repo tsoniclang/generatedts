@@ -4,6 +4,7 @@ using tsbindgen.Core.Intern;
 using tsbindgen.Core.Naming;
 using tsbindgen.Core.Policy;
 using tsbindgen.Renaming;
+using tsbindgen.Library;
 
 namespace tsbindgen;
 
@@ -58,6 +59,13 @@ public sealed class BuildContext
     public bool StrictMode { get; init; }
 
     /// <summary>
+    /// Library contract for library mode.
+    /// When non-null, emission is filtered to only symbols present in the contract.
+    /// Loaded from existing tsbindgen package (metadata.json + bindings.json).
+    /// </summary>
+    public LibraryContract? LibraryContract { get; init; }
+
+    /// <summary>
     /// Create a new BuildContext with default services.
     /// </summary>
     public static BuildContext Create(
@@ -65,7 +73,8 @@ public sealed class BuildContext
         Action<string>? logger = null,
         bool verboseLogging = false,
         HashSet<string>? logCategories = null,
-        bool strictMode = false)
+        bool strictMode = false,
+        LibraryContract? libraryContract = null)
     {
         policy ??= PolicyDefaults.Create();
 
@@ -97,7 +106,8 @@ public sealed class BuildContext
             Logger = logger,
             VerboseLogging = verboseLogging,
             LogCategories = logCategories,
-            StrictMode = strictMode
+            StrictMode = strictMode,
+            LibraryContract = libraryContract
         };
     }
 

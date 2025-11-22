@@ -14,7 +14,7 @@ This is the final safety gate before emission - ensuring no unreviewed changes r
 
 ## Baseline File
 
-Location: `baselines/bcl-surface-manifest.json`
+Location: `scripts/harness/baselines/bcl-surface-manifest.json`
 
 Structure:
 ```json
@@ -99,7 +99,7 @@ Once you've reviewed and approved the changes:
 bash scripts/capture-surface-manifest.sh
 
 # Review what changed in the manifest
-git diff baselines/bcl-surface-manifest.json
+git diff scripts/harness/baselines/bcl-surface-manifest.json
 ```
 
 ### Step 4: Commit the Update
@@ -107,7 +107,7 @@ git diff baselines/bcl-surface-manifest.json
 Include the baseline update in your PR:
 
 ```bash
-git add baselines/bcl-surface-manifest.json
+git add scripts/harness/baselines/bcl-surface-manifest.json
 git commit -m "feat: Update surface baseline for <reason>
 
 <Detailed explanation of what changed and why>
@@ -165,7 +165,7 @@ dotnet run --project src/tsbindgen/tsbindgen.csproj -- \
 bash scripts/capture-surface-manifest.sh
 
 # Commit with clear message
-git add baselines/bcl-surface-manifest.json
+git add scripts/harness/baselines/bcl-surface-manifest.json
 git commit -m "feat: Update baseline for .NET 11.0.0 BCL
 
 Added 47 new types from System.Threading.RateLimiting
@@ -186,7 +186,7 @@ bash scripts/test-surface-manifest.sh
 bash scripts/capture-surface-manifest.sh
 
 # Commit
-git add baselines/bcl-surface-manifest.json
+git add scripts/harness/baselines/bcl-surface-manifest.json
 git commit -m "feat: Improve Task<T> mapping to Promise<T>
 
 Changed all async method return types to use Promise<T>

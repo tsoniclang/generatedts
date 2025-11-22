@@ -93,6 +93,7 @@ public static class MetadataEmitter
 
         return new TypeMetadata
         {
+            StableId = type.StableId.ToString(),
             ClrName = type.ClrFullName,
             TsEmitName = tsEmitName,
             Kind = type.Kind.ToString(),
@@ -133,6 +134,7 @@ public static class MetadataEmitter
 
         return new MethodMetadata
         {
+            StableId = method.StableId.ToString(),
             ClrName = method.ClrName,
             TsEmitName = tsEmitName,
             NormalizedSignature = normalizedSignature,
@@ -172,6 +174,7 @@ public static class MetadataEmitter
 
         return new PropertyMetadata
         {
+            StableId = property.StableId.ToString(),
             ClrName = property.ClrName,
             TsEmitName = tsEmitName,
             NormalizedSignature = normalizedSignature,
@@ -199,6 +202,7 @@ public static class MetadataEmitter
 
         return new FieldMetadata
         {
+            StableId = field.StableId.ToString(),
             ClrName = field.ClrName,
             TsEmitName = tsEmitName,
             NormalizedSignature = normalizedSignature,
@@ -219,6 +223,7 @@ public static class MetadataEmitter
 
         return new EventMetadata
         {
+            StableId = evt.StableId.ToString(),
             ClrName = evt.ClrName,
             TsEmitName = tsEmitName,
             NormalizedSignature = normalizedSignature,
@@ -267,6 +272,7 @@ public sealed record NamespaceMetadata
 /// </summary>
 public sealed record TypeMetadata
 {
+    public required string StableId { get; init; }
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
     public required string Kind { get; init; }
@@ -304,6 +310,7 @@ public sealed record UnsatisfiableInterfaceMetadata
 /// </summary>
 public sealed record MethodMetadata
 {
+    public required string StableId { get; init; }
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
     public required string NormalizedSignature { get; init; }
@@ -324,6 +331,7 @@ public sealed record MethodMetadata
 /// </summary>
 public sealed record PropertyMetadata
 {
+    public required string StableId { get; init; }
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
     public required string NormalizedSignature { get; init; }
@@ -344,6 +352,7 @@ public sealed record PropertyMetadata
 /// </summary>
 public sealed record FieldMetadata
 {
+    public required string StableId { get; init; }
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
     public required string NormalizedSignature { get; init; }
@@ -357,6 +366,7 @@ public sealed record FieldMetadata
 /// </summary>
 public sealed record EventMetadata
 {
+    public required string StableId { get; init; }
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
     public required string NormalizedSignature { get; init; }
