@@ -1,8 +1,12 @@
 using System.Collections.Immutable;
+using System.Linq;
+using tsbindgen.Emit;
+using tsbindgen.Emit.Printers;
 using tsbindgen.Model;
 using tsbindgen.Model.Symbols;
 using tsbindgen.Model.Symbols.MemberSymbols;
 using tsbindgen.Model.Types;
+using tsbindgen.Plan;
 
 namespace tsbindgen.Analysis;
 
@@ -83,6 +87,15 @@ public static class ExtensionMethodAnalyzer
                 continue;
             }
 
+            // STRICT MODE: Skip methods with unresolvable type signatures ('any' erasures)
+            // This prevents TBG905 errors by filtering at plan creation time
+            if (HasErasedAnyTypes(ctx, graph, method, targetTypeSymbol, importPlan: null))
+            {
+                ctx.Log("ExtensionMethodAnalyzer",
+                    $"  Skipping {method.ClrName} on {namedRef.FullName} - contains erased 'any' types");
+                continue;
+            }
+
             // Add to bucket
             if (!buckets.ContainsKey(key))
             {
@@ -141,5 +154,65 @@ public static class ExtensionMethodAnalyzer
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Check if a method's signature contains erased 'any' types.
+    /// Returns true if TypeRefPrinter would produce 'any' for return type, parameters, or constraints.
+    /// STRICT MODE: Methods with 'any' types are filtered out during plan generation.
+    /// </summary>
+    private static bool HasErasedAnyTypes(
+        BuildContext ctx,
+        SymbolGraph graph,
+        MethodSymbol method,
+        TypeSymbol declaringType,
+        ImportPlan? importPlan)
+    {
+        // Create type name resolver for the method's declaring type namespace
+        var resolver = new TypeNameResolver(ctx, graph, importPlan, declaringType.Namespace);
+
+        // Check return type
+        if (method.ReturnType != null)
+        {
+            var returnTypeString = TypeRefPrinter.Print(
+                method.ReturnType,
+                resolver,
+                ctx,
+                forValuePosition: false);
+
+            if (returnTypeString == "any")
+                return true;
+        }
+
+        // Check parameter types (skip first parameter - it's the 'this' parameter)
+        foreach (var param in method.Parameters.Skip(1))
+        {
+            var paramTypeString = TypeRefPrinter.Print(
+                param.Type,
+                resolver,
+                ctx,
+                forValuePosition: false);
+
+            if (paramTypeString == "any")
+                return true;
+        }
+
+        // Check generic constraints
+        foreach (var genParam in method.GenericParameters)
+        {
+            foreach (var constraint in genParam.Constraints)
+            {
+                var constraintTypeString = TypeRefPrinter.Print(
+                    constraint,
+                    resolver,
+                    ctx,
+                    forValuePosition: false);
+
+                if (constraintTypeString == "any")
+                    return true;
+            }
+        }
+
+        return false;
     }
 }
