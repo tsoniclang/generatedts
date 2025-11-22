@@ -142,10 +142,40 @@ Builder.Build
 graph = graph.WithIndices → Model/SymbolGraph.cs
   ↓
   Populates TypeIndex, NamespaceIndex for O(1) lookups
+  ↓
+┌──────────────────────────────────────────┐
+│ [Library Mode Only - if --lib provided] │
+└──────────────────────────────────────────┘
+  ↓
+LibraryContractLoader.Load(libraryPath) → Library/LibraryContractLoader.cs:23
+  ↓
+  ├─→ FindMetadataFiles(libraryPath)
+  │   For each metadata.json:
+  │     └─→ JsonSerializer.Deserialize<NamespaceMetadata>(json)
+  │         Extract type StableIds
+  │
+  ├─→ FindBindingsFiles(libraryPath)
+  │   For each bindings.json:
+  │     └─→ JsonSerializer.Deserialize<NamespaceBindings>(json)
+  │         Extract member StableIds
+  │
+  └─→ new LibraryContract
+      Returns: Immutable contract with HashSet<string> of StableIds
+  ↓
+graph = LibraryFilter.Filter(graph, contract) → Library/LibraryFilter.cs:18
+  ↓
+  For each type:
+    stableId = type.StableId.ToString()
+    if contract.AllowedTypeStableIds.Contains(stableId):
+      REMOVE type (base library type)
+    else:
+      KEEP type (user type)
+  Returns: New SymbolGraph with only user types
 ```
 
 **TypeIndex:** CLR full name → TypeSymbol
 **NamespaceIndex:** Namespace name → NamespaceSymbol
+**Library Mode:** Contract loading validates LIB001, filtering is O(1) per type
 
 ---
 
@@ -654,13 +684,14 @@ constraintFindings = InterfaceConstraintAuditor.Audit(ctx, graph)
   Returns: InterfaceConstraintFindings
   ↓
 ┌────────────────────────────────────────────┐
-│ Phase 4.7: PhaseGate Validation (20+ checks)│
+│ Phase 4.7: PhaseGate Validation (50+ checks)│
 └────────────────────────────────────────────┘
   ↓
-PhaseGate.Validate(ctx, graph, imports, constraintFindings)
+PhaseGate.Validate(ctx, graph, imports, constraintFindings, libraryContract)
   Location: Plan/PhaseGate.cs:24
   [See Section 8 for complete PhaseGate call graph]
   Returns: void (emits diagnostics to ctx.Diagnostics)
+  Validates library mode LIB002 (dangling references) if --lib flag
   Throws: If validation errors exceed threshold
   If no errors: Continue to Emit phase
   If errors: Build fails
@@ -685,10 +716,10 @@ record EmissionPlan
 
 ## Phase 4.7: PhaseGate Validation Call Graph
 
-Comprehensive pre-emission validation (20+ functions):
+Comprehensive pre-emission validation (50+ functions, 19 modules):
 
 ```
-PhaseGate.Validate(ctx, graph, imports, constraintFindings) → Plan/PhaseGate.cs:24
+PhaseGate.Validate(ctx, graph, imports, constraintFindings, libraryContract) → Plan/PhaseGate.cs:24
   ↓
 validationContext = new ValidationContext
   Tracks: ErrorCount, WarningCount, Diagnostics, DiagnosticCountsByCode
@@ -914,6 +945,25 @@ ImportExport.ValidateExportCompleteness(ctx, graph, imports, validationContext)
     Check if source namespace actually exports the type
     If NOT exported: PG_EXPORT_001 "Imported type not exported by source"
   ↓
+┌────────────────────────────────────────────────────────┐
+│ M19: Library Mode Validation (LibraryMode - LIB002)   │
+└────────────────────────────────────────────────────────┘
+  ↓
+LibraryMode.Validate(ctx, graph, contract, validationContext) → Plan/Validation/LibraryMode.cs
+  ↓
+  If NOT in library mode: Skip validation
+  If in library mode:
+    For each namespace → For each type:
+      └─→ CheckTypeReference(type, type.BaseType, contract, ctx, validationContext)
+          └─→ If reference.StableId in contract AND type not in graph: LIB002
+      └─→ For each interface in type.Interfaces:
+          CheckTypeReference(type, interface, contract, ctx, validationContext)
+      └─→ For each member (method/property/field/event):
+          CheckTypeReference recursively for all type references
+          (parameters, return types, property types, field types, event types, generics)
+  LIB001 validated during contract loading (Phase 2)
+  LIB003 disabled in library mode (binding consistency checked separately)
+  ↓
 ┌────────────────────────────────────────────┐
 │ Final: Report Results                     │
 └────────────────────────────────────────────┘
@@ -943,8 +993,9 @@ ImportExport.ValidateExportCompleteness(ctx, graph, imports, validationContext)
 - **Finalization.cs**: Comprehensive finalization sweep (9 checks)
 - **Types.cs**: TypeMap, external resolution, printer consistency
 - **ImportExport.cs**: API surface, import/export completeness
+- **LibraryMode.cs**: Library mode contract integrity, dangling references (LIB002)
 
-**Total PhaseGate Checks:** 20+ validation functions, 40+ diagnostic codes
+**Total PhaseGate Checks:** 50+ validation functions (19 modules), 46 diagnostic codes (including LIB001-LIB003)
 
 ---
 
