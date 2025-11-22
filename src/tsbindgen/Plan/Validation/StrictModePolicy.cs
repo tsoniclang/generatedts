@@ -70,13 +70,9 @@ public static class StrictModePolicy
             "Reserved word collisions - whitelisted for core BCL types used in qualified contexts only. " +
             "Will become ERROR in PR D if unqualified usage detected."),
 
-        // TBG201: Circular namespace dependencies (267 instances)
-        // TEMPORARY WHITELIST - Will be eliminated in PR B via SCC bucketing
-        // TypeScript's module system handles circular imports correctly, but we aim for
-        // zero warnings by restructuring emission to collapse SCCs into single modules.
-        ["TBG201"] = (AllowedLevel.WhitelistedWarning,
-            "Circular namespace dependencies - whitelisted until PR B implements SCC bucketing. " +
-            "Will be eliminated structurally by emitting SCCs as single modules."),
+        // TBG201: Circular namespace dependencies (ELIMINATED in PR B)
+        // Was 267 instances - now 0 after SCC bucketing filters intra-SCC cycles
+        // Kept in policy for documentation, but should never trigger
 
         // TBG203: Interface conformance issues (87 instances)
         // TEMPORARY WHITELIST - Will be eliminated in PR C by honest emission

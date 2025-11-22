@@ -44,7 +44,7 @@ public static class PhaseGate
         ValidationCore.ValidateInterfaceConformance(ctx, graph, validationContext);
         ValidationCore.ValidateInheritance(ctx, graph, validationContext);
         ValidationCore.ValidateEmitScopes(ctx, graph, validationContext);
-        ValidationCore.ValidateImports(ctx, graph, imports, validationContext);
+        ValidationCore.ValidateImports(ctx, graph, imports, plan.SCCBuckets, validationContext);
         ValidationCore.ValidatePolicyCompliance(ctx, graph, validationContext);
 
         // Step 9: PhaseGate Hardening - Additional validation checks

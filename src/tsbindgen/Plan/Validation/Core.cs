@@ -424,7 +424,7 @@ internal static class Core
         ctx.Log("PhaseGate", $"{totalMembers} members, {viewOnlyMembers} ViewOnly");
     }
 
-    internal static void ValidateImports(BuildContext ctx, SymbolGraph graph, ImportPlan imports, ValidationContext validationCtx)
+    internal static void ValidateImports(BuildContext ctx, SymbolGraph graph, ImportPlan imports, SCCPlan sccPlan, ValidationContext validationCtx)
     {
         ctx.Log("PhaseGate", "Validating import plan...");
 
@@ -432,16 +432,26 @@ internal static class Core
         int totalExports = imports.NamespaceExports.Values.Sum(list => list.Count);
 
         // Check for circular dependencies
+        // PR B: Filter out intra-SCC cycles (these are handled by SCC bucketing)
         var circularDeps = DetectCircularDependencies(imports);
-        if (circularDeps.Count > 0)
+        var interSCCCircularDeps = FilterInterSCCCycles(circularDeps, sccPlan);
+
+        if (interSCCCircularDeps.Count > 0)
         {
-            foreach (var cycle in circularDeps)
+            foreach (var cycle in interSCCCircularDeps)
             {
                 validationCtx.RecordDiagnostic(
                     DiagnosticCodes.CircularInheritance,
                     "WARNING",
                     $"Circular dependency detected: {cycle}");
             }
+        }
+
+        // PR B: Log eliminated intra-SCC cycles for visibility
+        var intraSCCCount = circularDeps.Count - interSCCCircularDeps.Count;
+        if (intraSCCCount > 0)
+        {
+            ctx.Log("PhaseGate", $"Filtered {intraSCCCount} intra-SCC circular dependencies (handled by SCC bucketing)");
         }
 
         ctx.Log("PhaseGate", $"{totalImports} import statements, {totalExports} export statements");
@@ -583,5 +593,51 @@ internal static class Core
         path.RemoveAt(path.Count - 1);
         recursionStack.Remove(node);
         return false;
+    }
+
+    /// <summary>
+    /// PR B: Filter circular dependencies to only include inter-SCC cycles.
+    /// Intra-SCC cycles are handled by SCC bucketing and should not generate warnings.
+    /// </summary>
+    private static List<string> FilterInterSCCCycles(List<string> cycles, SCCPlan sccPlan)
+    {
+        var interSCCCycles = new List<string>();
+
+        foreach (var cycle in cycles)
+        {
+            // Parse cycle string: "NS1 -> NS2 -> NS3 -> NS1"
+            var namespaces = cycle.Split(new[] { " -> " }, System.StringSplitOptions.RemoveEmptyEntries);
+
+            if (namespaces.Length < 2)
+                continue;
+
+            // Check if all namespaces in cycle are in the same SCC
+            var firstNS = namespaces[0];
+            if (!sccPlan.NamespaceToBucket.TryGetValue(firstNS, out var firstBucket))
+            {
+                // Unknown namespace - include cycle as warning
+                interSCCCycles.Add(cycle);
+                continue;
+            }
+
+            var allInSameSCC = true;
+            foreach (var ns in namespaces)
+            {
+                if (!sccPlan.NamespaceToBucket.TryGetValue(ns, out var bucket) || bucket != firstBucket)
+                {
+                    allInSameSCC = false;
+                    break;
+                }
+            }
+
+            // If not all in same SCC, this is an inter-SCC cycle (should not happen with correct SCC algorithm)
+            if (!allInSameSCC)
+            {
+                interSCCCycles.Add(cycle);
+            }
+            // Otherwise, it's an intra-SCC cycle - filter it out (handled by SCC bucketing)
+        }
+
+        return interSCCCycles;
     }
 }

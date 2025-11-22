@@ -319,6 +319,11 @@ public static class Builder
         var extensionMethods = Analysis.ExtensionMethodAnalyzer.Analyze(ctx, graph);
         ctx.Log("Build", $"Found {extensionMethods.Buckets.Length} extension method buckets ({extensionMethods.TotalMethodCount} total methods)");
 
+        // PR B: Compute SCC buckets to eliminate circular namespace dependencies
+        ctx.Log("Build", "\n--- Phase 4.12: SCC Bucketing ---");
+        var sccPlan = Plan.SCCPlanner.PlanSCCBuckets(ctx, imports);
+        ctx.Log("Build", $"Computed {sccPlan.Buckets.Count} SCC buckets ({sccPlan.Buckets.Count(b => b.IsMultiNamespace)} multi-namespace)");
+
         // Build emission plan
         var emissionPlan = new EmissionPlan
         {
@@ -329,7 +334,8 @@ public static class Builder
             StaticConflicts = staticConflicts,
             OverrideConflicts = overrideConflicts,
             PropertyOverrides = propertyOverrides,
-            ExtensionMethods = extensionMethods
+            ExtensionMethods = extensionMethods,
+            SCCBuckets = sccPlan
         };
 
         // Phase 4.7: PhaseGate Validation - validate complete emission plan before emission
@@ -467,6 +473,12 @@ public sealed record EmissionPlan
     /// Extension methods plan: all extension method buckets grouped by target type.
     /// </summary>
     public required Analysis.ExtensionMethodsPlan ExtensionMethods { get; init; }
+
+    /// <summary>
+    /// PR B: Plan for SCC bucketing to eliminate circular namespace dependencies (TBG201).
+    /// Groups namespaces by Strongly Connected Components.
+    /// </summary>
+    public required Plan.SCCPlan SCCBuckets { get; init; }
 
     public int NamespaceCount => Graph.Namespaces.Length;
 }
