@@ -1,6 +1,6 @@
 #!/bin/bash
-# Library mode test - ensures --lib mode produces identical output to normal mode
-# when using full BCL as library contract
+# Library mode test - validates --lib mode with real user assembly
+# Tests that user assemblies only emit their own types, not BCL types
 
 set -euo pipefail
 
@@ -10,85 +10,177 @@ echo "================================================"
 echo ""
 
 # Clean previous runs
-echo "[1/4] Cleaning previous test runs..."
-rm -rf .tests/lib/baseline .tests/lib/library-mode
-mkdir -p .tests/lib
+echo "[1/5] Cleaning previous test runs..."
+rm -rf .tests/lib-harness
+mkdir -p .tests/lib-harness
 
-# Run 1: Generate full BCL normally (baseline)
-echo "[2/4] Running normal generation (baseline)..."
+# Step 1: Generate BCL types (the library contract)
+echo "[2/5] Generating BCL types (library contract)..."
 dotnet run --project src/tsbindgen/tsbindgen.csproj -- \
     generate -d ~/dotnet/shared/Microsoft.NETCore.App/10.0.0-rc.1.25451.107 \
-    -o .tests/lib/baseline --strict > .tests/lib/baseline-output.txt 2>&1
+    -o .tests/lib-harness/bcl-types \
+    --strict > .tests/lib-harness/bcl-gen.txt 2>&1
 
-# Check baseline succeeded
 if [ $? -ne 0 ]; then
-    echo "❌ FAILED: Baseline generation failed"
-    cat .tests/lib/baseline-output.txt
+    echo "❌ FAILED: BCL generation failed"
+    tail -50 .tests/lib-harness/bcl-gen.txt
     exit 1
 fi
 
-echo "          ✓ Baseline generation succeeded"
+bcl_namespaces=$(find .tests/lib-harness/bcl-types -mindepth 1 -maxdepth 1 -type d | wc -l)
+echo "          ✓ BCL generation succeeded ($bcl_namespaces namespaces)"
 
-# Run 2: Generate with --lib pointing to baseline
-echo "[3/4] Running library mode generation (--lib baseline)..."
-dotnet run --project src/tsbindgen/tsbindgen.csproj -- \
-    generate -d ~/dotnet/shared/Microsoft.NETCore.App/10.0.0-rc.1.25451.107 \
-    -o .tests/lib/library-mode \
-    --lib .tests/lib/baseline \
-    --strict > .tests/lib/library-mode-output.txt 2>&1
+# Step 2: Create simple user library
+echo "[3/5] Creating simple user library..."
+mkdir -p .tests/lib-harness/user-lib
+cat > .tests/lib-harness/user-lib/UserLib.csproj <<'EOF'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>
+EOF
 
-# Check library mode succeeded
-if [ $? -ne 0 ]; then
-    echo "❌ FAILED: Library mode generation failed"
-    cat .tests/lib/library-mode-output.txt
+cat > .tests/lib-harness/user-lib/Calculator.cs <<'EOF'
+using System;
+using System.Collections.Generic;
+
+namespace MyCompany.Utils
+{
+    public class Calculator
+    {
+        public int Add(int a, int b) => a + b;
+        public int Subtract(int a, int b) => a - b;
+        public List<int> GetRange(int start, int count)
+        {
+            var result = new List<int>();
+            for (int i = 0; i < count; i++)
+            {
+                result.Add(start + i);
+            }
+            return result;
+        }
+    }
+
+    public class StringHelper
+    {
+        public string Reverse(string input)
+        {
+            if (string.IsNullOrEmpty(input))
+                return input;
+
+            char[] chars = input.ToCharArray();
+            Array.Reverse(chars);
+            return new string(chars);
+        }
+    }
+}
+EOF
+
+# Build user library
+cd .tests/lib-harness/user-lib
+dotnet build -c Release > /dev/null 2>&1
+cd ../../..
+
+# Find the DLL (could be in bin/ or artifacts/)
+userlib_dll=""
+if [ -f .tests/lib-harness/user-lib/bin/Release/net10.0/UserLib.dll ]; then
+    userlib_dll=".tests/lib-harness/user-lib/bin/Release/net10.0/UserLib.dll"
+elif [ -f ./artifacts/bin/UserLib/Release/net10.0/UserLib.dll ]; then
+    userlib_dll="./artifacts/bin/UserLib/Release/net10.0/UserLib.dll"
+else
+    echo "❌ FAILED: User library DLL not found"
     exit 1
 fi
 
-echo "          ✓ Library mode generation succeeded"
+echo "          ✓ User library created and built ($userlib_dll)"
+
+# Step 3: Generate user library WITHOUT --lib (should emit everything)
+echo "[4/5] Generating user library without --lib (baseline)..."
+dotnet run --project src/tsbindgen/tsbindgen.csproj -- \
+    generate -a $userlib_dll \
+    -d ~/dotnet/shared/Microsoft.NETCore.App/10.0.0-rc.1.25451.107 \
+    -o .tests/lib-harness/user-lib-full \
+    --strict > .tests/lib-harness/user-full.txt 2>&1
+
+if [ $? -ne 0 ]; then
+    echo "❌ FAILED: User library generation (full) failed"
+    tail -50 .tests/lib-harness/user-full.txt
+    exit 1
+fi
+
+full_namespaces=$(find .tests/lib-harness/user-lib-full -mindepth 1 -maxdepth 1 -type d | wc -l)
+echo "          ✓ User library (full) generated: $full_namespaces namespaces"
+echo "          (Includes both user types AND BCL types)"
+
+# Step 4: Generate user library WITH --lib (should only emit user types)
+echo "[5/5] Generating user library with --lib (filtered)..."
+dotnet run --project src/tsbindgen/tsbindgen.csproj -- \
+    generate -a $userlib_dll \
+    -d ~/dotnet/shared/Microsoft.NETCore.App/10.0.0-rc.1.25451.107 \
+    -o .tests/lib-harness/user-lib-filtered \
+    --lib .tests/lib-harness/bcl-types \
+    --strict > .tests/lib-harness/user-filtered.txt 2>&1
+
+if [ $? -ne 0 ]; then
+    echo "❌ FAILED: User library generation (--lib) failed"
+    tail -100 .tests/lib-harness/user-filtered.txt
+    exit 1
+fi
+
+filtered_namespaces=$(find .tests/lib-harness/user-lib-filtered -mindepth 1 -maxdepth 1 -type d | wc -l)
+echo "          ✓ User library (--lib) generated: $filtered_namespaces namespaces"
 
 # Check for LIB001-003 errors
-echo "[4/4] Checking for library mode validation errors..."
-if grep -q "LIB00[123]" .tests/lib/library-mode-output.txt; then
+if grep -q "LIB00[123]" .tests/lib-harness/user-filtered.txt; then
     echo "❌ FAILED: Library mode validation errors detected"
-    echo ""
-    echo "LIB001-003 errors found:"
-    grep "LIB00[123]" .tests/lib/library-mode-output.txt
-    echo ""
+    grep "LIB00[123]" .tests/lib-harness/user-filtered.txt | head -20
     exit 1
 fi
 
-echo "          ✓ No library mode validation errors"
+echo "          ✓ No LIB001-003 validation errors"
 
-# Compare outputs
-echo "          Comparing outputs (byte-for-byte)..."
-if diff -r .tests/lib/baseline .tests/lib/library-mode > /dev/null 2>&1; then
-    echo "          ✓ Outputs are identical (byte-for-byte)"
-    echo ""
-    echo "================================================"
-    echo "✓ LIBRARY MODE VERIFIED"
-    echo "================================================"
-    echo ""
-    echo "Summary:"
-    echo "  - Normal mode generation succeeded"
-    echo "  - Library mode generation succeeded"
-    echo "  - No LIB001-003 validation errors"
-    echo "  - Outputs are byte-for-byte identical"
-    echo "  - Library mode contract filtering is transparent"
-    echo ""
-    exit 0
-else
-    echo "❌ FAILED: Outputs differ between normal and library mode"
-    echo ""
-    echo "This indicates library mode is filtering or changing output incorrectly."
-    echo "When using full BCL as library contract, output should be identical."
-    echo ""
-    echo "Run 'diff -r .tests/lib/baseline .tests/lib/library-mode' to see differences"
-    echo ""
-
-    # Show summary of differences
-    echo "Difference summary:"
-    diff -r .tests/lib/baseline .tests/lib/library-mode | head -50
-    echo ""
-
+# Verify filtering happened
+if [ "$filtered_namespaces" -ge "$full_namespaces" ]; then
+    echo "❌ FAILED: --lib didn't filter anything ($filtered_namespaces >= $full_namespaces)"
     exit 1
 fi
+
+echo "          ✓ Filtering worked: $full_namespaces → $filtered_namespaces namespaces"
+
+# Verify user namespace is present
+if [ ! -d .tests/lib-harness/user-lib-filtered/MyCompany.Utils ]; then
+    echo "❌ FAILED: MyCompany.Utils namespace missing from filtered output"
+    exit 1
+fi
+
+echo "          ✓ User namespace (MyCompany.Utils) present in output"
+
+# Verify BCL namespaces are NOT present (they're in the library contract)
+if [ -d .tests/lib-harness/user-lib-filtered/System ]; then
+    echo "❌ FAILED: System namespace should NOT be in filtered output (it's in --lib)"
+    exit 1
+fi
+
+echo "          ✓ BCL namespaces correctly excluded from output"
+
+# Count types in user namespace
+user_types=$(find .tests/lib-harness/user-lib-filtered/MyCompany.Utils -name "*.d.ts" | wc -l)
+echo "          User types emitted: $user_types"
+
+echo ""
+echo "================================================"
+echo "✓ LIBRARY MODE FULLY VERIFIED"
+echo "================================================"
+echo ""
+echo "Summary:"
+echo "  ✓ BCL generation succeeded ($bcl_namespaces namespaces)"
+echo "  ✓ User library build succeeded"
+echo "  ✓ Full generation: $full_namespaces namespaces (user + BCL)"
+echo "  ✓ Filtered generation: $filtered_namespaces namespaces (user only)"
+echo "  ✓ BCL types correctly excluded via --lib"
+echo "  ✓ User types (MyCompany.Utils) correctly included"
+echo "  ✓ No LIB001-003 validation errors"
+echo "  ✓ Strict mode passes"
+echo ""

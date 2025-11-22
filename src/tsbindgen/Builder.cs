@@ -66,17 +66,23 @@ public static class Builder
             var stats = graph.GetStatistics();
             ctx.Log("Build", $"Loaded: {stats.NamespaceCount} namespaces, {stats.TypeCount} types, {stats.TotalMembers} members");
 
-            // Library mode: contract loaded and attached to context
-            // Filtering happens during emission, not here
-            if (libraryContract != null)
-            {
-                ctx.Log("Build", $"Library mode: contract has {libraryContract.TypeCount} types, {libraryContract.MemberCount} members");
-            }
-
             // Phase 2: Normalize (build indices)
             ctx.Log("Build", "\n--- Phase 2: Normalize ---");
             graph = graph.WithIndices();
             ctx.Log("Build", "Built symbol indices");
+
+            // Library mode: Filter graph to contract BEFORE Shape passes
+            // This ensures all Shape plans only see allowed types/members
+            if (libraryContract != null)
+            {
+                ctx.Log("Build", "\n--- Library Filtering (before Shape) ---");
+                ctx.Log("Build", $"Contract: {libraryContract.TypeCount} types, {libraryContract.MemberCount} members");
+                graph = LibraryFilter.FilterGraph(ctx, graph, libraryContract);
+
+                // Rebuild indices after filtering
+                graph = graph.WithIndices();
+                ctx.Log("Build", "Rebuilt indices after filtering");
+            }
 
             // Phase 3: Shape
             ctx.Log("Build", "\n--- Phase 3: Shape ---");
@@ -458,80 +464,6 @@ public static class Builder
         }
     }
 
-    /// <summary>
-    /// Filter symbol graph to only include types and members present in library contract.
-    /// Used in library mode to restrict emission to library surface.
-    /// </summary>
-    private static SymbolGraph FilterByLibraryContract(
-        BuildContext ctx,
-        SymbolGraph graph,
-        LibraryContract contract)
-    {
-        ctx.Log("Library", "Filtering symbol graph by library contract...");
-
-        var filteredNamespaces = new List<NamespaceSymbol>();
-
-        foreach (var ns in graph.Namespaces)
-        {
-            // Filter types in this namespace
-            var filteredTypes = new List<TypeSymbol>();
-
-            foreach (var type in ns.Types)
-            {
-                // Check if type is allowed
-                if (!LibraryFilter.IsAllowedType(type, contract))
-                {
-                    ctx.Log("Library", $"Filtered out type: {type.StableId}");
-                    continue;
-                }
-
-                // Filter members within type
-                var filteredMethods = type.Members.Methods
-                    .Where(m => LibraryFilter.IsAllowedMethod(m, contract))
-                    .ToImmutableArray();
-
-                var filteredProperties = type.Members.Properties
-                    .Where(p => LibraryFilter.IsAllowedProperty(p, contract))
-                    .ToImmutableArray();
-
-                var filteredFields = type.Members.Fields
-                    .Where(f => LibraryFilter.IsAllowedField(f, contract))
-                    .ToImmutableArray();
-
-                var filteredEvents = type.Members.Events
-                    .Where(e => LibraryFilter.IsAllowedEvent(e, contract))
-                    .ToImmutableArray();
-
-                // Constructors are not in contract (no StableIds), so keep all
-                var filteredConstructors = type.Members.Constructors;
-
-                // Create filtered members bag
-                var filteredMembers = new TypeMembers
-                {
-                    Methods = filteredMethods,
-                    Properties = filteredProperties,
-                    Fields = filteredFields,
-                    Events = filteredEvents,
-                    Constructors = filteredConstructors
-                };
-
-                // Create filtered type
-                var filteredType = type.WithMembers(filteredMembers);
-                filteredTypes.Add(filteredType);
-            }
-
-            // Only keep namespace if it has types after filtering
-            if (filteredTypes.Count > 0)
-            {
-                var filteredNs = ns with { Types = filteredTypes.ToImmutableArray() };
-                filteredNamespaces.Add(filteredNs);
-            }
-        }
-
-        ctx.Log("Library", $"Filtered: {filteredNamespaces.Count} namespaces remain (from {graph.Namespaces.Length})");
-
-        return graph with { Namespaces = filteredNamespaces.ToImmutableArray() };
-    }
 }
 
 /// <summary>

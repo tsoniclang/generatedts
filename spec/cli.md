@@ -39,6 +39,39 @@ Output directory for generated files.
 tsbindgen generate --assembly Assembly.dll --out-dir ./types
 ```
 
+## Library Mode
+
+### `--lib`
+Load library contract from existing tsbindgen package and emit only symbols in that contract.
+
+Library mode restricts emission to types and members that exist in a previously generated package directory, ensuring the output is a valid subset of the library surface.
+
+**Usage**:
+```bash
+# Generate baseline package
+tsbindgen generate -d ~/dotnet/shared/Microsoft.NETCore.App/10.0.0 -o ./bcl-full
+
+# Generate subset using library contract
+tsbindgen generate -d ~/dotnet/shared/Microsoft.NETCore.App/10.0.0 -o ./bcl-subset --lib ./bcl-full
+```
+
+**What it does**:
+1. Loads contract from metadata.json (type/member StableIds) and bindings.json (runtime callability)
+2. Filters current build to only emit types/members in the contract
+3. Validates filtered output is self-contained (no dangling references - **LIB002**)
+4. Validates emitted surface exactly matches binding surface (**LIB003**)
+5. Fails if contract references non-existent symbols (**LIB001**)
+
+**Requirements**:
+- Library package directory must contain `**/metadata.json` files (with StableIds)
+- Library package directory must contain `**/bindings.json` files
+- All validation errors (LIB001-003) are hard failures in `--strict` mode
+
+**Example errors**:
+- **LIB001**: Contract references `System.Foo` but current assemblies don't contain it
+- **LIB002**: Emitted member references `System.Bar` which isn't in the contract (dangling reference)
+- **LIB003**: Contract bindings don't match emitted members (missing binding or extra binding)
+
 ## Filter Options
 
 ### `--namespaces`, `-n`
