@@ -30,63 +30,16 @@ fi
 bcl_namespaces=$(find .tests/lib-harness/bcl-types -mindepth 1 -maxdepth 1 -type d | wc -l)
 echo "          ✓ BCL generation succeeded ($bcl_namespaces namespaces)"
 
-# Step 2: Create simple user library
-echo "[3/5] Creating simple user library..."
-mkdir -p .tests/lib-harness/user-lib
-cat > .tests/lib-harness/user-lib/UserLib.csproj <<'EOF'
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
-</Project>
-EOF
-
-cat > .tests/lib-harness/user-lib/Calculator.cs <<'EOF'
-using System;
-using System.Collections.Generic;
-
-namespace MyCompany.Utils
-{
-    public class Calculator
-    {
-        public int Add(int a, int b) => a + b;
-        public int Subtract(int a, int b) => a - b;
-        public List<int> GetRange(int start, int count)
-        {
-            var result = new List<int>();
-            for (int i = 0; i < count; i++)
-            {
-                result.Add(start + i);
-            }
-            return result;
-        }
-    }
-
-    public class StringHelper
-    {
-        public string Reverse(string input)
-        {
-            if (string.IsNullOrEmpty(input))
-                return input;
-
-            char[] chars = input.ToCharArray();
-            Array.Reverse(chars);
-            return new string(chars);
-        }
-    }
-}
-EOF
-
-# Build user library
-cd .tests/lib-harness/user-lib
+# Step 2: Build user library fixture
+echo "[3/5] Building user library fixture..."
+cd scripts/harness/fixtures/UserLib
 dotnet build -c Release > /dev/null 2>&1
-cd ../../..
+cd ../../../..
 
 # Find the DLL (could be in bin/ or artifacts/)
 userlib_dll=""
-if [ -f .tests/lib-harness/user-lib/bin/Release/net10.0/UserLib.dll ]; then
-    userlib_dll=".tests/lib-harness/user-lib/bin/Release/net10.0/UserLib.dll"
+if [ -f scripts/harness/fixtures/UserLib/bin/Release/net10.0/UserLib.dll ]; then
+    userlib_dll="scripts/harness/fixtures/UserLib/bin/Release/net10.0/UserLib.dll"
 elif [ -f ./artifacts/bin/UserLib/Release/net10.0/UserLib.dll ]; then
     userlib_dll="./artifacts/bin/UserLib/Release/net10.0/UserLib.dll"
 else
@@ -94,7 +47,7 @@ else
     exit 1
 fi
 
-echo "          ✓ User library created and built ($userlib_dll)"
+echo "          ✓ User library fixture built ($userlib_dll)"
 
 # Step 3: Generate user library WITHOUT --lib (should emit everything)
 echo "[4/5] Generating user library without --lib (baseline)..."
