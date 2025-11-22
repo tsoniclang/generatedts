@@ -1,5 +1,5 @@
 #!/bin/bash
-# Regression test for strict mode - ensures no non-whitelisted warnings
+# Regression test for strict mode - ensures zero errors, zero warnings, and disciplined INFO codes
 
 set -e  # Exit on error
 
@@ -9,7 +9,7 @@ echo "================================================"
 echo ""
 
 # Run strict mode validation
-echo "[1/2] Running strict mode validation..."
+echo "[1/3] Running strict mode validation..."
 output=$(dotnet run --project src/tsbindgen/tsbindgen.csproj -- \
     generate -d ~/dotnet/shared/Microsoft.NETCore.App/10.0.0-rc.1.25451.107 \
     -o .tests/strict-test --strict --logs PhaseGate 2>&1)
@@ -29,7 +29,7 @@ echo "✓ Strict mode validation passed"
 echo ""
 
 # Check validation output
-echo "[2/2] Checking diagnostic counts..."
+echo "[2/3] Checking diagnostic counts..."
 
 # Extract counts from output
 errors=$(echo "$output" | grep -o "Validation complete - [0-9]* errors" | grep -o "[0-9]*" || echo "0")
@@ -48,18 +48,54 @@ if [ "$errors" != "0" ]; then
 fi
 
 echo "✓ Zero errors verified"
-echo ""
 
-# Check for non-whitelisted warnings
-non_whitelisted=$(echo "$output" | grep "Strict mode enforced:" || true)
-
-if [ -n "$non_whitelisted" ]; then
-    echo "❌ FAILED: Non-whitelisted warnings detected"
-    echo "$non_whitelisted"
+# Verify warning count is zero (strict mode zero tolerance)
+if [ "$warnings" != "0" ]; then
+    echo "❌ FAILED: Expected 0 warnings (strict mode zero tolerance), got $warnings"
     exit 1
 fi
 
-echo "✓ No non-whitelisted warnings detected"
+echo "✓ Zero warnings verified (strict mode zero tolerance)"
+echo ""
+
+# Check INFO code discipline
+echo "[3/3] Validating INFO diagnostic codes..."
+
+# Expected INFO codes (these are the only allowed codes)
+# TBG120: Reserved word collisions (8 instances - core BCL types in qualified contexts)
+# TBG310: Property covariance (TypeScript language limitation)
+# TBG410: Narrowed generic constraints (valid TypeScript pattern)
+expected_codes="TBG120 TBG310 TBG410"
+
+# Extract actual INFO codes from diagnostic summary
+actual_codes=$(echo "$output" | grep -A 10 "Diagnostic Summary by Code:" | \
+    grep "TBG[0-9]*:" | \
+    sed 's/.*\(TBG[0-9]*\).*/\1/' | \
+    sort -u | \
+    tr '\n' ' ' | \
+    sed 's/ $//')
+
+echo "  Expected INFO codes: $expected_codes"
+echo "  Actual INFO codes:   $actual_codes"
+echo ""
+
+# Compare expected vs actual
+if [ "$actual_codes" != "$expected_codes" ]; then
+    echo "❌ FAILED: INFO diagnostic codes don't match expected set"
+    echo ""
+    echo "This indicates either:"
+    echo "  - A new INFO code was introduced (requires review)"
+    echo "  - An expected INFO code is missing (BCL change or regression)"
+    echo ""
+    echo "Expected: $expected_codes"
+    echo "Actual:   $actual_codes"
+    echo ""
+    echo "Diagnostic Summary:"
+    echo "$output" | grep -A 10 "Diagnostic Summary by Code:"
+    exit 1
+fi
+
+echo "✓ INFO diagnostic codes match expected set"
 echo ""
 
 echo "================================================"
@@ -70,5 +106,6 @@ echo "Summary:"
 echo "  - Strict mode validation passes"
 echo "  - Zero errors (ERROR level diagnostics)"
 echo "  - Zero warnings (strict mode zero tolerance achieved)"
-echo "  - INFO diagnostics don't count toward totals (25 expected)"
+echo "  - INFO codes disciplined (only TBG120, TBG310, TBG410 allowed)"
+echo "  - INFO counts may vary with BCL changes, but code set is locked"
 echo ""

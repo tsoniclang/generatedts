@@ -6,13 +6,13 @@ namespace tsbindgen.Plan.Validation;
 /// Strict mode diagnostic policy.
 /// Defines which diagnostic codes are allowed in strict mode validation.
 ///
-/// Strict mode philosophy:
-/// - ERROR: Always disallowed (blocks emission)
-/// - WARNING: Disallowed unless explicitly whitelisted here
-/// - INFO: Always allowed (informational only, doesn't count toward warning total)
+/// Strict mode philosophy (ZERO WARNINGS):
+/// - ERROR: Always forbidden (blocks emission)
+/// - WARNING: Always forbidden (strict mode = zero tolerance)
+/// - INFO: Always allowed (informational only, doesn't count toward totals)
 ///
-/// When strict mode is enabled, PhaseGate validation fails if any non-whitelisted
-/// WARNING exists, ensuring zero technical debt in production builds.
+/// When strict mode is enabled, PhaseGate validation fails if ANY WARNING exists.
+/// All warnings must be either eliminated or downgraded to INFO with justification.
 /// </summary>
 public static class StrictModePolicy
 {
@@ -27,12 +27,6 @@ public static class StrictModePolicy
         Forbidden,
 
         /// <summary>
-        /// Allowed only if explicitly whitelisted (WARNING level).
-        /// Must have documented justification.
-        /// </summary>
-        WhitelistedWarning,
-
-        /// <summary>
         /// Always allowed (INFO level).
         /// Informational only - doesn't count toward warning totals.
         /// </summary>
@@ -41,6 +35,9 @@ public static class StrictModePolicy
 
     /// <summary>
     /// Central policy mapping: diagnostic code → allowed level in strict mode.
+    /// Currently only tracks ERROR codes (Forbidden).
+    /// WARNING codes are unconditionally forbidden.
+    /// INFO codes are unconditionally allowed.
     /// </summary>
     private static readonly Dictionary<string, (AllowedLevel Level, string Justification)> Policy = new()
     {
@@ -58,35 +55,35 @@ public static class StrictModePolicy
         ["TBG907"] = (AllowedLevel.Forbidden, "Extension import resolution - must be zero"),
 
         // ============================================================================
-        // WARNINGS - Zero tolerance (no whitelisted warnings)
+        // WARNINGS - Unconditionally forbidden (zero tolerance achieved)
         // ============================================================================
         // All previous WARNING codes have been eliminated or downgraded to INFO:
         //
-        // TBG120: Reserved word collisions - DOWNGRADED TO INFO in PR D
+        // TBG120: Reserved word collisions - DOWNGRADED TO INFO
         // (8 instances: System.Enum, System.String, System.Type, System.Boolean, System.Void,
         //  System.Diagnostics.Switch, System.Diagnostics.Debugger, System.Reflection.Module)
-        // These core BCL types use reserved words but are always used in qualified contexts
+        // Always used in qualified contexts - no collision risk
         //
-        // TBG201: Circular namespace dependencies - ELIMINATED in PR B
-        // (was 267 instances, now 0 after SCC bucketing filters intra-SCC cycles)
+        // TBG201: Circular namespace dependencies - ELIMINATED
+        // (was 267 instances, now 0 via SCC bucketing)
         //
-        // TBG203: Interface conformance failures - ELIMINATED in PR C/D
-        // (was 87 instances, now 0 after honest emission filtering fixes)
+        // TBG203: Interface conformance failures - ELIMINATED
+        // (was 87 instances, now 0 via honest emission + fixes)
 
         // ============================================================================
-        // INFO - Always allowed (informational, doesn't count as warnings)
+        // INFO - Unconditionally allowed (doesn't count toward totals)
         // ============================================================================
-        //
-        // NOTE: INFO diagnostics don't need whitelist entries - they're always allowed
-        // Listed here for documentation only:
-        // - TBG310: Property covariance (emitted as INFO)
-        // - TBG410: Narrowed generic constraints (emitted as INFO)
+        // INFO diagnostics don't need policy entries - always allowed
+        // Current INFO codes:
+        // - TBG120: Reserved word collisions (8 core BCL types in qualified contexts)
+        // - TBG310: Property covariance (TypeScript language limitation)
+        // - TBG410: Narrowed generic constraints (valid TypeScript pattern)
     };
 
     /// <summary>
     /// Check if a diagnostic code is allowed in strict mode.
     /// </summary>
-    /// <param name="code">Diagnostic code (e.g., "TBG201")</param>
+    /// <param name="code">Diagnostic code (e.g., "TBG310")</param>
     /// <param name="level">Diagnostic level ("ERROR", "WARNING", "INFO")</param>
     /// <returns>True if allowed, false if should fail validation</returns>
     public static bool IsAllowed(string code, string level)
@@ -99,16 +96,11 @@ public static class StrictModePolicy
         if (level == "ERROR")
             return false;
 
-        // WARNING - check policy
+        // WARNING always fails validation (strict mode = zero tolerance)
         if (level == "WARNING")
         {
-            if (!Policy.TryGetValue(code, out var policy))
-            {
-                // Unknown code - fail safe: disallow
-                return false;
-            }
-
-            return policy.Level == AllowedLevel.WhitelistedWarning;
+            // No exceptions - strict mode forbids ALL warnings
+            return false;
         }
 
         // Unknown level - fail safe: disallow
@@ -116,7 +108,7 @@ public static class StrictModePolicy
     }
 
     /// <summary>
-    /// Get the justification for a whitelisted diagnostic code.
+    /// Get the justification for a diagnostic code.
     /// </summary>
     public static string GetJustification(string code)
     {
@@ -125,25 +117,24 @@ public static class StrictModePolicy
             return policy.Justification;
         }
 
-        return "No justification available";
+        return "Strict mode forbids warnings. Downgrade to INFO with justification or fix root cause.";
     }
 
     /// <summary>
     /// Get all whitelisted warning codes.
+    /// INTENTIONALLY EMPTY - strict mode has zero tolerance for warnings.
+    /// This method must return empty to maintain zero-warning invariant.
     /// </summary>
     public static IEnumerable<string> GetWhitelistedWarnings()
     {
-        foreach (var (code, (level, _)) in Policy)
-        {
-            if (level == AllowedLevel.WhitelistedWarning)
-            {
-                yield return code;
-            }
-        }
+        // Intentionally empty - zero tolerance policy
+        yield break;
     }
 
     /// <summary>
-    /// Get all informational codes.
+    /// Get all informational codes currently defined in the policy.
+    /// Note: INFO codes don't need policy entries - they're always allowed.
+    /// This returns empty because INFO codes aren't stored in the policy dictionary.
     /// </summary>
     public static IEnumerable<string> GetInformationalCodes()
     {
