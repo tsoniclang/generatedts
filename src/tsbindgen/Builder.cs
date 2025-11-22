@@ -296,9 +296,6 @@ public static class Builder
         var constraintFindings = InterfaceConstraintAuditor.Audit(ctx, graph);
         ctx.Log("Build", $"Found {constraintFindings.Findings.Length} interface constraint findings");
 
-        // Validate before proceeding
-        PhaseGate.Validate(ctx, graph, imports, constraintFindings);
-
         // D1: Plan static hierarchy flattening to eliminate TS2417 errors
         ctx.Log("Build", "\n--- Phase 4.7: Static Hierarchy Flattening ---");
         var staticFlattening = Shape.StaticHierarchyFlattener.Plan(ctx, graph);
@@ -320,7 +317,8 @@ public static class Builder
         var extensionMethods = Analysis.ExtensionMethodAnalyzer.Analyze(ctx, graph);
         ctx.Log("Build", $"Found {extensionMethods.Buckets.Length} extension method buckets ({extensionMethods.TotalMethodCount} total methods)");
 
-        return new EmissionPlan
+        // Build emission plan
+        var emissionPlan = new EmissionPlan
         {
             Graph = graph,
             Imports = imports,
@@ -331,6 +329,12 @@ public static class Builder
             PropertyOverrides = propertyOverrides,
             ExtensionMethods = extensionMethods
         };
+
+        // Phase 4.7: PhaseGate Validation - validate complete emission plan before emission
+        ctx.Log("Build", "\n--- Phase 4.7: PhaseGate Validation ---");
+        PhaseGate.Validate(ctx, emissionPlan, constraintFindings);
+
+        return emissionPlan;
     }
 
     /// <summary>

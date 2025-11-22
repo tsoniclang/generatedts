@@ -21,8 +21,11 @@ namespace tsbindgen.Plan;
 /// </summary>
 public static class PhaseGate
 {
-    public static void Validate(BuildContext ctx, SymbolGraph graph, ImportPlan imports, InterfaceConstraintFindings constraintFindings)
+    public static void Validate(BuildContext ctx, EmissionPlan plan, InterfaceConstraintFindings constraintFindings)
     {
+        var graph = plan.Graph;
+        var imports = plan.Imports;
+
         ctx.Log("PhaseGate", "Validating symbol graph before emission...");
 
         var validationContext = new ValidationContext
@@ -73,9 +76,9 @@ public static class PhaseGate
         // PhaseGate Hardening - M5: Class surface uniqueness (PG_NAME_005)
         Names.ValidateClassSurfaceUniqueness(ctx, graph, validationContext);
 
-        // PhaseGate Hardening - M6: Comprehensive finalization sweep (PG_FIN_001 through PG_FIN_009)
+        // PhaseGate Hardening - M6: Comprehensive finalization sweep (PG_FIN_001 through PG_FIN_010)
         // This is the FINAL validation before emission - catches any symbol without proper finalization
-        Finalization.Validate(ctx, graph, validationContext);
+        Finalization.Validate(ctx, graph, plan.ExtensionMethods, validationContext);
 
         // PhaseGate Hardening - M6a: CLR surface name policy (PG_NAME_SURF_001)
         // Validates that class members match interface members using CLR-name contract
@@ -133,6 +136,10 @@ public static class PhaseGate
         // Validates imported types are actually exported by source namespaces
         ImportExport.ValidateExportCompleteness(ctx, graph, imports, validationContext);
 
+        // PhaseGate Hardening - M11: Extension import completeness (PG_EXT_IMPORT_001)
+        // Validates extension bucket imports are resolvable
+        ImportExport.ValidateExtensionImportCompleteness(ctx, graph, plan.ExtensionMethods, imports, validationContext);
+
         // PhaseGate Hardening - M17: Heritage value imports (PG_IMPORT_002)
         // Validates base classes and interfaces in heritage clauses use value imports (not type-only)
         ImportExport.ValidateHeritageValueImports(ctx, graph, imports, validationContext);
@@ -140,6 +147,14 @@ public static class PhaseGate
         // PhaseGate Hardening - M18: Qualified export paths (PG_EXPORT_002)
         // Validates qualified names like 'System_Internal.System.Exception$instance' have valid export paths
         ImportExport.ValidateQualifiedExportPaths(ctx, graph, imports, validationContext);
+
+        // PhaseGate Hardening - M19: Plan integrity (PG_PLAN_001 through PG_PLAN_005)
+        // Validates all Shape plans reference valid types/members and are consistent with graph
+        PlanIntegrity.Validate(ctx, graph, plan, validationContext);
+
+        // PhaseGate Hardening - M20: Extension method conformance (PG_EXT_001, PG_EXT_002)
+        // Validates extension method buckets have correct arity and no erased 'any' types
+        Validation.Extensions.Validate(ctx, graph, plan.ExtensionMethods, imports, validationContext);
 
         // Report results
         ctx.Log("PhaseGate", $"Validation complete - {validationContext.ErrorCount} errors, {validationContext.WarningCount} warnings, {validationContext.InfoCount} info");

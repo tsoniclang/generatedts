@@ -589,4 +589,128 @@ internal static class ImportExport
 
         ctx.Log("PhaseGate", $"Validated {checkedQualifiedNames} qualified names. Invalid paths: {invalidPaths}");
     }
+
+    /// <summary>
+    /// PG_EXT_IMPORT_001: Validates extension import completeness.
+    /// Any foreign type referenced by extension bucket signatures must be resolvable/importable.
+    /// Treats internal/extensions as a synthetic namespace for import validation.
+    /// </summary>
+    internal static void ValidateExtensionImportCompleteness(
+        BuildContext ctx,
+        SymbolGraph graph,
+        Analysis.ExtensionMethodsPlan extensionsPlan,
+        ImportPlan? imports,
+        ValidationContext validationCtx)
+    {
+        ctx.Log("PhaseGate", "Validating extension import completeness (PG_EXT_IMPORT_001)...");
+
+        int checkedBuckets = 0;
+        int unresolvedTypes = 0;
+
+        // Built-in/ambient types that don't need imports
+        var builtInTypes = new HashSet<string>
+        {
+            "System.String",
+            "System.Object",
+            "System.Array",
+            "System.Int32",
+            "System.Int64",
+            "System.Double",
+            "System.Boolean",
+            "System.Void",
+            "System.Decimal",
+            "System.DateTime",
+            "System.Guid",
+            "System.Type"
+        };
+
+        foreach (var bucket in extensionsPlan.Buckets)
+        {
+            // Collect all type references used in this bucket's methods
+            var referencedTypes = new HashSet<string>();
+
+            foreach (var method in bucket.Methods)
+            {
+                // Add return type
+                if (method.ReturnType != null)
+                    CollectTypeReferences(method.ReturnType, referencedTypes);
+
+                // Add parameter types
+                foreach (var param in method.Parameters)
+                    CollectTypeReferences(param.Type, referencedTypes);
+
+                // Add constraint types
+                foreach (var genParam in method.GenericParameters)
+                {
+                    foreach (var constraint in genParam.Constraints)
+                        CollectTypeReferences(constraint, referencedTypes);
+                }
+            }
+
+            // Validate each referenced type is either:
+            // 1. In TypeIndex (will be emitted)
+            // 2. Built-in/ambient (doesn't need import)
+            // 3. Has an import planned (if imports != null)
+            foreach (var typeRef in referencedTypes)
+            {
+                // Skip built-ins
+                if (builtInTypes.Contains(typeRef))
+                    continue;
+
+                // Check if in graph
+                var inGraph = graph.TypeIndex.Values.Any(t => t.ClrFullName == typeRef);
+                if (inGraph)
+                    continue;
+
+                // Check if it's a primitive
+                if (TypeNameResolver.IsPrimitive(typeRef))
+                    continue;
+
+                // If we get here, it's a foreign type that needs to be resolvable
+                validationCtx.RecordDiagnostic(
+                    "TBG907",
+                    "WARNING",
+                    $"[PG_EXT_IMPORT_001] Extension bucket {bucket.BucketInterfaceName} references foreign type '{typeRef}' " +
+                    $"which is not in graph and may need import resolution");
+                unresolvedTypes++;
+            }
+
+            checkedBuckets++;
+        }
+
+        ctx.Log("PhaseGate", $"Validated {checkedBuckets} extension buckets. Unresolved types: {unresolvedTypes}");
+    }
+
+    private static void CollectTypeReferences(TypeReference typeRef, HashSet<string> collector)
+    {
+        switch (typeRef)
+        {
+            case NamedTypeReference named:
+                collector.Add(named.FullName);
+                // Recurse into type arguments
+                foreach (var arg in named.TypeArguments)
+                    CollectTypeReferences(arg, collector);
+                break;
+
+            case ArrayTypeReference arr:
+                CollectTypeReferences(arr.ElementType, collector);
+                break;
+
+            case PointerTypeReference ptr:
+                CollectTypeReferences(ptr.PointeeType, collector);
+                break;
+
+            case ByRefTypeReference byRef:
+                CollectTypeReferences(byRef.ReferencedType, collector);
+                break;
+
+            case GenericParameterReference:
+                // Generic parameters don't need imports
+                break;
+
+            case PlaceholderTypeReference:
+                // Placeholders are handled elsewhere
+                break;
+        }
+    }
 }

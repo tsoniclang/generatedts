@@ -102,9 +102,18 @@ public static class DiagnosticCodes
     // 8Px — Primitive Lifting / CLROf
     public const string PrimitiveGenericLiftMismatch   = "TBG8P1"; // PG_GENERIC_PRIM_LIFT_001 - Primitive type argument not covered by CLROf lifting rules
 
-    // 9xx — Assembly Load
+    // 9xx — Assembly Load / Plan Integrity / Extensions
     public const string UnresolvedExternalType         = "TBG880"; // PG_LOAD_001
     public const string MixedPublicKeyTokenForSameName = "TBG881"; // PG_LOAD_002
     public const string VersionDriftForSameIdentity    = "TBG882"; // PG_LOAD_003
     public const string RetargetableOrContentTypeAssemblyRef = "TBG883"; // PG_LOAD_004
+
+    public const string StaticFlatteningPlanInvalid    = "TBG900"; // PG_PLAN_001 - StaticFlatteningPlan references invalid types/members
+    public const string StaticConflictPlanInvalid      = "TBG901"; // PG_PLAN_002 - StaticConflictPlan references invalid types/members
+    public const string OverrideConflictPlanInvalid    = "TBG902"; // PG_PLAN_003 - OverrideConflictPlan references invalid types/members
+    public const string PropertyOverridePlanInvalid    = "TBG903"; // PG_PLAN_004 - PropertyOverridePlan contains invalid unions/generic params
+    public const string ExtensionMethodsPlanInvalid    = "TBG904"; // PG_PLAN_005 - ExtensionMethodsPlan has invalid target types or method flags
+    public const string ExtensionMethodErasedAnyType   = "TBG905"; // PG_EXT_002 - Extension method signature contains erased 'any' type
+    public const string ExtensionBucketNameInvalid     = "TBG906"; // PG_FIN_010 - Extension bucket name is invalid or reserved
+    public const string ExtensionImportUnresolved      = "TBG907"; // PG_EXT_IMPORT_001 - Extension bucket references unresolvable foreign type
 }

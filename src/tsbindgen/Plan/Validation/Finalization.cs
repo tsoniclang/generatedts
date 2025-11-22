@@ -22,9 +22,9 @@ internal static class Finalization
     /// <summary>
     /// Comprehensive finalization sweep - validates that every symbol has proper placement and naming.
     /// This is the FINAL check before emission - nothing should leak past this gate.
-    /// Implements PG_FIN_001 through PG_FIN_009.
+    /// Implements PG_FIN_001 through PG_FIN_010.
     /// </summary>
-    internal static void Validate(BuildContext ctx, SymbolGraph graph, ValidationContext validationCtx)
+    internal static void Validate(BuildContext ctx, SymbolGraph graph, Analysis.ExtensionMethodsPlan extensionsPlan, ValidationContext validationCtx)
     {
         ctx.Log("PhaseGate", "Running comprehensive finalization sweep (PG_FIN_001-009)...");
 
@@ -388,6 +388,87 @@ internal static class Finalization
             }
         }
 
+        // PG_FIN_010: Extension bucket names finalized
+        // Every bucket interface name must be a valid identifier and not reserved
+        ValidateExtensionBucketNames(ctx, graph, extensionsPlan, validationCtx);
+
         ctx.Log("PhaseGate", "Finalization sweep complete");
+    }
+
+    /// <summary>
+    /// PG_FIN_010: Validates extension bucket names are finalized and valid.
+    /// Extension bucket interface names must be valid TypeScript identifiers and not reserved words.
+    /// Bucket naming is done in ExtensionMethodAnalyzer and should be reserved in
+    /// a dedicated namespace scope (ns:internal.extensions:internal).
+    /// </summary>
+    private static void ValidateExtensionBucketNames(
+        BuildContext ctx,
+        SymbolGraph graph,
+        Analysis.ExtensionMethodsPlan plan,
+        ValidationContext validationCtx)
+    {
+        foreach (var bucket in plan.Buckets)
+        {
+            var bucketName = bucket.BucketInterfaceName;
+
+            // Check if name is valid identifier
+            if (string.IsNullOrWhiteSpace(bucketName))
+            {
+                validationCtx.RecordDiagnostic(
+                    "TBG906",
+                    "ERROR",
+                    $"[PG_FIN_010] Extension bucket for {bucket.Key.FullName} has empty interface name");
+                continue;
+            }
+
+            // Check if name contains invalid characters
+            if (!IsValidTypeScriptIdentifier(bucketName))
+            {
+                validationCtx.RecordDiagnostic(
+                    "TBG906",
+                    "ERROR",
+                    $"[PG_FIN_010] Extension bucket name '{bucketName}' is not a valid TypeScript identifier");
+            }
+
+            // Check if name is a reserved word (after sanitization)
+            var sanitized = Sanitize(bucketName);
+            if (sanitized.WasSanitized)
+            {
+                validationCtx.RecordDiagnostic(
+                    "TBG906",
+                    "ERROR",
+                    $"[PG_FIN_010] Extension bucket name '{bucketName}' is a TypeScript reserved word");
+            }
+
+            // Note: Bucket names are currently generated from TargetType.TsEmitName with "__Ext_" prefix
+            // This means they are finalized after target types are named
+            // We verify the target type has a valid TsEmitName
+            if (string.IsNullOrWhiteSpace(bucket.TargetType.TsEmitName))
+            {
+                validationCtx.RecordDiagnostic(
+                    "TBG906",
+                    "ERROR",
+                    $"[PG_FIN_010] Extension bucket target type {bucket.TargetType.ClrFullName} missing TsEmitName");
+            }
+        }
+    }
+
+    private static bool IsValidTypeScriptIdentifier(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+
+        // Must start with letter, _, or $
+        if (!char.IsLetter(name[0]) && name[0] != '_' && name[0] != '$')
+            return false;
+
+        // Rest must be letters, digits, _, or $
+        for (int i = 1; i < name.Length; i++)
+        {
+            if (!char.IsLetterOrDigit(name[i]) && name[i] != '_' && name[i] != '$')
+                return false;
+        }
+
+        return true;
     }
 }
