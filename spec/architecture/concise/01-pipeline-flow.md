@@ -45,18 +45,22 @@ The tsbindgen pipeline executes in **strict sequential order** through 5 main ph
 
 ## Phase 2: NORMALIZE (Build Indices)
 
-**Purpose**: Build lookup tables for efficient cross-reference resolution
+**Purpose**: Build lookup tables for efficient cross-reference resolution + optional library mode filtering
 
 **Input**: `SymbolGraph` (from Phase 1)
-**Output**: `SymbolGraph` (with indices)
+**Output**: `SymbolGraph` (with indices, optionally filtered)
 **Mutability**: Pure (new SymbolGraph with indices)
 
 **Operations**:
 1. `graph.WithIndices` → `NamespaceIndex`, `TypeIndex` (includes nested types)
-2. Build `GlobalInterfaceIndex` (interface inheritance)
-3. Build `InterfaceDeclIndex` (interface member declarations)
+2. **[Library Mode Only]** Load contract: `LibraryContractLoader.Load(libraryPath)` → `LibraryContract` (HashSet of StableIds from base package)
+3. **[Library Mode Only]** Filter graph: `LibraryFilter.Filter(graph, contract)` → Remove types in contract
+4. Build `GlobalInterfaceIndex` (interface inheritance)
+5. Build `InterfaceDeclIndex` (interface member declarations)
 
-**Files**: `Model/SymbolGraph.cs` (`WithIndices`), `Shape/GlobalInterfaceIndex.cs`, `Shape/InterfaceDeclIndex.cs`
+**Files**: `Model/SymbolGraph.cs` (`WithIndices`), `Library/LibraryContractLoader.cs`, `Library/LibraryFilter.cs`, `Shape/GlobalInterfaceIndex.cs`, `Shape/InterfaceDeclIndex.cs`
+
+**Library Mode**: Validates LIB001 (contract files exist) during contract loading.
 
 ---
 
@@ -341,13 +345,15 @@ The tsbindgen pipeline executes in **strict sequential order** through 5 main ph
 
 **Purpose**: Validate entire pipeline output before emission
 
-**Input**: `SymbolGraph`, `ImportPlan`, `ConstraintFindings`
+**Input**: `SymbolGraph`, `ImportPlan`, `ConstraintFindings`, `LibraryContract?`
 **Output**: Side effect (records diagnostics in `BuildContext.Diagnostics`)
 **Mutability**: Side effect only
 
-**Operations**: Run 26 validation checks (Finalization, Scopes, Names, Views, Imports, Types, Overloads, Constraints), record ERROR/WARNING/INFO diagnostics, fail fast on ERROR.
+**Operations**: Run 50+ validation checks (Finalization, Scopes, Names, Views, Imports, Types, Overloads, Constraints, Library Mode), record ERROR/WARNING/INFO diagnostics, fail fast on ERROR.
 
-**Files**: `Plan/PhaseGate.cs`, `Plan/Validation/*.cs` (26 validators)
+**Files**: `Plan/PhaseGate.cs`, `Plan/Validation/*.cs` (19 validators including LibraryMode.cs)
+
+**Library Mode Validation**: LIB002 (dangling references - user types don't reference filtered types), LIB003 (disabled in library mode).
 
 **Critical Rule**: Any ERROR blocks Phase 5 (Emit). Build returns `Success = false`.
 
@@ -388,13 +394,13 @@ The tsbindgen pipeline executes in **strict sequential order** through 5 main ph
 | Phase | Input Type | Output Type | Mutability | Key Transformations |
 |-------|-----------|-------------|------------|---------------------|
 | **1. LOAD** | `string[]` | `SymbolGraph` | Immutable | Reflection → SymbolGraph |
-| **2. NORMALIZE** | `SymbolGraph` | `SymbolGraph` | Immutable | Build indices (NamespaceIndex, TypeIndex, GlobalInterfaceIndex) |
+| **2. NORMALIZE** | `SymbolGraph` | `SymbolGraph` | Immutable | Build indices + [Library Mode] load contract & filter graph |
 | **3. SHAPE** | `SymbolGraph` | `SymbolGraph` + Plans | Immutable | 23 passes: flatten, synthesize, determine EmitScope, create plans (including extension methods) |
 | **3.5. NAME RESERVATION** | `SymbolGraph` | `SymbolGraph` | Side effect + pure | Reserve names, set TsEmitName |
 | **4. PLAN** | `SymbolGraph` + Plans | `EmissionPlan` | Immutable | Build imports, plan order, combine plans |
 | **4.5. OVERLOAD UNIFICATION** | `SymbolGraph` | `SymbolGraph` | Immutable | Merge overloads |
 | **4.6. CONSTRAINT AUDIT** | `SymbolGraph` | `ConstraintFindings` | Immutable | Audit constraints |
-| **4.7. PHASEGATE** | `SymbolGraph` + `ImportPlan` + `ConstraintFindings` | Side effect | Side effect | 26 validation checks |
+| **4.7. PHASEGATE** | `SymbolGraph` + `ImportPlan` + `ConstraintFindings` + `LibraryContract?` | Side effect | Side effect | 50+ validation checks (19 modules, including LIB002) |
 | **5. EMIT** | `EmissionPlan` | File I/O | Side effects | Generate .d.ts, .json, .js using Shape plans |
 
 ---
