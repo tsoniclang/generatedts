@@ -60,6 +60,31 @@ tsbindgen System.Net.Http.dll --out-dir ./declarations
 tsbindgen System.IO.dll --log build.log.json
 ```
 
+**Generate user library excluding BCL types:**
+
+```bash
+# Step 1: Generate BCL package (once)
+tsbindgen generate -d ~/dotnet/shared/Microsoft.NETCore.App/10.0.0 -o ./bcl-package
+
+# Step 2: Generate user library, BCL types excluded
+tsbindgen generate -a MyLib.dll -d ~/dotnet/.../10.0.0 \
+  --lib ./bcl-package -o ./my-lib-package
+```
+
+## Library Mode (`--lib`)
+
+When generating declarations for a user assembly that references a base library (e.g., .NET BCL), use `--lib` to exclude base library types from output. This produces a clean package containing only your library's types.
+
+**How it works:**
+1. Generate base library package first (contains `metadata.json` + `bindings.json`)
+2. Use `--lib <base-package-path>` when generating user library
+3. tsbindgen filters: keeps types NOT in base, removes types IN base
+4. Validates no dangling references (LIB002 strict check)
+
+**Use case:** Publishing TypeScript declarations for a .NET library without duplicating BCL type definitions.
+
+See [CLI documentation](spec/cli.md#library-mode) for complete details.
+
 ## Generated Output
 
 The tool generates two files for each assembly:
@@ -255,14 +280,29 @@ static Loop(body: Expression, _break: LabelTarget, _continue: LabelTarget): Loop
 
 This ensures that all generated `.d.ts` files are valid TypeScript and can be parsed by the TypeScript compiler without syntax errors.
 
-## Validation
+## Testing & Validation
 
-The project includes a comprehensive validation script that ensures all generated `.d.ts` files are syntactically valid TypeScript.
+The project includes comprehensive test scripts to ensure correctness and prevent regressions.
 
-### Running Validation
+### Running All Tests
 
 ```bash
+# TypeScript syntax validation
 npm install  # First time only
+npm run validate
+
+# Regression guards (run all)
+./scripts/test-determinism.sh      # Deterministic output
+./scripts/test-strict-mode.sh      # Strict mode compliance
+./scripts/test-surface-manifest.sh # Surface baseline guard
+./scripts/test-lib.sh              # Library mode (--lib)
+```
+
+### TypeScript Validation
+
+Ensures all generated `.d.ts` files are syntactically valid TypeScript:
+
+```bash
 npm run validate
 ```
 
@@ -272,11 +312,9 @@ This script:
 3. Runs the TypeScript compiler to validate all declarations
 4. Reports syntax errors (TS1xxx), duplicate type errors (TS6200), and semantic errors (TS2xxx)
 
-### Understanding Validation Results
-
-**Critical**: The validation **must** pass with **zero TS1xxx syntax errors**. These indicate the generator is producing invalid TypeScript syntax.
-
-**Expected**: Semantic errors (TS2xxx) and duplicate type errors (TS6200) are expected when validating individual assemblies without their full dependency graph. These are not critical as long as there are no syntax errors.
+**Success criteria:**
+- ✅ **Zero syntax errors (TS1xxx)** - All output is valid TypeScript
+- ⚠️ **Semantic errors acceptable** - TS2xxx errors are expected (known limitations)
 
 **Example output:**
 ```
@@ -290,6 +328,78 @@ Error breakdown:
   - Syntax errors (TS1xxx): 0 ✓
   - Duplicate types (TS6200): 0 (expected)
   - Semantic errors (TS2xxx): 1 (expected - missing cross-assembly refs)
+```
+
+### Regression Guards
+
+#### Determinism Test (`test-determinism.sh`)
+
+Ensures tsbindgen produces identical output across runs:
+
+```bash
+./scripts/test-determinism.sh
+```
+
+**What it tests:**
+- Same input → same output (bit-for-bit identical)
+- No nondeterministic ordering or formatting
+- Critical for reproducible builds and diffing
+
+#### Strict Mode Test (`test-strict-mode.sh`)
+
+Verifies strict mode compliance and performance baseline:
+
+```bash
+./scripts/test-strict-mode.sh
+```
+
+**What it tests:**
+- No diagnostics with `--strict` flag
+- Performance doesn't regress beyond baseline
+
+#### Surface Baseline Test (`test-surface-manifest.sh`)
+
+Guards against accidental removal of public API surface:
+
+```bash
+./scripts/test-surface-manifest.sh
+```
+
+**What it tests:**
+- Type count matches baseline (prevents deletions)
+- Member count matches baseline (prevents deletions)
+- Intentional changes require baseline update
+
+#### Library Mode Test (`test-lib.sh`)
+
+Validates `--lib` mode filters base library types correctly:
+
+```bash
+./scripts/test-lib.sh
+```
+
+**What it tests:**
+- BCL package generation succeeds
+- User library builds successfully
+- Full generation includes both user + BCL types
+- `--lib` filtered generation includes ONLY user types
+- No LIB001-003 validation errors
+- BCL namespaces correctly excluded from filtered output
+- User namespaces correctly included in filtered output
+
+**Expected result:**
+```
+✓ LIBRARY MODE FULLY VERIFIED
+
+Summary:
+  ✓ BCL generation succeeded (130 namespaces)
+  ✓ User library build succeeded
+  ✓ Full generation: 131 namespaces (user + BCL)
+  ✓ Filtered generation: 1 namespaces (user only)
+  ✓ BCL types correctly excluded via --lib
+  ✓ User types (MyCompany.Utils) correctly included
+  ✓ No LIB001-003 validation errors
+  ✓ Strict mode passes
 ```
 
 ## Development

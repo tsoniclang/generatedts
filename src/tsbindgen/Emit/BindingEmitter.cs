@@ -104,6 +104,7 @@ public static class BindingEmitter
 
         return new TypeBinding
         {
+            StableId = type.StableId.ToString(),
             ClrName = type.ClrFullName,
             TsEmitName = tsEmitName,
             AssemblyName = type.StableId.AssemblyName,
@@ -148,6 +149,7 @@ public static class BindingEmitter
 
         return new MethodBinding
         {
+            StableId = method.StableId.ToString(),
             ClrName = method.ClrName,
             TsEmitName = tsEmitName,
             MetadataToken = method.StableId.MetadataToken ?? 0,
@@ -185,6 +187,7 @@ public static class BindingEmitter
 
         return new PropertyBinding
         {
+            StableId = property.StableId.ToString(),
             ClrName = property.ClrName,
             TsEmitName = tsEmitName,
             MetadataToken = property.StableId.MetadataToken ?? 0,
@@ -211,6 +214,7 @@ public static class BindingEmitter
 
         return new FieldBinding
         {
+            StableId = field.StableId.ToString(),
             ClrName = field.ClrName,
             TsEmitName = tsEmitName,
             MetadataToken = field.StableId.MetadataToken ?? 0,
@@ -234,6 +238,7 @@ public static class BindingEmitter
 
         return new EventBinding
         {
+            StableId = evt.StableId.ToString(),
             ClrName = evt.ClrName,
             TsEmitName = tsEmitName,
             MetadataToken = evt.StableId.MetadataToken ?? 0,
@@ -253,6 +258,7 @@ public static class BindingEmitter
 
         return new ConstructorBinding
         {
+            StableId = ctor.StableId.ToString(),
             MetadataToken = ctor.StableId.MetadataToken ?? 0,
             CanonicalSignature = ctor.StableId.CanonicalSignature,
             NormalizedSignature = normalizedSignature,
@@ -678,6 +684,7 @@ public sealed record NamespaceBindings
 /// </summary>
 public sealed record TypeBinding
 {
+    public required string StableId { get; init; }
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
     public required string AssemblyName { get; init; }
@@ -703,6 +710,7 @@ public sealed record TypeBinding
 /// </summary>
 public sealed record MethodBinding
 {
+    public required string StableId { get; init; }
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
     public required int MetadataToken { get; init; }
@@ -722,6 +730,7 @@ public sealed record MethodBinding
 /// </summary>
 public sealed record PropertyBinding
 {
+    public required string StableId { get; init; }
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
     public required int MetadataToken { get; init; }
@@ -742,6 +751,7 @@ public sealed record PropertyBinding
 /// </summary>
 public sealed record FieldBinding
 {
+    public required string StableId { get; init; }
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
     public required int MetadataToken { get; init; }
@@ -759,6 +769,7 @@ public sealed record FieldBinding
 /// </summary>
 public sealed record EventBinding
 {
+    public required string StableId { get; init; }
     public required string ClrName { get; init; }
     public required string TsEmitName { get; init; }
     public required int MetadataToken { get; init; }
@@ -775,6 +786,7 @@ public sealed record EventBinding
 /// </summary>
 public sealed record ConstructorBinding
 {
+    public required string StableId { get; init; }
     public required int MetadataToken { get; init; }
     public required string CanonicalSignature { get; init; }
     public required string NormalizedSignature { get; init; }

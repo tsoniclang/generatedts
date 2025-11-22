@@ -109,6 +109,24 @@ internal static class LibraryMode
         }
     }
 
+    /// <summary>
+    /// Determine actionable fix direction for a dangling reference.
+    /// </summary>
+    private static string DetermineFixDirection(string missingStableId)
+    {
+        // Check if it's a BCL type (common case)
+        if (missingStableId.StartsWith("System.Private.CoreLib:") ||
+            missingStableId.StartsWith("System.Runtime:") ||
+            missingStableId.StartsWith("System.Collections:") ||
+            missingStableId.Contains(":System."))
+        {
+            return "Add BCL types to --lib package OR remove dependency on this BCL type";
+        }
+
+        // User assembly dependency
+        return "Add dependency assembly to --lib package OR remove/replace this dependency";
+    }
+
     private static void CheckTypeReference(
         TypeReference typeRef,
         string referencingMember,
@@ -149,10 +167,16 @@ internal static class LibraryMode
                     if (graph.TypeIndex.TryGetValue(stableId, out _))
                     {
                         // ERROR: Referenced a type that exists but was filtered out
+                        // Provide actionable guidance
+                        var fixDirection = DetermineFixDirection(stableId);
                         validationCtx.RecordDiagnostic(
                             "LIB002",
                             "ERROR",
-                            $"Member {referencingMember} references non-library type {stableId} ({named.FullName}) in {context}");
+                            $"Dangling reference detected:\n" +
+                            $"  User member:     {referencingMember}\n" +
+                            $"  References:      {stableId}\n" +
+                            $"  Location:        {context}\n" +
+                            $"  Fix:             {fixDirection}");
                         danglingCount++;
                     }
                     // else: External type (not in graph) - allowed
