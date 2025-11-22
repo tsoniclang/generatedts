@@ -86,6 +86,26 @@ public sealed record SymbolGraph
         TypeIndex.TryGetValue(clrFullName, out type);
 
     /// <summary>
+    /// Check if a type is emittable (present in TypeIndex).
+    /// This is the unified gate for plan generation - if a type is not in TypeIndex,
+    /// it should not appear in any plan (StaticFlattening, Conflicts, PropertyOverrides, etc.).
+    ///
+    /// Invariant: IsEmittableType(id) == true ⟺ type will be emitted to .d.ts
+    /// </summary>
+    /// <param name="stableId">Type StableId in format "AssemblyName:ClrFullName" or just ClrFullName</param>
+    public bool IsEmittableType(string stableId)
+    {
+        // StableId format: "AssemblyName:ClrFullName"
+        // TypeIndex keys are ClrFullName only
+        // Extract ClrFullName if this is a full StableId
+        var clrFullName = stableId.Contains(':')
+            ? stableId.Substring(stableId.IndexOf(':') + 1)
+            : stableId;
+
+        return TypeIndex.ContainsKey(clrFullName);
+    }
+
+    /// <summary>
     /// Update a single type in the graph (pure - returns new graph).
     /// Finds the type by CLR full name, applies the transform, and returns a new graph.
     /// Automatically rebuilds indices.

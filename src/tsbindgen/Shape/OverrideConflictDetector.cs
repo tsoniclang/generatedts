@@ -33,6 +33,10 @@ public static class OverrideConflictDetector
         {
             foreach (var type in ns.Types)
             {
+                // Skip types not in TypeIndex (platform-specific intrinsics, internal types, etc.)
+                if (!graph.IsEmittableType(type.StableId.ToString()))
+                    continue;
+
                 // Only check classes with base types
                 if (type.Kind != TypeKind.Class || type.BaseType == null)
                     continue;

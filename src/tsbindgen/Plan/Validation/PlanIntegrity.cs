@@ -61,8 +61,13 @@ internal static class PlanIntegrity
     {
         foreach (var typeStableId in plan.TypesRequiringFlattening)
         {
-            // Check type exists
-            if (!graph.TypeIndex.TryGetValue(typeStableId, out var type))
+            // Extract ClrFullName from StableId (format: "AssemblyName:ClrFullName")
+            var clrFullName = typeStableId.Contains(':')
+                ? typeStableId.Substring(typeStableId.IndexOf(':') + 1)
+                : typeStableId;
+
+            // Check type exists in TypeIndex (uses ClrFullName as key)
+            if (!graph.TypeIndex.TryGetValue(clrFullName, out var type))
             {
                 validationCtx.RecordDiagnostic(
                     "TBG900",
@@ -147,8 +152,13 @@ internal static class PlanIntegrity
     {
         foreach (var (typeStableId, suppressedMemberIds) in plan.SuppressedMembers)
         {
-            // Check type exists
-            if (!graph.TypeIndex.TryGetValue(typeStableId, out var type))
+            // Extract ClrFullName from StableId (format: "AssemblyName:ClrFullName")
+            var clrFullName = typeStableId.Contains(':')
+                ? typeStableId.Substring(typeStableId.IndexOf(':') + 1)
+                : typeStableId;
+
+            // Check type exists in TypeIndex (uses ClrFullName as key)
+            if (!graph.TypeIndex.TryGetValue(clrFullName, out var type))
             {
                 validationCtx.RecordDiagnostic(
                     "TBG901",
@@ -192,8 +202,13 @@ internal static class PlanIntegrity
     {
         foreach (var (typeStableId, suppressedMemberIds) in plan.SuppressedMembers)
         {
-            // Check type exists
-            if (!graph.TypeIndex.TryGetValue(typeStableId, out var type))
+            // Extract ClrFullName from StableId (format: "AssemblyName:ClrFullName")
+            var clrFullName = typeStableId.Contains(':')
+                ? typeStableId.Substring(typeStableId.IndexOf(':') + 1)
+                : typeStableId;
+
+            // Check type exists in TypeIndex (uses ClrFullName as key)
+            if (!graph.TypeIndex.TryGetValue(clrFullName, out var type))
             {
                 validationCtx.RecordDiagnostic(
                     "TBG902",
@@ -240,8 +255,13 @@ internal static class PlanIntegrity
 
         foreach (var ((typeStableId, propertyStableId), unionTypeString) in plan.PropertyTypeOverrides)
         {
-            // Check type exists
-            if (!graph.TypeIndex.TryGetValue(typeStableId, out var type))
+            // Extract ClrFullName from StableId (format: "AssemblyName:ClrFullName")
+            var clrFullName = typeStableId.Contains(':')
+                ? typeStableId.Substring(typeStableId.IndexOf(':') + 1)
+                : typeStableId;
+
+            // Check type exists in TypeIndex (uses ClrFullName as key)
+            if (!graph.TypeIndex.TryGetValue(clrFullName, out var type))
             {
                 validationCtx.RecordDiagnostic(
                     "TBG903",
