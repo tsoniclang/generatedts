@@ -128,6 +128,25 @@
 
 ---
 
+### 9. Library Mode (LIB001-003)
+
+**Purpose:** Validate library mode filtering and contract integrity.
+
+**Rules:**
+- **LIB001:** Contract directory exists and contains metadata.json and bindings.json files (validated during contract loading)
+- **LIB002:** No dangling references - user types don't reference filtered-out types
+- **LIB003:** Disabled in library mode (binding consistency validated separately post-emission)
+
+**Files:** `Plan/Validation/LibraryMode.cs`
+
+**Algorithm (LIB002):**
+1. Skip if not in library mode
+2. For each namespace → type → walk all type references recursively
+3. Check base types, interfaces, method params/returns, property/field/event types, generics
+4. If reference StableId is in contract but type is not (was filtered) → ERROR
+
+---
+
 ## Diagnostic Codes
 
 ### Load Phase
@@ -162,7 +181,12 @@
 ### Constraint
 - **PG_CNSTR_001-004:** Constraint integrity
 
-**Total:** 43 diagnostic codes (TBG001-TBG883 in full system)
+### Library Mode
+- **LIB001:** Contract files missing/invalid
+- **LIB002:** Dangling reference (user type → filtered type)
+- **LIB003:** Disabled in library mode
+
+**Total:** 46 diagnostic codes (TBG001-TBG883, LIB001-LIB003 in full system)
 
 ---
 
@@ -241,7 +265,7 @@ Machine-readable summary for CI:
 ```csharp
 // In Builder.Build (Plan phase)
 var constraintFindings = InterfaceConstraintAuditor.Audit(ctx, graph);
-PhaseGate.Validate(ctx, graph, importPlan, constraintFindings);
+PhaseGate.Validate(ctx, graph, importPlan, constraintFindings, libraryContract);
 
 if (ctx.Diagnostics.HasErrors)
 {
@@ -262,7 +286,7 @@ ctx.Log("PhaseGate", "Validation passed - proceeding to emission");
 
 ## Summary
 
-PhaseGate enforces 50+ validation rules across 8 categories:
+PhaseGate enforces 50+ validation rules across 9 categories (19 validation modules):
 1. **Finalization:** Every symbol has valid TypeScript name
 2. **Scope Integrity:** Scopes are well-formed and consistent
 3. **Name Uniqueness:** No collisions within same scope
@@ -271,6 +295,7 @@ PhaseGate enforces 50+ validation rules across 8 categories:
 6. **Type Resolution:** All type references can be resolved
 7. **Overload Collision:** No conflicting overload signatures
 8. **Constraint Integrity:** Generic constraints are satisfiable
+9. **Library Mode:** Contract integrity and no dangling references
 
 **Benefits:**
 - Fail fast on errors (before emission)
