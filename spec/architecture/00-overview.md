@@ -230,6 +230,7 @@ Scopes enable:
                  │  - DiagnosticBag      │
                  │  - Interner           │
                  │  - Logger             │
+                 │  - LibraryMode        │  ← Library mode flag
                  └───────────┬───────────┘
                              │
                              ▼
@@ -263,10 +264,25 @@ Scopes enable:
         │  │  SymbolGraph.WithIndices       │  │
         │  │  - NamespaceIndex                │  │
         │  │  - TypeIndex (for lookups)       │  │
+        │  └────────────┬─────────────────────┘  │
+        │               ▼                         │
+        │  ┌──────────────────────────────────┐  │
+        │  │  [Library Mode Only]             │  │
+        │  │  LibraryContractLoader.Load      │  │
+        │  │  - Load metadata.json (types)    │  │
+        │  │  - Load bindings.json (members)  │  │
+        │  │  - Build LibraryContract         │  │
+        │  └────────────┬─────────────────────┘  │
+        │               ▼                         │
+        │  ┌──────────────────────────────────┐  │
+        │  │  [Library Mode Only]             │  │
+        │  │  LibraryFilter.Filter            │  │
+        │  │  - Remove types IN contract      │  │
+        │  │  - Keep types NOT in contract    │  │
         │  └──────────────────────────────────┘  │
         └────────────────┬───────────────────────┘
                          │
-                Output: SymbolGraph (with indices)
+                Output: SymbolGraph (filtered if --lib)
                          │
                          ▼
         ┌────────────────────────────────────────┐
@@ -342,6 +358,8 @@ Scopes enable:
         │  │  PhaseGate.Validate              │  │
         │  │  - Pre-emission validation       │  │
         │  │  - 50+ validation rules          │  │
+        │  │  - Library mode validation       │  │
+        │  │    (LIB001-003)                  │  │
         │  │  - Fail fast on errors           │  │
         │  └──────────────────────────────────┘  │
         └────────────────┬───────────────────────┘
@@ -652,6 +670,85 @@ if (ctx.Diagnostics.HasErrors)
     return new BuildResult { Success = false, ... };
 }
 ```
+
+### Library Mode: Filtered Package Generation
+
+**Library Mode** (`--lib`) enables generating TypeScript declarations for user assemblies while excluding types from a base library package (e.g., BCL), producing clean, focused declaration packages.
+
+**Use Case**: Library authors want to publish TypeScript declarations for their .NET library without duplicating thousands of BCL type declarations.
+
+**Example**:
+```bash
+# Step 1: Generate base BCL package (once)
+tsbindgen generate -d ~/dotnet/.../10.0.0 -o bcl-package/
+
+# Step 2: Generate user library, excluding BCL types
+tsbindgen generate -a MyLib.dll -d ~/dotnet/.../10.0.0 \
+  --lib bcl-package/ -o my-lib-package/
+
+# Result: my-lib-package/ contains ONLY MyLib types, BCL types excluded
+```
+
+**How It Works**:
+
+1. **Contract Loading** (Phase 2: Normalize)
+   - `LibraryContractLoader.Load(libraryPath)` reads base package:
+     - `metadata.json` files → Extract type StableIds
+     - `bindings.json` files → Extract member StableIds
+   - Builds `LibraryContract` with `HashSet<string>` of StableIds
+   - Validates LIB001: Contract directory exists, files present
+
+2. **Graph Filtering** (Phase 2: Normalize, Post-Indexing)
+   - `LibraryFilter.Filter(graph, contract)` processes each type:
+     - If `type.StableId` is IN contract → **REMOVE** (base library type)
+     - If `type.StableId` is NOT in contract → **KEEP** (user type)
+   - Returns new `SymbolGraph` with only user types
+   - O(1) lookup per type via `HashSet<string>`
+
+3. **Validation** (Phase 4: Plan, PhaseGate)
+   - **LIB002 (Dangling References)**: Validates no user type references a filtered-out type
+     - Walks all type references (base types, interfaces, parameters, return types, generics)
+     - Confirms every referenced type is either:
+       - In the contract (allowed dependency)
+       - In the current graph (user type)
+       - Builtin/generic parameter (TypeScript primitive)
+     - Fails with actionable error if dangling reference found
+   - **LIB003 (Binding Consistency)**: Disabled in library mode (bindings validated separately)
+
+**LibraryContract Structure**:
+```csharp
+public sealed record LibraryContract
+{
+    // Types IN the base library (to be excluded from emission)
+    public required HashSet<string> AllowedTypeStableIds { get; init; }
+
+    // Members IN the base library (for validation)
+    public required HashSet<string> AllowedBindingStableIds { get; init; }
+}
+```
+
+**Validation Error Example** (LIB002):
+```
+Dangling reference detected:
+  User member:     MyLib:MyCompany.Utils.Calculator::DoWork():void
+  References:      System.Data.SqlClient:System.Data.SqlClient.SqlConnection
+  Location:        return type
+  Fix:             Add BCL types to --lib package OR remove dependency on this BCL type
+```
+
+**Key Properties**:
+- **No silent fallbacks**: Either package is self-consistent or build fails loudly
+- **StableId-based matching**: Exact, assembly-qualified identity
+- **Pre-Shape filtering**: Shape passes only process user types (performance + cleaner errors)
+- **Contract immutability**: LibraryContract is loaded once, never modified
+- **Strict validation**: LIB002 ensures no dangling references (type-safe package)
+
+**Benefits**:
+- Clean, focused packages (e.g., 1 namespace vs 131 with BCL)
+- No type duplication across packages
+- Modular package architecture (BCL → Framework → App)
+- Different BCL versions for different user libraries
+- Type-safe contract enforcement via StableIds
 
 ---
 
@@ -980,10 +1077,10 @@ These errors are **documented as acceptable impedance** and do not block emissio
 The tsbindgen pipeline is a **deterministic, pure functional transformation** from .NET assemblies to TypeScript declarations:
 
 1. **Load**: System.Reflection → SymbolGraph (pure CLR data)
-2. **Normalize**: Build indices for fast lookup
+2. **Normalize**: Build indices for fast lookup + library mode filtering (if `--lib`)
 3. **Shape**: 23 transformations to handle .NET/TypeScript impedance mismatches (includes extension method analysis)
 4. **Name Reservation**: Reserve all names through SymbolRenamer
-5. **Plan**: Analyze dependencies, plan imports, validate everything (PhaseGate)
+5. **Plan**: Analyze dependencies, plan imports, validate everything (PhaseGate + library mode validation)
 6. **Emit**: Generate TypeScript files with metadata sidecars and extension method buckets
 
 **Core Principles**:
@@ -993,5 +1090,8 @@ The tsbindgen pipeline is a **deterministic, pure functional transformation** fr
 - **Identity**: StableIds provide stable identity across pipeline
 - **Scoping**: Separate naming scopes for class vs view surfaces
 - **Validation**: PhaseGate enforces 50+ invariants before emission
+- **Modularity**: Library mode enables filtered package generation
 
 **Result**: 100% data integrity, zero data loss, type-safe TypeScript declarations for the entire .NET BCL (4,047 types, 130 namespaces, **198 known impedance errors**).
+
+**Library Mode**: Optionally filter base library types for clean, focused user library packages with strict contract validation.

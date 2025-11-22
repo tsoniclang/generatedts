@@ -72,13 +72,14 @@ The exact order of execution as implemented in `Builder.Build`:
 
 ## Phase 2: NORMALIZE (Build Indices)
 
-**Purpose**: Build lookup tables for efficient cross-reference resolution
+**Purpose**: Build lookup tables for efficient cross-reference resolution + optional library mode filtering
 
 **Input**:
 - `SymbolGraph` (from Phase 1)
+- Optional: `--lib` path (library mode)
 
 **Output**:
-- `SymbolGraph` (with indices populated)
+- `SymbolGraph` (with indices populated, filtered if `--lib`)
 
 **Mutability**: Pure function (returns new immutable SymbolGraph with indices)
 
@@ -86,17 +87,31 @@ The exact order of execution as implemented in `Builder.Build`:
 1. Call `graph.WithIndices` to populate:
    - `NamespaceIndex`: namespace name → NamespaceSymbol
    - `TypeIndex`: CLR full name → TypeSymbol (includes nested types)
-2. Build `GlobalInterfaceIndex` (interface inheritance lookups)
-3. Build `InterfaceDeclIndex` (interface member declarations)
+2. **[Library Mode Only]** Load library contract:
+   - `LibraryContractLoader.Load(libraryPath)` reads base package:
+     - Parse all `metadata.json` files → Extract type StableIds
+     - Parse all `bindings.json` files → Extract member StableIds
+   - Build `LibraryContract` with `HashSet<string>` of StableIds
+   - Validate LIB001: Contract directory exists, files present
+3. **[Library Mode Only]** Filter graph:
+   - `LibraryFilter.Filter(graph, contract)` processes each type:
+     - If `type.StableId` IN contract → **REMOVE** (base library type)
+     - If `type.StableId` NOT in contract → **KEEP** (user type)
+   - Returns new `SymbolGraph` with only user types
+   - O(1) lookup per type via `HashSet<string>`
+4. Build `GlobalInterfaceIndex` (interface inheritance lookups)
+5. Build `InterfaceDeclIndex` (interface member declarations)
 
 **Files Involved**:
 - `src/tsbindgen/Model/SymbolGraph.cs` (`WithIndices` method)
+- `src/tsbindgen/Library/LibraryContractLoader.cs` (library mode)
+- `src/tsbindgen/Library/LibraryFilter.cs` (library mode)
 - `src/tsbindgen/Shape/GlobalInterfaceIndex.cs`
 - `src/tsbindgen/Shape/InterfaceDeclIndex.cs`
 
 **Data Transformations**:
 - Input: SymbolGraph with empty indices
-- Output: SymbolGraph with populated indices (no other changes)
+- Output: SymbolGraph with populated indices (and filtered types if `--lib`)
 
 ---
 
@@ -431,12 +446,13 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 
 ## Phase 4.7: PHASEGATE VALIDATION
 
-**Purpose**: Validate entire pipeline output before emission
+**Purpose**: Validate entire pipeline output before emission + library mode contract validation
 
 **Input**:
 - `SymbolGraph` (from Phase 4.5)
 - `ImportPlan` (from Phase 4)
 - `ConstraintFindings` (from Phase 4.6)
+- Optional: `LibraryContract` (library mode)
 
 **Output**:
 - Side effect: Records diagnostics in `BuildContext.Diagnostics`
@@ -444,17 +460,28 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 **Mutability**: Side effect only (no data returned)
 
 **Key Operations**:
-- Run 26 validation checks (see PhaseGate spec)
+- Run 50+ validation checks (see PhaseGate spec)
+- **[Library Mode Only]** Validate library contract:
+  - **LIB002 (Dangling References)**: Validate no user type references filtered-out type
+    - Walk all type references (base types, interfaces, parameters, return types, generics)
+    - Confirm every referenced type is either:
+      - In the contract (allowed dependency)
+      - In the current graph (user type)
+      - Builtin/generic parameter
+    - Record ERROR diagnostic with actionable message if dangling reference found
+  - **LIB003 (Binding Consistency)**: Disabled in library mode
 - Record ERROR, WARNING, INFO diagnostics
 - Fail fast if any ERROR-level diagnostics found
 
 **Files Involved**:
 - `src/tsbindgen/Plan/PhaseGate.cs`
-- `src/tsbindgen/Plan/Validation/*.cs` (26 validators)
+- `src/tsbindgen/Plan/Validation/*.cs` (50+ validators)
+- `src/tsbindgen/Plan/Validation/LibraryMode.cs` (LIB001-003)
 
 **Critical Rule**:
 - Any ERROR-level diagnostic blocks Phase 5 (Emit)
 - Build returns `Success = false`
+- **Library mode**: LIB002 dangling references are ERROR-level (strict failure)
 
 ---
 
@@ -504,7 +531,7 @@ Each pass executes sequentially and returns a new immutable SymbolGraph:
 | **4. PLAN** | `SymbolGraph` | `EmissionPlan` | Immutable (pure) | Build import graph, plan imports/exports, determine emission order |
 | **4.5. OVERLOAD UNIFICATION** | `SymbolGraph` | `SymbolGraph` | Immutable (pure) | Merge method overloads |
 | **4.6. CONSTRAINT AUDIT** | `SymbolGraph` | `ConstraintFindings` | Immutable (pure) | Audit constructor constraints |
-| **4.7. PHASEGATE** | `SymbolGraph` + `ImportPlan` + `ConstraintFindings` | Side effect | Side effect only | 26 validation checks, record diagnostics |
+| **4.7. PHASEGATE** | `SymbolGraph` + `ImportPlan` + `ConstraintFindings` + `LibraryContract?` | Side effect | Side effect only | 50+ validation checks (incl. LIB002 library mode), record diagnostics |
 | **5. EMIT** | `EmissionPlan` | File I/O | Side effects | Generate .d.ts, .json, .js files |
 
 ---
@@ -641,7 +668,7 @@ Assembly Paths (string[])
     │ PHASE 4.7: PHASEGATE VALIDATION             │
     │                                             │
     │ PhaseGate.Validate                        │
-    │   → 26 validation checks                    │
+    │   → 50+ validation checks (incl. LIB002)   │
     │   → Record diagnostics                      │
     │                                             │
     │ Side effect: ctx.Diagnostics populated      │
