@@ -225,7 +225,7 @@ InterfaceMemberSubstitution.SubstituteClosedInterfaces(ctx, graph)
 
 ## 4. Phase 2: Normalize Call Graph
 
-Index building for fast lookups:
+Index building for fast lookups + optional library mode filtering:
 
 ```
 Builder.Build
@@ -236,6 +236,47 @@ graph = graph.WithIndices
   Returns new SymbolGraph with TypeIndex, NamespaceIndex populated
   ↓
   Purpose: Enable O(1) lookups by CLR full name
+  ↓
+┌──────────────────────────────────────────┐
+│ [Library Mode Only - if --lib provided] │
+└──────────────────────────────────────────┘
+  ↓
+LibraryContractLoader.Load(libraryPath)
+  Location: src/tsbindgen/Library/LibraryContractLoader.cs:23
+  ↓
+  ├─→ FindMetadataFiles(libraryPath)
+  │   Returns: List of all metadata.json file paths
+  │   ↓
+  │   For each metadata.json:
+  │     └─→ JsonSerializer.Deserialize<NamespaceMetadata>(json)
+  │         Extract type StableIds from metadata
+  │
+  ├─→ FindBindingsFiles(libraryPath)
+  │   Returns: List of all bindings.json file paths
+  │   ↓
+  │   For each bindings.json:
+  │     └─→ JsonSerializer.Deserialize<NamespaceBindings>(json)
+  │         Extract member StableIds from bindings
+  │
+  └─→ new LibraryContract
+      {
+        AllowedTypeStableIds = typeStableIds.ToHashSet(),
+        AllowedBindingStableIds = bindingStableIds.ToHashSet()
+      }
+      Returns: Immutable contract with O(1) lookup sets
+  ↓
+graph = LibraryFilter.Filter(graph, contract)
+  Location: src/tsbindgen/Library/LibraryFilter.cs:18
+  ↓
+  For each namespace in graph:
+    For each type in namespace:
+      stableId = type.StableId.ToString()
+      if contract.AllowedTypeStableIds.Contains(stableId):
+        REMOVE type (it's in base library)
+      else:
+        KEEP type (it's a user type)
+  ↓
+  Returns: New SymbolGraph with only user types (base library types removed)
 ```
 
 **TypeIndex Structure:**
@@ -246,6 +287,18 @@ graph = graph.WithIndices
 **NamespaceIndex Structure:**
 - Maps namespace name → NamespaceSymbol
 - Used for cross-namespace lookups
+
+**Library Mode Contract Loading:**
+- Reads metadata.json files from base package
+- Reads bindings.json files from base package
+- Builds HashSet of type/member StableIds for O(1) lookup
+- Validates LIB001: Contract directory exists, files present
+
+**Library Mode Filtering:**
+- Pre-Shape filtering (reduces workload for subsequent passes)
+- StableId-based exact matching
+- O(1) lookup per type via HashSet
+- Returns filtered graph with only user types
 
 ## 5. Phase 3: Shape Call Graph
 
@@ -1059,7 +1112,7 @@ record EmissionPlan
 
 ## 8. Phase 4.7: PhaseGate Validation Call Graph
 
-Comprehensive pre-emission validation (20+ validation functions):
+Comprehensive pre-emission validation (50+ validation functions):
 
 ```
 PhaseGate.Validate(ctx, graph, imports, constraintFindings)
@@ -1398,6 +1451,75 @@ ImportExport.ValidateExportCompleteness(ctx, graph, imports, validationContext)
   ↓
   Purpose: Catch broken import references
   ↓
+┌──────────────────────────────────────────────────────────┐
+│ M19: Library Mode Validation (LibraryMode - LIB002)     │
+│      [Only runs if ctx.LibraryMode == true]             │
+└──────────────────────────────────────────────────────────┘
+  ↓
+LibraryMode.Validate(ctx, graph, contract, validationContext)
+  Location: src/tsbindgen/Plan/Validation/LibraryMode.cs:19
+  ↓
+  Skip if NOT in library mode (contract == null)
+  ↓
+  For each namespace in graph:
+    For each type in namespace:
+      ├─→ CheckTypeReference(type.BaseType, type, "base type", contract, graph, validationContext)
+      │   Recursively validate base type exists in contract or current graph
+      │
+      ├─→ For each interface:
+      │   └─→ CheckTypeReference(iface, type, "interface", contract, graph, validationContext)
+      │       Validate interface type exists in contract or current graph
+      │
+      ├─→ For each method:
+      │   ├─→ CheckTypeReference(method.ReturnType, type, "return type", ...)
+      │   └─→ For each parameter:
+      │       └─→ CheckTypeReference(param.Type, type, "parameter type", ...)
+      │
+      ├─→ For each property:
+      │   └─→ CheckTypeReference(property.Type, type, "property type", ...)
+      │
+      ├─→ For each field:
+      │   └─→ CheckTypeReference(field.Type, type, "field type", ...)
+      │
+      └─→ For each event:
+          └─→ CheckTypeReference(event.Type, type, "event type", ...)
+  ↓
+CheckTypeReference(typeRef, referencingType, context, contract, graph, validationContext)
+  Location: LibraryMode.cs:51
+  ↓
+  Switch on typeRef.Kind:
+    ├─→ NamedTypeReference:
+    │   ├─→ Resolve to StableId
+    │   ├─→ if contract.AllowedTypeStableIds.Contains(stableId):
+    │   │   └─→ ALLOWED (type is in base library contract)
+    │   ├─→ else if graph.TypeIndex.TryGetValue(stableId, out _):
+    │   │   └─→ ALLOWED (type is in current user graph)
+    │   ├─→ else if graph.TypeIndex contains ClrFullName but different StableId:
+    │   │   └─→ ERROR LIB002 "Dangling reference detected"
+    │   │       Type was filtered out by --lib but still referenced
+    │   │       Provide actionable fix direction:
+    │   │         - BCL types: "Add BCL types to --lib package OR remove dependency"
+    │   │         - User types: "Add dependency assembly to --lib package OR remove/replace"
+    │   └─→ else:
+    │       └─→ ALLOWED (external type, not in graph at all)
+    │
+    ├─→ GenericTypeReference:
+    │   ├─→ CheckTypeReference(baseType, ...) recursively
+    │   └─→ For each type argument:
+    │       └─→ CheckTypeReference(typeArg, ...) recursively
+    │
+    ├─→ ArrayTypeReference:
+    │   └─→ CheckTypeReference(elementType, ...) recursively
+    │
+    ├─→ PointerTypeReference / ByRefTypeReference:
+    │   └─→ CheckTypeReference(underlyingType, ...) recursively
+    │
+    └─→ GenericParameterReference:
+        └─→ SKIP (always allowed, TypeScript handles)
+  ↓
+  Purpose: Ensure NO dangling references (user types don't reference filtered-out types)
+  Result: Strict validation - either package is self-consistent or build fails
+  ↓
 ┌────────────────────────────────────────────────┐
 │ Final: Report Results                         │
 └────────────────────────────────────────────────┘
@@ -1440,8 +1562,9 @@ ImportExport.ValidateExportCompleteness(ctx, graph, imports, validationContext)
 - **Finalization.cs**: Comprehensive finalization sweep (9 checks)
 - **Types.cs**: TypeMap, external resolution, printer consistency
 - **ImportExport.cs**: API surface, import/export completeness
+- **LibraryMode.cs**: Library mode contract validation (LIB002 - dangling references)
 
-**Total PhaseGate Checks:** 20+ validation functions, 40+ diagnostic codes
+**Total PhaseGate Checks:** 50+ validation functions, 40+ diagnostic codes (incl. LibraryMode.cs)
 
 ## 9. Phase 5: Emit Call Graph
 
@@ -2585,7 +2708,7 @@ This document provides complete call chains through the tsbindgen pipeline, show
 4. **Phase 3: Shape** - 14 transformation passes modifying the graph
 5. **Phase 3.5: Name Reservation** - Central naming through Renamer (6 steps)
 6. **Phase 4: Plan** - Import planning, ordering, overload unification, constraint audit
-7. **Phase 4.7: PhaseGate** - 20+ validation functions with 40+ diagnostic codes
+7. **Phase 4.7: PhaseGate** - 50+ validation functions with 40+ diagnostic codes (incl. M19: LibraryMode LIB002)
 8. **Phase 5: Emit** - File generation (TypeScript, metadata, bindings, stubs)
 9. **Cross-Cutting** - SymbolRenamer, DiagnosticBag, Policy, Logging
 10. **Complete Example** - Full trace from CLI to file write for List<T>
